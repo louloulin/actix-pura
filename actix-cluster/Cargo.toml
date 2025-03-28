@@ -30,4 +30,13 @@ parking_lot = "0.12"
 [dev-dependencies]
 tokio-test = "0.4"
 env_logger = "0.10"
-actix-rt = "2.8" 
+actix-rt = "2.8"
+signal-hook = { version = "0.3.15", features = ["iterator"] }
+
+[[example]]
+name = "validate_cluster"
+path = "examples/validate_cluster.rs"
+
+[[example]]
+name = "simple_validate"
+path = "examples/simple_validate.rs" 
