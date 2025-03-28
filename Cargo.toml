@@ -4,6 +4,7 @@ members = [
     "actix",
     "actix-broker",
     "actix-derive",
+    "actix-cluster",
 ]
 
 [workspace.package]
@@ -16,6 +17,7 @@ rust-version = "1.75"
 actix = { path = "actix" }
 actix-broker = { path = "actix-broker" }
 actix_derive = { path = "actix-derive" }
+actix-cluster = { path = "actix-cluster" }
 
 [profile.release]
 lto = true
