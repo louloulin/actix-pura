@@ -915,6 +915,27 @@ impl P2PTransport {
             }
         }
     }
+    
+    /// Get message handler for testing
+    pub fn get_message_handler(&self) -> Option<Arc<Mutex<dyn MessageHandler>>> {
+        self.message_handler.clone()
+    }
+    
+    /// Set message handler directly for testing
+    pub fn set_message_handler_direct(&mut self, handler: Arc<Mutex<dyn MessageHandler>>) {
+        self.message_handler = Some(handler);
+    }
+    
+    /// Add a peer node to the known peers list
+    pub fn add_peer(&mut self, node_id: NodeId, node_info: NodeInfo) {
+        let mut peers = self.peers.lock();
+        peers.insert(node_id, node_info);
+    }
+    
+    /// Get a clone of the peers map lock for testing
+    pub fn get_peers_lock(&self) -> Arc<Mutex<HashMap<NodeId, NodeInfo>>> {
+        self.peers.clone()
+    }
 }
 
 /// Actor for handling message envelopes
