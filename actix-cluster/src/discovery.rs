@@ -286,8 +286,8 @@ impl ServiceDiscovery for LibP2PDiscovery {
 /// Factory for creating discovery services based on configuration
 pub fn create_discovery_service(method: DiscoveryMethod) -> Box<dyn ServiceDiscovery> {
     match method {
-        DiscoveryMethod::Static => {
-            Box::new(StaticDiscovery::new(Vec::new()))
+        DiscoveryMethod::Static { seed_nodes } => {
+            Box::new(StaticDiscovery::new(seed_nodes))
         },
         DiscoveryMethod::Dns(domain) => {
             // In real implementation, create a DNS based discovery

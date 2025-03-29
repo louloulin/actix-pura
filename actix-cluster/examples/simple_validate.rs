@@ -49,7 +49,7 @@ fn create_config() -> ClusterConfig {
         .cluster_name("test-cluster".to_string())
         .heartbeat_interval(Duration::from_secs(1))
         .node_timeout(Duration::from_secs(5))
-        .discovery(DiscoveryMethod::Static)
+        .discovery(DiscoveryMethod::Static { seed_nodes: Vec::new() })
         .serialization_format(SerializationFormat::Bincode)
         .build()
         .expect("创建集群配置失败")

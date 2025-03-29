@@ -4,20 +4,19 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use std::time::Duration;
 use actix::prelude::*;
-use actix::dev::ToEnvelope;
 use tokio::sync::{RwLock, Mutex};
-use log::{debug, error, info, warn};
+use log::*;
 
 use crate::config::ClusterConfig;
 use crate::discovery::ServiceDiscovery;
 use crate::node::{Node, NodeId, NodeInfo, NodeStatus};
 use crate::error::{ClusterError, ClusterResult};
-use crate::message::{ActorPath, MessageEnvelope, MessageType, DeliveryGuarantee, AnyMessage};
+use crate::message::{ActorPath, MessageEnvelope, MessageType, DeliveryGuarantee};
 use crate::registry::{ActorRegistry, RegistryActor, RegisterLocal, RegisterRemote, Lookup};
-use crate::transport::{RemoteActorRef, TransportMessage};
+use crate::transport::{RemoteActorRef, TransportMessage, P2PTransport};
 
-// 导入特质
-use crate::registry::{ActorRef, LocalActorRef};
+// 导入需要的特质
+pub use crate::registry::{ActorRef, LocalActorRef};
 
 /// Cluster architecture type
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -89,7 +88,7 @@ impl ClusterSystem {
     }
     
     /// Start the cluster system
-    pub async fn start(&mut self) -> ClusterResult<Addr<ClusterSystemActor>> {
+    pub async fn start(mut self) -> ClusterResult<Addr<ClusterSystemActor>> {
         // Initialize transport for decentralized architecture
         if self.config.architecture == Architecture::Decentralized {
             // Create and initialize P2P transport
@@ -127,11 +126,8 @@ impl ClusterSystem {
         
         // 设置传输到注册表
         if let Some(transport) = &self.transport {
-            // 创建一个新的registry对象，避免借用Arc
-            let mut registry = ActorRegistry::new(self.local_node.id.clone());
+            let mut registry = self.registry.clone();
             registry.set_transport(transport.clone());
-            // 重新分配为Arc
-            self.registry = Arc::new(registry);
         }
         
         Ok(system_actor)
@@ -152,28 +148,21 @@ impl ClusterSystem {
         self.registry.clone()
     }
     
-    /// 注册本地Actor - 使用SimpleActorRef来注册
-    pub async fn register<A>(&self, path: &str, addr: Addr<A>) -> ClusterResult<()>
+    /// 注册本地Actor
+    pub async fn register<A: 'static>(&self, path: &str, addr: Addr<A>) -> ClusterResult<()>
     where
-        A: Actor + Handler<AnyMessage> + 'static,
-        <A as Handler<AnyMessage>>::Result: Send,
-        A::Context: ToEnvelope<A, AnyMessage>,
+        A: Actor + Handler<Box<dyn std::any::Any + Send>>,
+        <A as Handler<Box<dyn std::any::Any + Send>>>::Result: Send,
     {
-        // 检查是否已初始化
-        if self.registry_actor.is_none() {
-            return Err(ClusterError::RegistryNotInitialized);
+        let actor_ref = Box::new(LocalActorRef::new(addr, path.to_string()));
+        if let Some(registry) = &self.registry_actor {
+            registry.send(RegisterLocal {
+                path: path.to_string(),
+                actor_ref,
+            }).await?
+        } else {
+            Err(ClusterError::RegistryNotInitialized)
         }
-        
-        // 创建一个SimpleActorRef
-        let actor_ref = Box::new(SimpleActorRef::new(addr, path.to_string())) as Box<dyn ActorRef>;
-        
-        // 发送注册消息
-        self.registry_actor.as_ref().unwrap()
-            .send(RegisterLocal {
-                path: path.to_string(), 
-                actor_ref
-            })
-            .await?
     }
     
     /// 查找Actor
@@ -210,7 +199,7 @@ impl ClusterSystem {
         message: M,
         delivery_guarantee: DeliveryGuarantee,
     ) -> ClusterResult<()> {
-        if let Some(_transport) = &self.transport {
+        if let Some(transport) = &self.transport {
             let remote_ref = self.lookup_remote(target_node, target_actor).await
                 .ok_or_else(|| ClusterError::ActorNotFound(target_actor.to_string()))?;
             
@@ -396,10 +385,10 @@ impl ClusterSystemActor {
                         }
                         
                         // Send status update message
-                        let message = crate::transport::TransportMessage::StatusUpdate(
-                            node_id.clone(),
-                            status.to_string()
-                        );
+                        let message = crate::transport::TransportMessage::StatusUpdate {
+                            node_id: node_id.clone(),
+                            status: status.clone(),
+                        };
                         
                         let mut transport = transport_clone.lock().await;
                         if let Err(e) = transport.send_message(&target_id, message).await {
@@ -494,113 +483,65 @@ impl Actor for ClusterSystemActor {
 }
 
 impl Handler<MessageEnvelope> for ClusterSystemActor {
-    type Result = ();  // 与MessageEnvelope::Result类型一致
+    type Result = ();
     
     fn handle(&mut self, envelope: MessageEnvelope, ctx: &mut Self::Context) {
-        // 使用一个异步块来处理消息，避免阻塞actor
+        // Clone necessary data for async processing
         let transport = self.transport.clone();
         let nodes = self.nodes.clone();
         
-        ctx.spawn(
-            async move {
-                debug!("Handling message envelope: {:?}", envelope);
-                
-                // Check message type and route accordingly
-                match envelope.message_type {
-                    MessageType::ActorMessage => {
-                        // In a full implementation, this would look up the local actor
-                        // and forward the message
-                        debug!("Received actor message for {}", envelope.target_actor);
-                    },
-                    MessageType::SystemControl => {
-                        // Handle system control messages
-                        debug!("Received system control message");
-                    },
-                    MessageType::Discovery => {
-                        // Handle discovery related messages
-                        debug!("Received discovery message");
-                    },
-                    MessageType::Ping => {
-                        // Handle ping messages - respond with pong
-                        if let Some(transport) = &transport {
-                            let mut t = transport.lock().await;
-                            debug!("Received ping, sending pong to {}", envelope.sender_node);
+        // Process the message asynchronously
+        let fut = async move {
+            debug!("Handling message envelope: {:?}", envelope);
+            
+            // Check message type and route accordingly
+            match envelope.message_type {
+                MessageType::ActorMessage => {
+                    // In a full implementation, this would look up the local actor
+                    // and forward the message
+                    debug!("Received actor message for {}", envelope.target_actor);
+                },
+                MessageType::SystemControl => {
+                    // Handle system control messages
+                    debug!("Received system control message");
+                },
+                MessageType::Discovery => {
+                    // Handle discovery related messages
+                    debug!("Received discovery message");
+                },
+                MessageType::Ping => {
+                    // Handle ping messages - respond with pong
+                    if let Some(transport) = &transport {
+                        if let Ok(mut t) = transport.lock().await {
+                            debug!("Received ping, sending pong to {}", envelope.source_node);
                             let response = MessageEnvelope::new(
                                 envelope.target_node.clone(),
-                                envelope.sender_node.clone(),
+                                envelope.source_node.clone(),
                                 "system".to_string(),
                                 MessageType::Pong,
                                 DeliveryGuarantee::AtMostOnce,
                                 vec![],
                             );
                             if let Err(e) = t.send_envelope(response).await {
-                                error!("Failed to send pong response: {}", e);
+                                error!("Failed to send pong: {}", e);
                             }
                         }
-                    },
-                    MessageType::Pong => {
-                        // Update last seen timestamp for the node
-                        let mut node_map = nodes.write().await;
-                        if let Some(node) = node_map.get_mut(&envelope.sender_node) {
+                    }
+                },
+                MessageType::Pong => {
+                    // Update last seen timestamp for the node
+                    if let Ok(mut node_map) = nodes.write().await {
+                        if let Some(node) = node_map.get_mut(&envelope.source_node) {
                             node.update_last_seen();
-                            debug!("Updated last seen for node {}", envelope.sender_node);
+                            debug!("Updated last seen for node {}", envelope.source_node);
                         }
-                    },
-                }
+                    }
+                },
             }
-            .into_actor(self)
-            .map(|_, _, _| ()) // 忽略结果
-        );
-    }
-}
-
-/// 简单的ActorRef实现，避免使用泛型参数
-pub struct SimpleActorRef {
-    /// Actor路径
-    path: String,
-    /// Actor的发送函数，使用Arc允许克隆
-    sender: Arc<dyn Fn(Box<dyn std::any::Any + Send>) -> ClusterResult<()> + Send + Sync>,
-}
-
-impl SimpleActorRef {
-    /// 创建一个新的SimpleActorRef
-    pub fn new<A>(addr: Addr<A>, path: String) -> Self 
-    where 
-        A: Actor + Handler<AnyMessage>,
-        <A as Handler<AnyMessage>>::Result: Send,
-        A::Context: ToEnvelope<A, AnyMessage>,
-    {
-        let sender = Arc::new(move |msg| {
-            // 这里我们克隆addr来创建一个新的引用，这样可以在多个地方使用
-            let addr_clone = addr.clone();
-            addr_clone.do_send(AnyMessage(msg));
-            Ok(())
-        });
+        };
         
-        Self { path, sender }
-    }
-}
-
-impl Clone for SimpleActorRef {
-    fn clone(&self) -> Self {
-        Self {
-            path: self.path.clone(),
-            sender: self.sender.clone(),
-        }
-    }
-}
-
-impl ActorRef for SimpleActorRef {
-    fn send_any(&self, msg: Box<dyn std::any::Any + Send>) -> ClusterResult<()> {
-        (self.sender)(msg)
-    }
-    
-    fn path(&self) -> &str {
-        &self.path
-    }
-    
-    fn clone_box(&self) -> Box<dyn ActorRef> {
-        Box::new(self.clone())
+        // Spawn the future into the actor context
+        ctx.spawn(fut.into_actor(self));
     }
 }
 

@@ -15,13 +15,16 @@ pub mod registry;
 pub mod broker;
 pub mod error;
 pub mod serialization;
+pub mod message;
 
 pub use cluster::{ClusterSystem, Architecture};
 pub use config::{ClusterConfig, NodeRole, DiscoveryMethod};
-pub use node::{Node, NodeId, NodeInfo, PlacementStrategy};
+pub use node::{Node, NodeId, NodeInfo, NodeStatus, PlacementStrategy};
 pub use discovery::ServiceDiscovery;
-pub use error::ClusterError;
-pub use serialization::{SerializationFormat, Serializer};
+pub use error::{ClusterError, ClusterResult};
+pub use serialization::{SerializationFormat, Serializer, SerializerTrait, BincodeSerializer, JsonSerializer};
+pub use message::{ActorPath, MessageEnvelope, MessageType, DeliveryGuarantee, AnyMessage};
+pub use registry::{ActorRef, LocalActorRef};
 
 /// Re-exports from the actix crate
 pub mod prelude {

@@ -66,11 +66,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         port);
     
     let cluster = ClusterSystem::new("libp2p-example", config);
-    let system_actor = cluster.start().await?;
+    // 保存本地节点信息
+    let local_node_id = cluster.local_node().id.clone();
+    
+    // 获取可变引用后再启动
+    let mut cluster = cluster;
+    let _system_actor = cluster.start().await?;
     
     // Start a ping actor on the current node
     let ping_actor = PingActor {
-        node_id: cluster.local_node().id.clone(),
+        node_id: local_node_id,
     }.start();
     
     if !is_bootstrap {

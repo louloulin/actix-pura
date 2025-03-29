@@ -61,6 +61,18 @@ pub enum NodeStatus {
     Leaving,
 }
 
+impl fmt::Display for NodeStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NodeStatus::Up => write!(f, "Up"),
+            NodeStatus::Unreachable => write!(f, "Unreachable"),
+            NodeStatus::Down => write!(f, "Down"),
+            NodeStatus::Joining => write!(f, "Joining"),
+            NodeStatus::Leaving => write!(f, "Leaving"),
+        }
+    }
+}
+
 /// Actor placement strategies for distributed actors
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlacementStrategy {
@@ -273,9 +285,12 @@ impl Node {
     /// Record a heartbeat from this node
     pub fn record_heartbeat(&mut self) {
         self.tracking.record_heartbeat();
-        if self.info.status == NodeStatus::Unreachable {
-            self.info.mark_up();
-        }
+        self.info.mark_up(); // Ensure node is marked as up
+    }
+    
+    /// Update the last seen timestamp (convenience method for record_heartbeat)
+    pub fn update_last_seen(&mut self) {
+        self.record_heartbeat();
     }
     
     /// Check if node is unreachable based on heartbeat timeout

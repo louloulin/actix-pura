@@ -33,7 +33,10 @@ pub enum NodeRole {
 #[derive(Debug, Clone, PartialEq)]
 pub enum DiscoveryMethod {
     /// Static list of seed nodes
-    Static,
+    Static {
+        /// List of seed nodes to connect to
+        seed_nodes: Vec<String>,
+    },
     
     /// DNS-based discovery
     Dns(String),
@@ -116,7 +119,7 @@ impl Default for ClusterConfig {
             public_addr: None,
             seed_nodes: Vec::new(),
             master_nodes: Vec::new(),
-            discovery: DiscoveryMethod::Static,
+            discovery: DiscoveryMethod::Static { seed_nodes: Vec::new() },
             heartbeat_interval: Duration::from_secs(DEFAULT_HEARTBEAT_INTERVAL),
             node_timeout: Duration::from_secs(DEFAULT_NODE_TIMEOUT),
             serialization_format: SerializationFormat::Bincode,
@@ -243,7 +246,7 @@ impl ClusterConfig {
             (Architecture::Decentralized, NodeRole::Peer) => {
                 // For decentralized architecture with static discovery,
                 // we need seed nodes unless this is the first node
-                if matches!(self.discovery, DiscoveryMethod::Static) && self.seed_nodes.is_empty() {
+                if matches!(self.discovery, DiscoveryMethod::Static { seed_nodes: ref nodes } if nodes.is_empty()) {
                     log::warn!("No seed nodes provided for static discovery in a decentralized architecture");
                 }
             },

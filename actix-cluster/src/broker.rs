@@ -169,6 +169,7 @@ impl MessageBroker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::{Serialize, Deserialize};
     
     struct TestActor;
     
@@ -176,6 +177,7 @@ mod tests {
         type Context = Context<Self>;
     }
     
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     struct TestMessage {
         pub content: String,
     }
