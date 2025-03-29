@@ -196,29 +196,34 @@ mod tests {
     
     #[tokio::test]
     async fn test_broker_subscribe_unsubscribe() {
-        let node_id = NodeId::new();
-        let broker = MessageBroker::new(node_id);
+        // 创建LocalSet运行测试
+        let local = tokio::task::LocalSet::new();
         
-        let actor = TestActor.start();
-        
-        // Subscribe
-        let result = broker.subscribe::<TestMessage, _>(
-            "test-topic", 
-            actor.clone(), 
-            SubscriptionOptions::default()
-        ).await;
-        
-        assert!(result.is_ok());
-        
-        let topics = broker.get_topics().await;
-        assert_eq!(topics.len(), 1);
-        assert_eq!(topics[0], "test-topic");
-        
-        // Unsubscribe
-        let result = broker.unsubscribe("test-topic").await;
-        assert!(result.is_ok());
-        
-        let topics = broker.get_topics().await;
-        assert_eq!(topics.len(), 0);
+        local.run_until(async {
+            let node_id = NodeId::new();
+            let broker = MessageBroker::new(node_id);
+            
+            let actor = TestActor.start();
+            
+            // Subscribe
+            let result = broker.subscribe::<TestMessage, _>(
+                "test-topic", 
+                actor.clone(), 
+                SubscriptionOptions::default()
+            ).await;
+            
+            assert!(result.is_ok());
+            
+            let topics = broker.get_topics().await;
+            assert_eq!(topics.len(), 1);
+            assert_eq!(topics[0], "test-topic");
+            
+            // Unsubscribe
+            let result = broker.unsubscribe("test-topic").await;
+            assert!(result.is_ok());
+            
+            let topics = broker.get_topics().await;
+            assert_eq!(topics.len(), 0);
+        }).await;
     }
 } 

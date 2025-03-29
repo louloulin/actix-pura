@@ -1,23 +1,29 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 use tokio::time::sleep;
-use actix_rt::System;
+use tokio::runtime::Runtime;
+use tokio::task::LocalSet;
 
 use actix_cluster::{
-    Architecture, ClusterConfig, ClusterSystem, DiscoveryMethod, NodeRole, SerializationFormat
+    Architecture, ClusterConfig, ClusterSystem, DiscoveryMethod, NodeRole, SerializationFormat, NodeInfo
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 初始化日志
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("debug"));
     
-    // 使用actix运行时
-    let system = System::new();
-    system.block_on(async {
+    // 创建tokio运行时和LocalSet
+    let runtime = Runtime::new()?;
+    let local = LocalSet::new();
+    
+    local.block_on(&runtime, async {
         // 创建第一个集群节点
         let node1_config = create_config("node1", 8551, Architecture::Decentralized);
-        let node1_system = ClusterSystem::new("node1", node1_config);
+        let mut node1_system = ClusterSystem::new("node1", node1_config);
         log::info!("Node 1 created: {}", node1_system.local_node().id);
+        
+        // 获取节点1信息，以便节点2可以连接
+        let node1_info = node1_system.local_node().clone();
         
         // 启动第一个集群节点
         let _node1_addr = node1_system.start().await?;
@@ -26,9 +32,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 稍等片刻，让节点1完成初始化
         sleep(Duration::from_secs(1)).await;
         
-        // 创建第二个集群节点
+        // 创建第二个集群节点，它知道第一个节点
         let node2_config = create_config("node2", 8552, Architecture::Decentralized);
-        let node2_system = ClusterSystem::new("node2", node2_config);
+        let mut node2_system = ClusterSystem::new("node2", node2_config);
         log::info!("Node 2 created: {}", node2_system.local_node().id);
         
         // 启动第二个集群节点
@@ -43,15 +49,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         log::info!("Nodes should have discovered each other");
         log::info!("Verification complete!");
         
-        // 保持程序运行以观察日志
-        log::info!("Press Ctrl+C to exit");
-        // 使用信号处理
-        let mut signals = signal_hook::iterator::Signals::new([signal_hook::consts::SIGINT])?;
-        
-        // 检查是否收到信号
-        if signals.forever().next().is_some() {
-            log::info!("Received interrupt signal, shutting down");
-        }
+        // 结束测试
+        log::info!("Test completed successfully");
         
         Ok(())
     })
@@ -73,9 +72,8 @@ fn create_config(name: &str, port: u16, architecture: Architecture) -> ClusterCo
         .cluster_name(format!("{}-cluster", name))
         .heartbeat_interval(Duration::from_secs(1))
         .node_timeout(Duration::from_secs(5))
-        .discovery(DiscoveryMethod::LibP2P { 
-            bootstrap_nodes,
-            enable_mdns: true,
+        .discovery(DiscoveryMethod::Static { 
+            seed_nodes: if name == "node1" { vec![] } else { bootstrap_nodes }
         })
         .serialization_format(SerializationFormat::Bincode)
         .build()

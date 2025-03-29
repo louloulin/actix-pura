@@ -19,6 +19,16 @@ impl NodeId {
         NodeId(Uuid::new_v4())
     }
     
+    /// Create a local node ID (uses nil UUID)
+    pub fn local() -> Self {
+        NodeId(Uuid::nil())
+    }
+    
+    /// Check if this is a local node ID
+    pub fn is_local(&self) -> bool {
+        self.0 == Uuid::nil()
+    }
+    
     /// Get the underlying UUID
     pub fn as_uuid(&self) -> &Uuid {
         &self.0

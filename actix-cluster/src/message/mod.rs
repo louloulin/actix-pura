@@ -125,17 +125,17 @@ impl ActorPath {
         Self { node_id, path }
     }
     
-    /// 创建本地Actor路径
+    /// 创建本地Actor路径，使用特殊的NodeId::local()
     pub fn local(path: String) -> Self {
         Self {
-            node_id: NodeId::default(),
+            node_id: NodeId::local(),
             path,
         }
     }
     
     /// 检查路径是否指向本地节点
     pub fn is_local(&self, local_node: &NodeId) -> bool {
-        &self.node_id == local_node
+        &self.node_id == local_node || self.node_id.is_local()
     }
 }
 
@@ -230,8 +230,15 @@ mod tests {
         let local_path = ActorPath::local(path.clone());
         assert_eq!(local_path.path, path);
         
+        // 本地路径应该使用NodeId::local()
+        let local_node_id = NodeId::local();
+        assert_eq!(local_path.node_id, local_node_id);
+        
         // 测试是否为本地
-        assert!(!actor_path.is_local(&NodeId::default()));
-        assert!(local_path.is_local(&NodeId::default()));
+        assert!(!actor_path.is_local(&local_node_id));
+        // 使用本地节点ID创建的路径应该识别为本地
+        assert!(local_path.is_local(&local_node_id));
+        // 在任何节点上，本地路径也应该被识别为本地
+        assert!(local_path.is_local(&NodeId::new()));
     }
 } 

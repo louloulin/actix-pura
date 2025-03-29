@@ -2,41 +2,48 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 use actix_rt::System;
 use actix::prelude::*;
+use env_logger;
+use tokio::runtime::Runtime;
+use tokio::task::LocalSet;
 
 use actix_cluster::{
     Architecture, ClusterConfig, ClusterSystem, DiscoveryMethod, NodeRole, SerializationFormat
 };
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 初始化日志
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("debug"));
     
-    // 使用actix运行时
-    let system = System::new();
-    system.block_on(async {
-        // 创建集群节点配置
-        let config = create_config();
+    // 创建tokio运行时和LocalSet
+    let runtime = Runtime::new()?;
+    let local = LocalSet::new();
+    
+    local.block_on(&runtime, async {
+        let config = ClusterConfig::default()
+            .discovery(DiscoveryMethod::Static { seed_nodes: vec![] });
         
-        // 创建集群系统
-        let cluster_system = ClusterSystem::new("test-node", config);
+        let mut cluster_system = ClusterSystem::new("test-node", config);
         log::info!("节点创建成功: {}", cluster_system.local_node().id);
         
-        // 启动集群系统
         match cluster_system.start().await {
-            Ok(_addr) => {
-                log::info!("集群系统成功启动");
+            Ok(addr) => {
+                log::info!("节点启动成功: {}", cluster_system.local_node().id);
                 
-                // 保持系统运行一段时间
+                // 等待几秒钟看看节点运行状态
                 tokio::time::sleep(Duration::from_secs(5)).await;
                 
-                // 演示完成，程序自然结束
-                log::info!("演示完成，程序结束");
+                // 记录结束消息
+                log::info!("测试完成，主动退出");
+                
+                // 无需手动停止，让进程自然结束
             },
             Err(e) => {
-                log::error!("集群系统启动失败: {}", e);
+                log::error!("节点启动失败: {}", e);
             }
         }
     });
+    
+    Ok(())
 }
 
 fn create_config() -> ClusterConfig {

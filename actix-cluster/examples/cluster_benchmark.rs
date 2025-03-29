@@ -7,7 +7,7 @@ use tokio::sync::{Mutex, mpsc};
 use tokio::time::sleep;
 
 use actix_cluster::{
-    Architecture, ClusterConfig, ClusterSystem, DiscoveryMethod, NodeRole, SerializationFormat
+    Architecture, ClusterConfig, ClusterSystem, DiscoveryMethod, NodeRole, SerializationFormat, NodeInfo
 };
 
 // 消息类型定义
@@ -139,7 +139,7 @@ async fn run_node_benchmark(
     let config = create_config(format!("node{}", node_id), port, Architecture::Decentralized);
     
     // 创建集群系统
-    let system = ClusterSystem::new(&format!("node{}", node_id), config);
+    let mut system = ClusterSystem::new(&format!("node{}", node_id), config);
     log::info!("Node {} created: {}", node_id, system.local_node().id);
     
     // 创建benchmark actor

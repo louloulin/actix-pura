@@ -502,68 +502,73 @@ mod tests {
     
     #[tokio::test]
     async fn test_send_envelope() {
-        let node_id1 = NodeId::new();
-        let node_id2 = NodeId::new();
-        let addr1 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8558);
-        let addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8559);
+        // 创建LocalSet运行测试
+        let local = tokio::task::LocalSet::new();
         
-        let node_info1 = NodeInfo::new(
-            node_id1.clone(),
-            "test-node-1".to_string(),
-            NodeRole::Peer,
-            addr1,
-        );
-        
-        let node_info2 = NodeInfo::new(
-            node_id2.clone(),
-            "test-node-2".to_string(),
-            NodeRole::Peer,
-            addr2,
-        );
-        
-        // Test message data
-        let test_payload = vec![1, 2, 3, 4];
-        
-        // Create transport
-        let mut transport1 = P2PTransport::new(node_info1.clone(), SerializationFormat::Bincode).unwrap();
-        let transport1_clone = transport1.clone();
-        
-        // Set up handler
-        let handler = MessageEnvelopeHandler::new(node_id1.clone()).start();
-        transport1.set_message_handler(handler);
-        
-        // Add peer to transport
-        {
-            let mut peers = transport1.peers.lock();
-            peers.insert(node_id2.clone(), node_info2.clone());
-        }
-        
-        // Create envelope
-        let envelope = MessageEnvelope::new(
-            node_id1.clone(),
-            node_id2.clone(),
-            "test_actor".to_string(),
-            MessageType::ActorMessage,
-            DeliveryGuarantee::AtMostOnce, // No ack needed for test
-            test_payload.clone(),
-        );
-        
-        // In real code, we would need actual network communication
-        // For test, we simulate by directly calling handle_message
-        let transport_message = TransportMessage::Envelope(envelope.clone());
-        
-        // This is a simplified test that just ensures the code compiles
-        // and basic functionality works without actual network
-        
-        let actor_path = ActorPath::new(node_id2.clone(), "test_actor".to_string());
-        let remote_ref = RemoteActorRef::new(
-            actor_path,
-            Arc::new(tokio::sync::Mutex::new(transport1_clone)),
-            DeliveryGuarantee::AtMostOnce,
-        );
-        
-        // In real usage, this would actually send the message
-        // but for this test it's just checking compilation
-        // let result = remote_ref.send(test_payload).await;
+        local.run_until(async {
+            let node_id1 = NodeId::new();
+            let node_id2 = NodeId::new();
+            let addr1 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8558);
+            let addr2 = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8559);
+            
+            let node_info1 = NodeInfo::new(
+                node_id1.clone(),
+                "test-node-1".to_string(),
+                NodeRole::Peer,
+                addr1,
+            );
+            
+            let node_info2 = NodeInfo::new(
+                node_id2.clone(),
+                "test-node-2".to_string(),
+                NodeRole::Peer,
+                addr2,
+            );
+            
+            // Test message data
+            let test_payload = vec![1, 2, 3, 4];
+            
+            // Create transport
+            let mut transport1 = P2PTransport::new(node_info1.clone(), SerializationFormat::Bincode).unwrap();
+            let transport1_clone = transport1.clone();
+            
+            // Set up handler
+            let handler = MessageEnvelopeHandler::new(node_id1.clone()).start();
+            transport1.set_message_handler(handler);
+            
+            // Add peer to transport
+            {
+                let mut peers = transport1.peers.lock();
+                peers.insert(node_id2.clone(), node_info2.clone());
+            }
+            
+            // Create envelope
+            let envelope = MessageEnvelope::new(
+                node_id1.clone(),
+                node_id2.clone(),
+                "test_actor".to_string(),
+                MessageType::ActorMessage,
+                DeliveryGuarantee::AtMostOnce, // No ack needed for test
+                test_payload.clone(),
+            );
+            
+            // In real code, we would need actual network communication
+            // For test, we simulate by directly calling handle_message
+            let transport_message = TransportMessage::Envelope(envelope.clone());
+            
+            // This is a simplified test that just ensures the code compiles
+            // and basic functionality works without actual network
+            
+            let actor_path = ActorPath::new(node_id2.clone(), "test_actor".to_string());
+            let remote_ref = RemoteActorRef::new(
+                actor_path,
+                Arc::new(tokio::sync::Mutex::new(transport1_clone)),
+                DeliveryGuarantee::AtMostOnce,
+            );
+            
+            // In real usage, this would actually send the message
+            // but for this test it's just checking compilation
+            // let result = remote_ref.send(test_payload).await;
+        }).await;
     }
 } 
