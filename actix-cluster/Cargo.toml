@@ -26,6 +26,7 @@ libp2p = { version = "0.51", features = ["tokio", "tcp", "noise", "yamux", "iden
 once_cell = "1.18"
 multiaddr = "0.17"
 parking_lot = "0.12"
+lru = "0.8.0"
 
 [dev-dependencies]
 tokio-test = "0.4"

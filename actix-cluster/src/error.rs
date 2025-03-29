@@ -138,6 +138,10 @@ pub enum ClusterError {
     /// Mailbox error
     #[error("Mailbox error: {0}")]
     MailboxError(String),
+
+    /// Invalid operation
+    #[error("Invalid operation: {0}")]
+    InvalidOperation(String),
 }
 
 /// Type alias for Result with ClusterError

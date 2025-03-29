@@ -122,34 +122,42 @@ pub struct ActorMessageHandler {
 
 impl ActorMessageHandler {
     /// 创建一个新的 ActorMessageHandler
-    pub fn new<F>(handler: F) -> Self 
-    where 
+    pub fn new<F>(handler: F) -> Self
+    where
         F: Fn(NodeId, TransportMessage) -> ClusterResult<()> + Send + Sync + 'static 
     {
         Self {
             handler: Box::new(handler),
         }
     }
-    
-    /// 处理消息
-    pub fn handle(&self, sender: NodeId, message: TransportMessage) -> ClusterResult<()> {
-        (self.handler)(sender, message)
-    }
 }
 
 #[async_trait::async_trait]
 impl MessageHandler for ActorMessageHandler {
-    async fn handle_message(&mut self, sender: NodeId, message: TransportMessage) -> ClusterResult<()> {
-        debug!("Forwarding message from {} to handler", sender);
-        (self.handler)(sender, message)
+    async fn handle_message(&mut self, node_id: NodeId, message: TransportMessage) -> ClusterResult<()> {
+        debug!("Forwarding message from {} to handler", node_id);
+        (self.handler)(node_id, message)
     }
 }
 
-// 同步版本的实现
-impl SyncMessageHandler for ActorMessageHandler {
-    fn handle_message_sync(&self, sender: NodeId, message: TransportMessage) -> ClusterResult<()> {
-        debug!("Forwarding message from {} to handler (sync)", sender);
-        (self.handler)(sender, message)
+// 为 Addr<MessageEnvelopeHandler> 实现 From trait
+pub enum MessageHandlerType {
+    Function(Box<dyn Fn(NodeId, TransportMessage) -> ClusterResult<()> + Send + Sync>),
+    Actor(actix::Addr<MessageEnvelopeHandler>),
+}
+
+impl<F> From<F> for MessageHandlerType 
+where 
+    F: Fn(NodeId, TransportMessage) -> ClusterResult<()> + Send + Sync + 'static
+{
+    fn from(f: F) -> Self {
+        MessageHandlerType::Function(Box::new(f))
+    }
+}
+
+impl From<actix::Addr<MessageEnvelopeHandler>> for MessageHandlerType {
+    fn from(addr: actix::Addr<MessageEnvelopeHandler>) -> Self {
+        MessageHandlerType::Actor(addr)
     }
 }
 
@@ -256,7 +264,7 @@ impl P2PTransport {
                                 addr, 
                                 local_node_clone, 
                                 serializer_clone, 
-                                msg_tx_clone,
+                                Some(Arc::new(Mutex::new(MessageHandlerWrapper(msg_tx_clone)))),
                                 peers_clone,
                                 connections_clone,
                             ).await {
@@ -460,12 +468,6 @@ impl P2PTransport {
         // 创建一个克隆以避免同时借用envelope为只读和可变
         let target_node = envelope.target_node.clone();
         self.send_message(&target_node, TransportMessage::Envelope(envelope)).await
-    }
-    
-    /// Set message handler for incoming messages
-    pub fn set_message_handler(&mut self, handler: impl Fn(NodeId, TransportMessage) -> ClusterResult<()> + Send + Sync + 'static) {
-        let handler = ActorMessageHandler::new(handler);
-        self.message_handler = Some(Arc::new(Mutex::new(handler)));
     }
     
     /// Get the known peers
@@ -898,6 +900,21 @@ impl P2PTransport {
             pending_acks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
+
+    /// Set message handler for incoming messages
+    pub fn set_message_handler(&mut self, handler: impl Into<MessageHandlerType> + 'static) {
+        let handler: MessageHandlerType = handler.into();
+        match handler {
+            MessageHandlerType::Function(f) => {
+                let handler = ActorMessageHandler::new(f);
+                self.message_handler = Some(Arc::new(Mutex::new(handler)));
+            },
+            MessageHandlerType::Actor(addr) => {
+                let handler = ActorHandlerAdapter::new(addr);
+                self.message_handler = Some(Arc::new(Mutex::new(handler)));
+            }
+        }
+    }
 }
 
 /// Actor for handling message envelopes
@@ -962,9 +979,26 @@ impl actix::Message for MessageEnvelope {
     type Result = ();
 }
 
-// 添加消息实现
-impl actix::Message for TransportMessage {
+// 创建一个包装类型，代替直接使用元组
+/// 一个包装NodeId和TransportMessage的消息类型
+#[derive(Debug, Clone)]
+pub struct NodeMessage {
+    pub node_id: NodeId,
+    pub message: TransportMessage,
+}
+
+impl actix::Message for NodeMessage {
     type Result = ();
+}
+
+/// 修改MessageEnvelopeHandler的实现
+impl actix::Handler<NodeMessage> for MessageEnvelopeHandler {
+    type Result = ();
+
+    fn handle(&mut self, msg: NodeMessage, ctx: &mut Self::Context) -> Self::Result {
+        debug!("MessageEnvelopeHandler received message from node {}: {:?}", msg.node_id, msg.message);
+        // 实际处理消息的逻辑
+    }
 }
 
 /// A reference to a remote actor
@@ -1072,6 +1106,46 @@ impl crate::registry::ActorRef for RemoteActorRef {
     
     fn clone_box(&self) -> Box<dyn crate::registry::ActorRef> {
         Box::new(self.clone())
+    }
+}
+
+/// 修改ActorHandlerAdapter
+pub struct ActorHandlerAdapter {
+    actor: actix::Addr<MessageEnvelopeHandler>,
+}
+
+impl ActorHandlerAdapter {
+    pub fn new(actor: actix::Addr<MessageEnvelopeHandler>) -> Self {
+        Self { actor }
+    }
+}
+
+#[async_trait::async_trait]
+impl MessageHandler for ActorHandlerAdapter {
+    async fn handle_message(&mut self, node_id: NodeId, message: TransportMessage) -> ClusterResult<()> {
+        // 创建NodeMessage替代元组
+        let msg = NodeMessage {
+            node_id,
+            message,
+        };
+        
+        // 使用try_send避免async问题
+        self.actor.try_send(msg)
+            .map_err(|e| ClusterError::MessageSendFailed(format!("Failed to send message to actor: {}", e)))
+    }
+}
+
+/// 包装消息发送通道以实现 MessageHandler 特性
+struct MessageHandlerWrapper(Option<mpsc::Sender<(NodeId, TransportMessage)>>);
+
+#[async_trait::async_trait]
+impl MessageHandler for MessageHandlerWrapper {
+    async fn handle_message(&mut self, node_id: NodeId, message: TransportMessage) -> ClusterResult<()> {
+        if let Some(sender) = &self.0 {
+            sender.send((node_id, message)).await
+                .map_err(|e| ClusterError::MessageSendFailed(format!("Failed to send message: {}", e)))?;
+        }
+        Ok(())
     }
 }
 
@@ -1243,13 +1317,23 @@ async fn handle_incoming(
                         let node_id_clone = node_id.clone();
                         let message_clone = other_message.clone();
                         
-                        // 使用单独的任务处理消息，避免阻塞网络读取
+                        // 克隆handler用于异步执行
                         let handler_clone = handler.clone();
-                        tokio::spawn(async move {
-                            // 在任务中获取锁
-                            let mut handler_guard = handler_clone.lock();
-                            // 处理消息
-                            if let Err(e) = handler_guard.handle_message(node_id_clone, message_clone).await {
+                        
+                        // 使用单独的线程来执行异步处理
+                        // 使用克隆的数据，避免引用和锁的问题
+                        tokio::task::spawn_blocking(move || {
+                            // 在新线程中获取锁，这里是同步的阻塞操作，不会有await的问题
+                            let mut handler_locked = handler_clone.lock();
+                            
+                            // 构建一个运行时来执行异步代码
+                            let rt = tokio::runtime::Builder::new_current_thread()
+                                .enable_all()
+                                .build()
+                                .unwrap();
+                            
+                            // 在新的运行时中执行异步代码
+                            if let Err(e) = rt.block_on(handler_locked.handle_message(node_id_clone, message_clone)) {
                                 error!("Error handling message: {:?}", e);
                             }
                         });

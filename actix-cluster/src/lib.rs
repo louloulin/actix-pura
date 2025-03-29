@@ -16,6 +16,8 @@ pub mod broker;
 pub mod error;
 pub mod serialization;
 pub mod message;
+pub mod security;
+pub mod sync;
 
 pub use cluster::{ClusterSystem, Architecture};
 pub use config::{ClusterConfig, NodeRole, DiscoveryMethod};
