@@ -123,6 +123,10 @@ pub enum ClusterError {
     #[error("Remote actor error: {0}")]
     RemoteActorError(String),
 
+    /// Network error
+    #[error("Network error: {0}")]
+    NetworkError(String),
+
     /// Other error
     #[error("Other error: {0}")]
     Other(String),

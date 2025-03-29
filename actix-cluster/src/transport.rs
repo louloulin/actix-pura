@@ -5,16 +5,22 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 use std::any::Any;
+use std::net::SocketAddr;
+use std::io;
+use std::any::TypeId;
 
 use actix::prelude::*;
 use parking_lot::Mutex;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex as TokioMutex};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 use log::{debug, error, info, warn};
 use serde::{Serialize, Deserialize};
 
 use crate::error::{ClusterError, ClusterResult};
 use crate::node::{NodeId, NodeInfo, NodeStatus};
+use crate::config::NodeRole;
 use crate::serialization::{SerializationFormat, SerializerTrait, BincodeSerializer, JsonSerializer};
 use crate::message::{MessageEnvelope, MessageType, DeliveryGuarantee, ActorPath};
 
@@ -36,6 +42,8 @@ pub enum TransportMessage {
     ActorDiscovery(String),
     /// Actor discovery response
     ActorDiscoveryResponse(String, Vec<ActorPath>),
+    /// Node handshake (initial connection)
+    Handshake(NodeInfo),
 }
 
 /// A message that is waiting for acknowledgement
@@ -60,7 +68,7 @@ pub struct P2PTransport {
     peers: Arc<Mutex<HashMap<NodeId, NodeInfo>>>,
     
     /// Message serializer
-    serializer: Box<dyn SerializerTrait + Send + Sync>,
+    serializer: Box<dyn SerializerTrait>,
     
     /// Message receiver channel
     msg_rx: Option<mpsc::Receiver<(NodeId, TransportMessage)>>,
@@ -69,10 +77,19 @@ pub struct P2PTransport {
     msg_tx: Option<mpsc::Sender<(NodeId, TransportMessage)>>,
     
     /// Message handler actor
-    message_handler: Option<Arc<Mutex<ActorMessageHandler>>>,
+    message_handler: Option<Arc<Mutex<dyn MessageHandler>>>,
     
     /// Pending message acknowledgements
-    pending_acks: Arc<Mutex<HashMap<Uuid, PendingMessage>>>,
+    pending_acks: Arc<Mutex<HashMap<String, PendingMessage>>>,
+    
+    /// Active connections to other nodes
+    connections: Arc<Mutex<HashMap<NodeId, Arc<TokioMutex<TcpStream>>>>>,
+    
+    /// Listener for incoming connections
+    listener: Option<Arc<TcpListener>>,
+    
+    /// Flag indicating if transport is started
+    started: bool,
 }
 
 /// Actor for handling transport messages
@@ -84,25 +101,55 @@ pub trait Handler<M>: Actor {
     fn handle(&mut self, msg: M, ctx: &mut <Self as Actor>::Context);
 }
 
-/// Wrapper for actor message handler to satisfy Send + Sync
+/// 消息处理器trait
+#[async_trait::async_trait]
+pub trait MessageHandler: Send + Sync {
+    /// 处理来自节点的消息
+    async fn handle_message(&mut self, sender: NodeId, message: TransportMessage) -> ClusterResult<()>;
+}
+
+/// 消息处理器trait
+pub trait SyncMessageHandler: Send + Sync {
+    /// 处理来自节点的消息（同步版本）
+    fn handle_message_sync(&self, sender: NodeId, message: TransportMessage) -> ClusterResult<()>;
+}
+
+/// Actor 实现的消息处理器
 pub struct ActorMessageHandler {
-    // Type erased handler - this is safe because we only access it through
-    // actix framework which provides proper thread safety
-    pub addr: Option<Box<dyn std::any::Any + Send + Sync>>,
+    // 使用标准的函数指针或闭包存储
+    handler: Box<dyn Fn(NodeId, TransportMessage) -> ClusterResult<()> + Send + Sync>,
 }
 
 impl ActorMessageHandler {
-    /// Create a new actor message handler
-    pub fn new<A: Actor + Handler<TransportMessage>>(addr: Addr<A>) -> Self {
-        ActorMessageHandler {
-            addr: Some(Box::new(addr)),
+    /// 创建一个新的 ActorMessageHandler
+    pub fn new<F>(handler: F) -> Self 
+    where 
+        F: Fn(NodeId, TransportMessage) -> ClusterResult<()> + Send + Sync + 'static 
+    {
+        Self {
+            handler: Box::new(handler),
         }
     }
     
-    /// Get the address for handler
-    pub fn addr<A: Actor + Handler<TransportMessage>>(&self) -> Option<Addr<A>> {
-        self.addr.as_ref()
-            .and_then(|a| a.downcast_ref::<Addr<A>>().cloned())
+    /// 处理消息
+    pub fn handle(&self, sender: NodeId, message: TransportMessage) -> ClusterResult<()> {
+        (self.handler)(sender, message)
+    }
+}
+
+#[async_trait::async_trait]
+impl MessageHandler for ActorMessageHandler {
+    async fn handle_message(&mut self, sender: NodeId, message: TransportMessage) -> ClusterResult<()> {
+        debug!("Forwarding message from {} to handler", sender);
+        (self.handler)(sender, message)
+    }
+}
+
+// 同步版本的实现
+impl SyncMessageHandler for ActorMessageHandler {
+    fn handle_message_sync(&self, sender: NodeId, message: TransportMessage) -> ClusterResult<()> {
+        debug!("Forwarding message from {} to handler (sync)", sender);
+        (self.handler)(sender, message)
     }
 }
 
@@ -114,7 +161,7 @@ impl P2PTransport {
     /// Create a new transport layer
     pub fn new(local_node: NodeInfo, format: SerializationFormat) -> ClusterResult<Self> {
         // Create serializer based on format
-        let serializer: Box<dyn SerializerTrait + Send + Sync> = match format {
+        let serializer: Box<dyn SerializerTrait> = match format {
             SerializationFormat::Json => Box::new(JsonSerializer::new()),
             SerializationFormat::Bincode => Box::new(BincodeSerializer::new()),
             // SerializationFormat只有两个枚举值，不需要默认分支
@@ -131,6 +178,9 @@ impl P2PTransport {
             msg_tx: Some(tx),
             message_handler: None,
             pending_acks: Arc::new(Mutex::new(HashMap::new())),
+            connections: Arc::new(Mutex::new(HashMap::new())),
+            listener: None,
+            started: false,
         };
         
         Ok(transport)
@@ -139,8 +189,10 @@ impl P2PTransport {
     /// Initialize the transport
     pub async fn init(&mut self) -> ClusterResult<()> {
         // Add local node to peers
-        let mut peers = self.peers.lock();
-        peers.insert(self.local_node.id.clone(), self.local_node.clone());
+        {
+            let mut peers = self.peers.lock();
+            peers.insert(self.local_node.id.clone(), self.local_node.clone());
+        } // Release the lock here before any await points
         
         // Start message handling loop
         if let Some(msg_rx) = self.msg_rx.take() {
@@ -155,6 +207,71 @@ impl P2PTransport {
                 }
             });
         }
+        
+        // Start TCP listener
+        let listener = TcpListener::bind(self.local_node.addr).await
+            .map_err(|e| ClusterError::NetworkError(format!("Failed to bind TCP listener: {}", e)))?;
+        
+        info!("Transport bound to {}", self.local_node.addr);
+        
+        self.listener = Some(Arc::new(listener));
+        self.started = true;
+        
+        // Spawn a task to accept incoming connections
+        self.start_accept_loop()?;
+        
+        Ok(())
+    }
+    
+    /// Start accepting incoming connections
+    fn start_accept_loop(&self) -> ClusterResult<()> {
+        if self.listener.is_none() {
+            return Err(ClusterError::TransportNotInitialized);
+        }
+        
+        let listener = self.listener.as_ref().unwrap().clone();
+        let serializer = self.serializer.clone_box();
+        let local_node = self.local_node.clone();
+        let peers = self.peers.clone();
+        let connections = self.connections.clone();
+        let msg_tx = self.msg_tx.clone();
+        
+        tokio::spawn(async move {
+            loop {
+                match listener.accept().await {
+                    Ok((socket, addr)) => {
+                        debug!("Accepted connection from {}", addr);
+                        
+                        // Clone necessary data for the connection handling task
+                        let serializer_clone = serializer.clone_box();
+                        let local_node_clone = local_node.clone();
+                        let peers_clone = peers.clone();
+                        let connections_clone = connections.clone();
+                        let msg_tx_clone = msg_tx.clone();
+                        
+                        // Spawn a task to handle this connection
+                        tokio::spawn(async move {
+                            if let Err(e) = handle_incoming(
+                                socket, 
+                                addr, 
+                                local_node_clone, 
+                                serializer_clone, 
+                                msg_tx_clone,
+                                peers_clone,
+                                connections_clone,
+                            ).await {
+                                error!("Error handling connection: {}", e);
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        error!("Error accepting connection: {}", e);
+                        // Add a small delay to prevent CPU spinning on repeated errors
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                }
+            }
+        });
         
         Ok(())
     }
@@ -211,20 +328,113 @@ impl P2PTransport {
                 }
                 
                 Ok(())
-            }
+            },
+            TransportMessage::Handshake(node_info) => {
+                debug!("Received handshake from node {}", node_info.id);
+                
+                // Store the peer's node info
+                self.peers.lock().insert(node_info.id.clone(), node_info.clone());
+                
+                // Store the connection
+                let stream = TcpStream::connect(node_info.addr).await.map_err(|e| {
+                    error!("Failed to connect to peer: {}", e);
+                    ClusterError::NetworkError(format!("Failed to connect to peer: {}", e))
+                })?;
+                
+                let stream_mutex = Arc::new(TokioMutex::new(stream));
+                self.connections.lock().insert(node_info.id.clone(), stream_mutex.clone());
+                
+                // Send our handshake back
+                let handshake = TransportMessage::Handshake(self.local_node.clone());
+                
+                // 使用自有序列化方法
+                let serialized = match &*self.serializer {
+                    s if s.type_id() == std::any::TypeId::of::<crate::serialization::BincodeSerializer>() => {
+                        let serializer = crate::serialization::BincodeSerializer::new();
+                        serializer.serialize(&handshake)?
+                    },
+                    s if s.type_id() == std::any::TypeId::of::<crate::serialization::JsonSerializer>() => {
+                        let serializer = crate::serialization::JsonSerializer::new();
+                        serializer.serialize(&handshake)?
+                    },
+                    _ => {
+                        self.serializer.serialize_any(&handshake as &dyn std::any::Any)?
+                    }
+                };
+                
+                // 获取锁并发送数据
+                let mut stream = stream_mutex.lock().await;
+                stream.write_all(&(serialized.len() as u32).to_be_bytes()).await?;
+                stream.write_all(&serialized).await?;
+                
+                debug!("Sent handshake response to node {}", node_info.id);
+                
+                Ok(())
+            },
         }
     }
     
     /// Send a message to a specific node
     pub async fn send_message(&mut self, target_node: &NodeId, message: TransportMessage) -> ClusterResult<()> {
-        // In a real implementation, this would use network transport
-        // For now, we'll simulate by just logging the message
-        debug!("Would send message to node {}: {:?}", target_node, message);
+        debug!("Sending message to node {}: {:?}", target_node, message);
         
         // Check if we have the node in our known peers
-        if !self.peers.lock().contains_key(target_node) {
-            return Err(ClusterError::NodeNotFound(target_node.clone()));
+        let target_addr;
+        {
+            let peers = self.peers.lock();
+            if let Some(peer) = peers.get(target_node) {
+                target_addr = peer.addr;
+            } else {
+                return Err(ClusterError::NodeNotFound(target_node.clone()));
+            }
         }
+        
+        // Check if we already have a connection to this peer
+        let mut socket_opt = None;
+        {
+            let connections = self.connections.lock();
+            if let Some(socket) = connections.get(target_node) {
+                socket_opt = Some(socket.clone());
+            }
+        }
+        
+        // If we don't have a connection, establish one
+        if socket_opt.is_none() {
+            self.connect_to_peer(target_addr).await?;
+            
+            // Try to get the connection again
+            let connections = self.connections.lock();
+            if let Some(socket) = connections.get(target_node) {
+                socket_opt = Some(socket.clone());
+            } else {
+                return Err(ClusterError::ConnectionFailed(target_addr.to_string()));
+            }
+        }
+        
+        let socket = socket_opt.unwrap();
+        
+        // 序列化消息
+        let serialized = match &*self.serializer {
+            s if s.type_id() == std::any::TypeId::of::<crate::serialization::BincodeSerializer>() => {
+                let serializer = crate::serialization::BincodeSerializer::new();
+                serializer.serialize(&message)?
+            },
+            s if s.type_id() == std::any::TypeId::of::<crate::serialization::JsonSerializer>() => {
+                let serializer = crate::serialization::JsonSerializer::new();
+                serializer.serialize(&message)?
+            },
+            _ => {
+                self.serializer.serialize_any(&message as &dyn std::any::Any)?
+            }
+        };
+        
+        // Write the length of the message first (as u32), then the message itself
+        let len = serialized.len() as u32;
+        let len_bytes = len.to_be_bytes();
+        
+        let mut socket_locked = socket.lock().await;
+        socket_locked.write_all(&len_bytes).await?;
+        socket_locked.write_all(&serialized).await?;
         
         // If this is an envelope message with delivery guarantees, store it for retries
         if let TransportMessage::Envelope(ref envelope) = &message {
@@ -236,11 +446,12 @@ impl P2PTransport {
                     retry_count: 0,
                 };
                 
-                self.pending_acks.lock().insert(envelope.message_id, pending);
+                self.pending_acks.lock().insert(envelope.message_id.clone().to_string(), pending);
             }
         }
         
-        // Successfully "sent" the message
+        debug!("Successfully sent message to node {}", target_node);
+        
         Ok(())
     }
     
@@ -252,8 +463,9 @@ impl P2PTransport {
     }
     
     /// Set message handler for incoming messages
-    pub fn set_message_handler<A: Actor + Handler<TransportMessage> + 'static>(&mut self, handler: Addr<A>) {
-        self.message_handler = Some(Arc::new(Mutex::new(ActorMessageHandler::new(handler))));
+    pub fn set_message_handler(&mut self, handler: impl Fn(NodeId, TransportMessage) -> ClusterResult<()> + Send + Sync + 'static) {
+        let handler = ActorMessageHandler::new(handler);
+        self.message_handler = Some(Arc::new(Mutex::new(handler)));
     }
     
     /// Get the known peers
@@ -296,21 +508,394 @@ impl P2PTransport {
         // Send the envelope - 现在self已经是可变的
         self.send_envelope(envelope).await
     }
-}
 
-impl Clone for P2PTransport {
-    fn clone(&self) -> Self {
-        // 克隆序列化器，使用clone_box方法
-        let serializer = self.serializer.clone_box();
+    /// Connect to a peer node
+    pub async fn connect_to_peer(&mut self, peer_addr: SocketAddr) -> ClusterResult<()> {
+        debug!("Connecting to peer at {}", peer_addr);
         
+        // Connect to the peer
+        let socket = TcpStream::connect(peer_addr).await
+            .map_err(|e| ClusterError::NetworkError(format!("Failed to connect to peer: {}", e)))?;
+        
+        let socket_mutex = Arc::new(TokioMutex::new(socket));
+        
+        // Send handshake with our node info
+        let handshake = TransportMessage::Handshake(self.local_node.clone());
+        
+        // 序列化消息
+        let serialized = match &*self.serializer {
+            s if s.type_id() == std::any::TypeId::of::<crate::serialization::BincodeSerializer>() => {
+                let serializer = crate::serialization::BincodeSerializer::new();
+                serializer.serialize(&handshake)?
+            },
+            s if s.type_id() == std::any::TypeId::of::<crate::serialization::JsonSerializer>() => {
+                let serializer = crate::serialization::JsonSerializer::new();
+                serializer.serialize(&handshake)?
+            },
+            _ => {
+                self.serializer.serialize_any(&handshake as &dyn std::any::Any)?
+            }
+        };
+        
+        // Write the length of the message first (as u32), then the message itself
+        let len = serialized.len() as u32;
+        let len_bytes = len.to_be_bytes();
+        
+        let mut socket_locked = socket_mutex.lock().await;
+        socket_locked.write_all(&len_bytes).await
+            .map_err(|e| ClusterError::NetworkError(format!("Failed to write message length: {}", e)))?;
+        
+        socket_locked.write_all(&serialized).await
+            .map_err(|e| ClusterError::NetworkError(format!("Failed to write message: {}", e)))?;
+        
+        debug!("Sent handshake to peer at {}", peer_addr);
+        
+        // The peer's node info will be received by the connection handler
+        
+        Ok(())
+    }
+
+    /// Start the transport layer
+    pub async fn start(&mut self) -> ClusterResult<()> {
+        if self.started {
+            return Ok(());
+        }
+        
+        // Create message channels
+        let (tx, rx) = mpsc::channel(100);
+        self.msg_tx = Some(tx.clone());
+        self.msg_rx = Some(rx);
+        
+        // Set up TCP listener
+        let addr = self.local_node.addr;
+        let listener = TcpListener::bind(addr).await?;
+        self.listener = Some(Arc::new(listener));
+        
+        // Clone shared resources for the listener task
+        let local_node_clone = self.local_node.clone();
+        let peers_clone = self.peers.clone();
+        let connections_clone = self.connections.clone();
+        let serializer_clone = self.serializer.clone_box();
+        let message_handler_clone = self.message_handler.clone();
+        
+        // Spawn a task to accept incoming connections
+        let listener_clone = self.listener.as_ref().unwrap().clone();
+        let msg_tx_clone = self.msg_tx.clone();
+        
+        tokio::spawn(async move {
+            info!("P2P transport listening on {}", addr);
+            
+            loop {
+                match listener_clone.accept().await {
+                    Ok((socket, addr)) => {
+                        debug!("Accepted connection from {}", addr);
+                        
+                        // 克隆需要传递给新任务的资源
+                        let local_node_clone2 = local_node_clone.clone();
+                        let peers_clone2 = peers_clone.clone();
+                        let connections_clone2 = connections_clone.clone();
+                        let serializer_clone2 = serializer_clone.clone_box();
+                        let message_handler_clone2 = message_handler_clone.clone();
+                        
+                        // Spawn a task to handle this connection
+                        tokio::spawn(async move {
+                            if let Err(e) = handle_incoming(
+                                socket, 
+                                addr, 
+                                local_node_clone2, 
+                                serializer_clone2, 
+                                message_handler_clone2,
+                                peers_clone2,
+                                connections_clone2,
+                            ).await {
+                                error!("Error handling connection: {}", e);
+                            }
+                        });
+                    },
+                    Err(e) => {
+                        error!("Error accepting connection: {}", e);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    }
+                }
+            }
+        });
+        
+        // 处理消息发送队列 - 让我们把rx所有权移出，复制给变量
+        // 创建一个新的队列，避免借用self
+        let rx_owned = self.msg_rx.take().unwrap();
+        let peers_clone = self.peers.clone();
+        let connections_clone = self.connections.clone();
+        let serializer_clone = self.serializer.clone_box();
+        let local_node_clone = self.local_node.clone();
+        
+        tokio::spawn(async move {
+            let mut rx_owned = rx_owned;
+            
+            while let Some((target_node, message)) = rx_owned.recv().await {
+                debug!("Sending message to node {}: {:?}", target_node, message);
+                
+                // 获取目标节点地址
+                let target_addr;
+                {
+                    let peers = peers_clone.lock();
+                    if let Some(peer) = peers.get(&target_node) {
+                        target_addr = peer.addr;
+                    } else {
+                        error!("Node not found: {}", target_node);
+                        continue;
+                    }
+                }
+                
+                // 获取或创建连接
+                let mut socket_opt = None;
+                {
+                    let connections = connections_clone.lock();
+                    if let Some(socket) = connections.get(&target_node) {
+                        socket_opt = Some(socket.clone());
+                    }
+                }
+                
+                // 如果没有连接，创建一个
+                if socket_opt.is_none() {
+                    match TcpStream::connect(target_addr).await {
+                        Ok(stream) => {
+                            let stream_mutex = Arc::new(TokioMutex::new(stream));
+                            connections_clone.lock().insert(target_node.clone(), stream_mutex.clone());
+                            socket_opt = Some(stream_mutex);
+                            
+                            // 发送握手
+                            let handshake = TransportMessage::Handshake(local_node_clone.clone());
+                            let serializer_type_id = serializer_clone.type_id();
+                            
+                            let serialized = if serializer_type_id == TypeId::of::<BincodeSerializer>() {
+                                let concrete_serializer = BincodeSerializer::new();
+                                match concrete_serializer.serialize(&handshake) {
+                                    Ok(s) => s,
+                                    Err(e) => {
+                                        error!("Failed to serialize handshake: {}", e);
+                                        continue;
+                                    }
+                                }
+                            } else if serializer_type_id == TypeId::of::<JsonSerializer>() {
+                                let concrete_serializer = JsonSerializer::new();
+                                match concrete_serializer.serialize(&handshake) {
+                                    Ok(s) => s,
+                                    Err(e) => {
+                                        error!("Failed to serialize handshake: {}", e);
+                                        continue;
+                                    }
+                                }
+                            } else {
+                                match serializer_clone.serialize_any(&handshake as &dyn std::any::Any) {
+                                    Ok(s) => s,
+                                    Err(e) => {
+                                        error!("Failed to serialize handshake: {:?}", e);
+                                        continue;
+                                    }
+                                }
+                            };
+                            
+                            let len = serialized.len() as u32;
+                            let len_bytes = len.to_be_bytes();
+                            
+                            let mut stream = socket_opt.as_ref().unwrap().lock().await;
+                            if let Err(e) = stream.write_all(&len_bytes).await {
+                                error!("Failed to write handshake length: {}", e);
+                                continue;
+                            }
+                            
+                            if let Err(e) = stream.write_all(&serialized).await {
+                                error!("Failed to write handshake: {}", e);
+                                continue;
+                            }
+                        },
+                        Err(e) => {
+                            error!("Failed to connect to node {}: {}", target_node, e);
+                            continue;
+                        }
+                    }
+                }
+                
+                // 序列化消息
+                let serializer_type_id = serializer_clone.type_id();
+                let serialized = if serializer_type_id == TypeId::of::<BincodeSerializer>() {
+                    let concrete_serializer = BincodeSerializer::new();
+                    match concrete_serializer.serialize(&message) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            error!("Failed to serialize message: {}", e);
+                            continue;
+                        }
+                    }
+                } else if serializer_type_id == TypeId::of::<JsonSerializer>() {
+                    let concrete_serializer = JsonSerializer::new();
+                    match concrete_serializer.serialize(&message) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            error!("Failed to serialize message: {}", e);
+                            continue;
+                        }
+                    }
+                } else {
+                    match serializer_clone.serialize_any(&message as &dyn std::any::Any) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            error!("Failed to serialize message: {:?}", e);
+                            continue;
+                        }
+                    }
+                };
+                
+                // 发送消息
+                let socket = socket_opt.unwrap();
+                let len = serialized.len() as u32;
+                let len_bytes = len.to_be_bytes();
+                
+                let mut stream = socket.lock().await;
+                if let Err(e) = stream.write_all(&len_bytes).await {
+                    error!("Failed to write message length: {}", e);
+                    continue;
+                }
+                
+                if let Err(e) = stream.write_all(&serialized).await {
+                    error!("Failed to write message: {}", e);
+                    continue;
+                }
+                
+                debug!("Successfully sent message to node {}", target_node);
+            }
+        });
+        
+        self.started = true;
+        Ok(())
+    }
+
+    /// Connect to a remote peer
+    pub async fn connect(&self, addr: SocketAddr) -> ClusterResult<NodeInfo> {
+        if !self.started {
+            return Err(ClusterError::ConfigurationError("Transport not started".to_string()));
+        }
+        
+        debug!("Connecting to {}", addr);
+        
+        let stream = TcpStream::connect(addr).await
+            .map_err(|e| ClusterError::NetworkError(format!("Failed to connect: {}", e)))?;
+            
+        let peer_addr = stream.peer_addr()
+            .map_err(|e| ClusterError::NetworkError(format!("Failed to get peer address: {}", e)))?;
+            
+        debug!("Connected to {}", peer_addr);
+        
+        // Create a temporary node ID and info
+        let node_id = NodeId::new();
+        let node_info = NodeInfo::new(
+            node_id.clone(), 
+            format!("temp-{}", node_id), 
+            NodeRole::Peer, 
+            peer_addr
+        );
+        
+        // Store the connection
+        let stream_mutex = Arc::new(TokioMutex::new(stream));
+        self.connections.lock().insert(node_id.clone(), stream_mutex.clone());
+        
+        // Send handshake
+        let handshake = TransportMessage::Handshake(self.local_node.clone());
+        
+        let serializer_type_id = self.serializer.type_id();
+        let serialized = if serializer_type_id == TypeId::of::<BincodeSerializer>() {
+            let concrete_serializer = BincodeSerializer::new();
+            concrete_serializer.serialize(&handshake)?
+        } else if serializer_type_id == TypeId::of::<JsonSerializer>() {
+            let concrete_serializer = JsonSerializer::new();
+            concrete_serializer.serialize(&handshake)?
+        } else {
+            self.serializer.serialize_any(&handshake as &dyn std::any::Any)?
+        };
+        
+        let len = serialized.len() as u32;
+        let len_bytes = len.to_be_bytes();
+        
+        {
+            let mut stream = stream_mutex.lock().await;
+            stream.write_all(&len_bytes).await
+                .map_err(|e| ClusterError::NetworkError(format!("Failed to write handshake length: {}", e)))?;
+                
+            stream.write_all(&serialized).await
+                .map_err(|e| ClusterError::NetworkError(format!("Failed to write handshake: {}", e)))?;
+        }
+        
+        // Receive handshake response
+        let mut buffer = [0u8; 4];
+        {
+            let mut stream = stream_mutex.lock().await;
+            stream.read_exact(&mut buffer).await
+                .map_err(|e| ClusterError::NetworkError(format!("Failed to read handshake response length: {}", e)))?;
+        }
+        
+        let msg_len = u32::from_be_bytes(buffer) as usize;
+        let mut msg_buffer = vec![0u8; msg_len];
+        
+        {
+            let mut stream = stream_mutex.lock().await;
+            stream.read_exact(&mut msg_buffer).await
+                .map_err(|e| ClusterError::NetworkError(format!("Failed to read handshake response: {}", e)))?;
+        }
+        
+        // Deserialize handshake response
+        let response: TransportMessage = if serializer_type_id == TypeId::of::<BincodeSerializer>() {
+            let concrete_serializer = BincodeSerializer::new();
+            concrete_serializer.deserialize(&msg_buffer)?
+        } else if serializer_type_id == TypeId::of::<JsonSerializer>() {
+            let concrete_serializer = JsonSerializer::new();
+            concrete_serializer.deserialize(&msg_buffer)?
+        } else {
+            match self.serializer.deserialize_any(&msg_buffer)? {
+                boxed if boxed.type_id() == TypeId::of::<TransportMessage>() => {
+                    *boxed.downcast::<TransportMessage>().unwrap()
+                },
+                _ => {
+                    return Err(ClusterError::DeserializationError("Expected TransportMessage".to_string()));
+                }
+            }
+        };
+        
+        // Process handshake response
+        match response {
+            TransportMessage::Handshake(peer_info) => {
+                debug!("Received handshake from {}", peer_info.id);
+                
+                // Update the connection with the actual node ID
+                {
+                    let mut connections = self.connections.lock();
+                    connections.remove(&node_id);
+                    connections.insert(peer_info.id.clone(), stream_mutex);
+                }
+                
+                // Add to peers
+                self.peers.lock().insert(peer_info.id.clone(), peer_info.clone());
+                
+                Ok(peer_info)
+            },
+            _ => {
+                Err(ClusterError::DeserializationError("Expected handshake response".to_string()))
+            }
+        }
+    }
+    
+    /// Clone this transport instance
+    pub fn clone(&self) -> Self {
         P2PTransport {
             local_node: self.local_node.clone(),
             peers: self.peers.clone(),
-            serializer,
-            msg_rx: None, // Don't clone the receiver
-            msg_tx: self.msg_tx.clone(),
+            connections: self.connections.clone(),
+            serializer: self.serializer.clone_box(),
+            listener: self.listener.clone(),
             message_handler: self.message_handler.clone(),
-            pending_acks: self.pending_acks.clone(),
+            msg_tx: self.msg_tx.clone(),
+            msg_rx: None,  // 不克隆接收器
+            started: self.started,
+            pending_acks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -366,6 +951,9 @@ impl Handler<TransportMessage> for MessageEnvelopeHandler {
             TransportMessage::ActorDiscoveryResponse(path, locations) => {
                 debug!("Received actor discovery response for {}", path);
             },
+            TransportMessage::Handshake(node_info) => {
+                debug!("Received handshake from node {}", node_info.id);
+            },
         }
     }
 }
@@ -379,24 +967,15 @@ impl actix::Message for TransportMessage {
     type Result = ();
 }
 
-/// Remote actor reference
+/// A reference to a remote actor
+#[derive(Clone)]
 pub struct RemoteActorRef {
     /// Path to the actor
-    pub actor_path: ActorPath,
+    actor_path: ActorPath,
     /// Transport for sending messages
     transport: Arc<tokio::sync::Mutex<P2PTransport>>,
-    /// Default delivery guarantee
+    /// Delivery guarantee
     delivery_guarantee: DeliveryGuarantee,
-}
-
-impl Clone for RemoteActorRef {
-    fn clone(&self) -> Self {
-        Self {
-            actor_path: self.actor_path.clone(),
-            transport: self.transport.clone(),
-            delivery_guarantee: self.delivery_guarantee,
-        }
-    }
 }
 
 impl RemoteActorRef {
@@ -418,7 +997,7 @@ impl RemoteActorRef {
         // Get locked transport to serialize and send the message
         let mut transport = self.transport.lock().await;
         
-        // Use the updated serialization approach
+        // Serialize the message according to the serialization format of transport
         let payload = match &*transport.serializer {
             s if s.type_id() == std::any::TypeId::of::<crate::serialization::BincodeSerializer>() => {
                 let serializer = crate::serialization::BincodeSerializer::new();
@@ -449,12 +1028,29 @@ impl RemoteActorRef {
     
     /// Send a pre-created message envelope
     pub async fn send_envelope(&self, envelope: MessageEnvelope) -> ClusterResult<()> {
-        // 获取transport的锁
+        // Get locked transport and send the envelope
         let mut transport = self.transport.lock().await;
         transport.send_envelope(envelope).await
     }
+    
+    /// Get the actor path
+    pub fn path(&self) -> &ActorPath {
+        &self.actor_path
+    }
+    
+    /// Get the delivery guarantee
+    pub fn delivery_guarantee(&self) -> DeliveryGuarantee {
+        self.delivery_guarantee
+    }
+    
+    /// Set the delivery guarantee
+    pub fn with_delivery_guarantee(mut self, guarantee: DeliveryGuarantee) -> Self {
+        self.delivery_guarantee = guarantee;
+        self
+    }
 }
 
+// 为RemoteActorRef实现ActorRef trait
 impl crate::registry::ActorRef for RemoteActorRef {
     fn send_any(&self, msg: Box<dyn std::any::Any + Send>) -> ClusterResult<()> {
         // Use tokio runtime to run the async task
@@ -477,6 +1073,203 @@ impl crate::registry::ActorRef for RemoteActorRef {
     fn clone_box(&self) -> Box<dyn crate::registry::ActorRef> {
         Box::new(self.clone())
     }
+}
+
+/// Handle a new connection
+async fn handle_incoming(
+    stream: TcpStream,
+    peer_addr: SocketAddr,
+    local_node_info: NodeInfo,
+    serializer: Box<dyn SerializerTrait>,
+    message_handler: Option<Arc<Mutex<dyn MessageHandler>>>,
+    peers: Arc<Mutex<HashMap<NodeId, NodeInfo>>>,
+    connections: Arc<Mutex<HashMap<NodeId, Arc<TokioMutex<TcpStream>>>>>,
+) -> ClusterResult<()> {
+    debug!("Handling incoming connection from {}", peer_addr);
+    
+    let stream_mutex = Arc::new(TokioMutex::new(stream));
+    let mut buffer = [0u8; 4]; // For the message length
+    let mut peer_node_id = None;
+    
+    // 持续读取消息
+    loop {
+        // 读取消息长度
+        let read_result = {
+            let mut stream = stream_mutex.lock().await;
+            stream.read_exact(&mut buffer).await
+        };
+        
+        match read_result {
+            Ok(_) => {},
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                debug!("Connection closed by peer");
+                break;
+            }
+            Err(e) => return Err(ClusterError::NetworkError(format!("Failed to read message length: {}", e))),
+        }
+        
+        let msg_len = u32::from_be_bytes(buffer) as usize;
+        
+        // 读取消息内容
+        let mut msg_buffer = vec![0u8; msg_len];
+        let read_result = {
+            let mut stream = stream_mutex.lock().await;
+            stream.read_exact(&mut msg_buffer).await
+        };
+        
+        match read_result {
+            Ok(_) => {},
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                debug!("Connection closed by peer");
+                break;
+            }
+            Err(e) => return Err(ClusterError::NetworkError(format!("Failed to read message: {}", e))),
+        }
+        
+        // 反序列化消息
+        let serializer_type_id = serializer.type_id();
+        let message: TransportMessage = if serializer_type_id == std::any::TypeId::of::<crate::serialization::BincodeSerializer>() {
+            let concrete_serializer = crate::serialization::BincodeSerializer::new();
+            match concrete_serializer.deserialize(&msg_buffer) {
+                Ok(msg) => msg,
+                Err(e) => {
+                    error!("Failed to deserialize message: {}", e);
+                    continue;
+                }
+            }
+        } else if serializer_type_id == std::any::TypeId::of::<crate::serialization::JsonSerializer>() {
+            let concrete_serializer = crate::serialization::JsonSerializer::new();
+            match concrete_serializer.deserialize(&msg_buffer) {
+                Ok(msg) => msg,
+                Err(e) => {
+                    error!("Failed to deserialize message: {}", e);
+                    continue;
+                }
+            }
+        } else {
+            match serializer.deserialize_any(&msg_buffer) {
+                Ok(boxed) if boxed.type_id() == std::any::TypeId::of::<TransportMessage>() => {
+                    match boxed.downcast::<TransportMessage>() {
+                        Ok(boxed_msg) => *boxed_msg,
+                        Err(_) => {
+                            error!("Failed to downcast message");
+                            continue;
+                        }
+                    }
+                },
+                Ok(_) => {
+                    error!("Unknown message type");
+                    continue;
+                },
+                Err(e) => {
+                    error!("Failed to deserialize message: {:?}", e);
+                    continue;
+                }
+            }
+        };
+        
+        debug!("Received message: {:?}", message);
+        
+        // 处理消息
+        match message {
+            TransportMessage::Handshake(node_info) => {
+                debug!("Received handshake from node {}", node_info.id);
+                
+                // 存储节点信息
+                peers.lock().insert(node_info.id.clone(), node_info.clone());
+                
+                // 存储连接
+                peer_node_id = Some(node_info.id.clone());
+                connections.lock().insert(node_info.id.clone(), stream_mutex.clone());
+                
+                // 发送我们的握手响应
+                let handshake = TransportMessage::Handshake(local_node_info.clone());
+                
+                // 序列化握手消息
+                let serialized = if serializer_type_id == std::any::TypeId::of::<crate::serialization::BincodeSerializer>() {
+                    let concrete_serializer = crate::serialization::BincodeSerializer::new();
+                    match concrete_serializer.serialize(&handshake) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            error!("Failed to serialize handshake: {}", e);
+                            continue;
+                        }
+                    }
+                } else if serializer_type_id == std::any::TypeId::of::<crate::serialization::JsonSerializer>() {
+                    let concrete_serializer = crate::serialization::JsonSerializer::new();
+                    match concrete_serializer.serialize(&handshake) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            error!("Failed to serialize handshake: {}", e);
+                            continue;
+                        }
+                    }
+                } else {
+                    match serializer.serialize_any(&handshake as &dyn std::any::Any) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            error!("Failed to serialize handshake: {:?}", e);
+                            continue;
+                        }
+                    }
+                };
+                
+                // 发送握手响应
+                let len = serialized.len() as u32;
+                let len_bytes = len.to_be_bytes();
+                
+                let write_result = {
+                    let mut stream = stream_mutex.lock().await;
+                    // 使用and_then将结果链接起来
+                    let len_result = stream.write_all(&len_bytes).await;
+                    match len_result {
+                        Ok(_) => stream.write_all(&serialized).await,
+                        Err(e) => Err(e),
+                    }
+                };
+                
+                if let Err(e) = write_result {
+                    error!("Failed to write handshake: {}", e);
+                    break;
+                }
+                
+                debug!("Sent handshake response to node {}", node_info.id);
+            },
+            other_message => {
+                // 对于其他消息类型，传递给消息处理器
+                if let Some(node_id) = &peer_node_id {
+                    if let Some(handler) = &message_handler {
+                        // 创建消息和发送者ID的克隆
+                        let node_id_clone = node_id.clone();
+                        let message_clone = other_message.clone();
+                        
+                        // 使用单独的任务处理消息，避免阻塞网络读取
+                        let handler_clone = handler.clone();
+                        tokio::spawn(async move {
+                            // 在任务中获取锁
+                            let mut handler_guard = handler_clone.lock();
+                            // 处理消息
+                            if let Err(e) = handler_guard.handle_message(node_id_clone, message_clone).await {
+                                error!("Error handling message: {:?}", e);
+                            }
+                        });
+                    } else {
+                        debug!("No message handler registered, ignoring message");
+                    }
+                } else {
+                    debug!("Received message from unknown peer, ignoring");
+                }
+            }
+        }
+    }
+    
+    // 连接关闭后清理
+    if let Some(node_id) = peer_node_id {
+        connections.lock().remove(&node_id);
+        debug!("Removed connection for node {}", node_id);
+    }
+    
+    Ok(())
 }
 
 #[cfg(test)]

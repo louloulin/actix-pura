@@ -205,21 +205,23 @@ impl ServiceDiscovery for LibP2PDiscovery {
             ));
         }
         
-        // Initialize P2P transport
+        // 获取本地节点信息（避免在后面使用self.local_node，因为它会锁住self）
         let local_node = self.local_node.as_ref().unwrap().clone();
+        
+        // 初始化P2P transport
         let mut transport = crate::transport::P2PTransport::new(
             local_node.clone(),
-            crate::serialization::SerializationFormat::Bincode, // Use bincode for efficiency
+            crate::serialization::SerializationFormat::Bincode, // 使用bincode提高效率
         )?;
         
-        // Initialize the transport
+        // 添加本地节点到已知节点
+        self.nodes.insert(local_node.id.clone(), local_node.clone());
+        
+        // 初始化transport
         transport.init().await?;
         
-        // Store the transport
+        // 存储transport - 在await后存储，避免锁的问题
         self.transport = Some(Arc::new(Mutex::new(transport)));
-        
-        // Add local node to known nodes
-        self.nodes.insert(local_node.id.clone(), local_node);
         
         Ok(())
     }
@@ -244,20 +246,51 @@ impl ServiceDiscovery for LibP2PDiscovery {
     }
     
     async fn discover_nodes(&mut self) -> ClusterResult<Vec<NodeInfo>> {
-        if let Some(transport) = &self.transport {
-            // Get peers from transport
-            let peers = transport.lock().unwrap().get_peers();
+        let mut new_nodes = Vec::new();
+        
+        if let Some(transport_arc) = &self.transport {
+            // 获取transport引用但不持有锁
+            let transport;
+            {
+                let transport_guard = transport_arc.lock().unwrap();
+                transport = transport_guard.clone();
+            }
             
-            // Merge with already known nodes
-            for peer in peers {
-                self.nodes.insert(peer.id.clone(), peer);
+            // 使用bootstrap节点进行发现
+            for bootstrap_addr in &self.bootstrap_nodes {
+                if let Ok(addr) = bootstrap_addr.parse::<SocketAddr>() {
+                    // 创建一个临时节点ID
+                    let node_id = NodeId::new();
+                    
+                    // 检查是否已经知道这个节点
+                    let known_node = self.nodes.values().any(|n| n.addr == addr);
+                    
+                    if !known_node {
+                        // 尝试连接到bootstrap节点
+                        match transport.connect(addr).await {
+                            Ok(connected_node) => {
+                                // 添加到已知节点
+                                self.nodes.insert(connected_node.id.clone(), connected_node.clone());
+                                new_nodes.push(connected_node);
+                            }
+                            Err(e) => {
+                                log::warn!("Failed to connect to bootstrap node {}: {}", addr, e);
+                            }
+                        }
+                    }
+                } else {
+                    log::warn!("Invalid bootstrap node address: {}", bootstrap_addr);
+                }
+            }
+            
+            // 如果启用了mDNS，执行本地发现
+            if self.enable_mdns {
+                // 执行mDNS发现逻辑（未实现）
+                log::info!("mDNS discovery is enabled but not implemented yet");
             }
         }
         
-        // Return all known nodes
-        let nodes: Vec<NodeInfo> = self.nodes.values().cloned().collect();
-        
-        Ok(nodes)
+        Ok(new_nodes)
     }
     
     async fn update_node_status(&mut self, node_id: &NodeId, status: NodeStatus) -> ClusterResult<()> {
