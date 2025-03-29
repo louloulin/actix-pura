@@ -39,4 +39,12 @@ path = "examples/validate_cluster.rs"
 
 [[example]]
 name = "simple_validate"
-path = "examples/simple_validate.rs" 
+path = "examples/simple_validate.rs"
+
+[[example]]
+name = "cluster_benchmark"
+path = "examples/cluster_benchmark.rs"
+
+[[example]]
+name = "distributed_benchmark"
+path = "examples/distributed_benchmark.rs" 
