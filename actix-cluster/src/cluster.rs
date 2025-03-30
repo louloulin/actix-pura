@@ -7,14 +7,16 @@ use actix::prelude::*;
 use actix::dev::ToEnvelope;
 use tokio::sync::{RwLock, Mutex};
 use log::{debug, error, info, warn};
+use serde::{Deserialize, Serialize};
 
 use crate::config::ClusterConfig;
 use crate::discovery::ServiceDiscovery;
 use crate::node::{Node, NodeId, NodeInfo, NodeStatus};
 use crate::error::{ClusterError, ClusterResult};
 use crate::message::{ActorPath, MessageEnvelope, MessageType, DeliveryGuarantee, AnyMessage};
-use crate::registry::{ActorRegistry, RegistryActor, RegisterLocal, RegisterRemote, Lookup};
-use crate::transport::{RemoteActorRef, TransportMessage};
+use crate::registry::{ActorRegistry, RegistryActor, RegisterLocal, RegisterRemote, Lookup, DiscoverActor};
+use crate::transport::{RemoteActorRef, TransportMessage, P2PTransport};
+use crate::config::NodeRole;
 
 // 导入特质
 use crate::registry::{ActorRef, LocalActorRef};
@@ -90,51 +92,79 @@ impl ClusterSystem {
     
     /// Start the cluster system
     pub async fn start(&mut self) -> ClusterResult<Addr<ClusterSystemActor>> {
-        // Initialize transport for decentralized architecture
-        if self.config.architecture == Architecture::Decentralized {
-            // Create and initialize P2P transport
-            let mut transport = crate::transport::P2PTransport::new(
-                self.local_node.clone(),
-                self.config.serialization_format,
-            )?;
-            
-            transport.init().await?;
-            
-            self.transport = Some(Arc::new(Mutex::new(transport)));
+        info!("Starting cluster system...");
+        debug!("Local node: {:?}", self.local_node);
+        debug!("Config: {:?}", self.config);
+        
+        // 创建传输层
+        let transport = match self.config.architecture {
+            Architecture::Decentralized => {
+                // 对于去中心化架构，使用P2P传输
+                info!("Creating P2P transport for decentralized architecture");
+                let transport = P2PTransport::new(
+                    self.local_node.clone(),
+                    self.config.serialization_format,
+                )?;
+                Some(Arc::new(Mutex::new(transport)))
+            },
+            Architecture::Centralized => {
+                if self.local_node.role == NodeRole::Peer {
+                    // 对于中心化架构中的对等节点，也使用P2P传输
+                    info!("Creating P2P transport for centralized architecture (peer node)");
+                    let transport = P2PTransport::new(
+                        self.local_node.clone(),
+                        self.config.serialization_format,
+                    )?;
+                    Some(Arc::new(Mutex::new(transport)))
+                } else {
+                    // 对于中心化架构中的主节点，目前不需要传输层
+                    info!("No transport needed for centralized master node");
+                    None
+                }
+            }
+        };
+        
+        self.transport = transport.clone();
+        
+        // 创建注册表Actor
+        let registry_actor = RegistryActor::new(self.registry.clone()).start();
+        self.registry_actor = Some(registry_actor);
+        
+        // 创建一个新的registry对象，避免借用Arc
+        let mut registry = ActorRegistry::new(self.local_node.id.clone());
+        
+        if let Some(transport) = &transport {
+            registry.set_transport(transport.clone());
         }
         
-        // Initialize the discovery service
-        {
-            let mut discovery = self.discovery.lock().await;
-            discovery.register_node(&self.local_node).await?;
-            discovery.init().await?;
+        // 更新registry
+        self.registry = Arc::new(registry);
+        
+        // 如果有传输层，设置registry adapter
+        if let Some(transport) = &transport {
+            let mut transport_lock = transport.lock().await;
+            transport_lock.set_registry_adapter(self.registry.clone());
+            
+            // 启动传输层
+            if !transport_lock.is_started() {
+                transport_lock.start().await?;
+            }
         }
         
-        // Create and start the system actor
+        // 创建系统Actor
         let system_actor = ClusterSystemActor::new(
             self.config.clone(),
             self.local_node.clone(),
             self.nodes.clone(),
             self.discovery.clone(),
             self.transport.clone(),
-        ).start();
+        );
         
-        self.system_actor = Some(system_actor.clone());
+        // 启动系统Actor
+        let addr = system_actor.start();
+        self.system_actor = Some(addr.clone());
         
-        // 启动注册表Actor
-        let registry_actor = RegistryActor::new(self.registry.clone()).start();
-        self.registry_actor = Some(registry_actor);
-        
-        // 设置传输到注册表
-        if let Some(transport) = &self.transport {
-            // 创建一个新的registry对象，避免借用Arc
-            let mut registry = ActorRegistry::new(self.local_node.id.clone());
-            registry.set_transport(transport.clone());
-            // 重新分配为Arc
-            self.registry = Arc::new(registry);
-        }
-        
-        Ok(system_actor)
+        Ok(addr)
     }
     
     /// Get the local node information
@@ -217,6 +247,23 @@ impl ClusterSystem {
             remote_ref.send(message).await
         } else {
             Err(ClusterError::TransportNotInitialized)
+        }
+    }
+
+    /// 发现并获取远程Actor
+    pub async fn discover_actor(&self, path: &str) -> Option<Box<dyn ActorRef>> {
+        if self.registry_actor.is_none() {
+            return None;
+        }
+        
+        match self.registry_actor.as_ref().unwrap().send(DiscoverActor { 
+            path: path.to_string() 
+        }).await {
+            Ok(actor_ref) => actor_ref,
+            Err(e) => {
+                error!("Failed to discover actor: {}", e);
+                None
+            }
         }
     }
 }

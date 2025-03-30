@@ -5,12 +5,14 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use actix::prelude::*;
 use actix::dev::ToEnvelope;
 use log::{debug, error, info};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use tokio::sync::oneshot;
 
 use crate::error::{ClusterError, ClusterResult};
 use crate::message::{ActorPath, DeliveryGuarantee, MessageEnvelope, AnyMessage};
@@ -107,6 +109,8 @@ pub struct ActorRegistry {
     remote_actors: RwLock<HashMap<ActorPath, NodeId>>,
     /// Transport for sending messages to remote actors
     transport: Option<Arc<TransportAdapter>>,
+    /// Map of pending actor discovery requests, keyed by path
+    pending_discoveries: RwLock<HashMap<String, Vec<oneshot::Sender<Option<Box<dyn ActorRef>>>>>>,
 }
 
 impl ActorRegistry {
@@ -117,6 +121,7 @@ impl ActorRegistry {
             local_actors: RwLock::new(HashMap::new()),
             remote_actors: RwLock::new(HashMap::new()),
             transport: None,
+            pending_discoveries: RwLock::new(HashMap::new()),
         }
     }
     
@@ -202,6 +207,142 @@ impl ActorRegistry {
     pub fn get_remote_actors(&self) -> Vec<ActorPath> {
         let actors = self.remote_actors.read();
         actors.keys().cloned().collect()
+    }
+
+    /// Discover an actor in the cluster
+    pub async fn discover_actor(&self, path: &str) -> Option<Box<dyn ActorRef>> {
+        // First check local registry
+        if let Some(actor_ref) = self.lookup(path) {
+            return Some(actor_ref);
+        }
+
+        // If we have no transport, we can't discover actors remotely
+        if self.transport.is_none() {
+            return None;
+        }
+
+        let transport = self.transport.as_ref().unwrap();
+        let (sender, receiver) = oneshot::channel();
+
+        // Register the pending discovery request
+        {
+            let mut pending = self.pending_discoveries.write();
+            pending.entry(path.to_string())
+                .or_insert_with(Vec::new)
+                .push(sender);
+        }
+
+        // Send actor discovery request to all known nodes
+        let discovery_message = TransportMessage::ActorDiscoveryRequest(
+            self.local_node_id.clone(), 
+            path.to_string()
+        );
+
+        // Get a list of all known nodes from the transport
+        let mut transport_lock = transport.transport.lock().await;
+        let nodes = transport_lock.get_peer_list();
+
+        // Send discovery request to all nodes
+        for node_id in nodes {
+            // Skip local node
+            if node_id == self.local_node_id {
+                continue;
+            }
+
+            // Send discovery request to the remote node
+            if let Err(e) = transport_lock.send_message(&node_id, discovery_message.clone()).await {
+                error!("Failed to send actor discovery request to node {}: {}", node_id, e);
+            }
+        }
+        
+        // Wait for a response with timeout
+        match tokio::time::timeout(Duration::from_secs(5), receiver).await {
+            Ok(Ok(actor_ref)) => actor_ref,
+            Ok(Err(_)) => {
+                error!("Actor discovery channel was closed");
+                None
+            },
+            Err(_) => {
+                // Timeout - clean up pending request
+                let mut pending = self.pending_discoveries.write();
+                if let Some(senders) = pending.get_mut(path) {
+                    senders.retain(|s| !s.is_closed());
+                    if senders.is_empty() {
+                        pending.remove(path);
+                    }
+                }
+                error!("Actor discovery timed out for path: {}", path);
+                None
+            }
+        }
+    }
+
+    /// Handle an actor discovery request from another node
+    pub async fn handle_discovery_request(&self, sender_id: NodeId, path: String) -> ClusterResult<()> {
+        debug!("Handling actor discovery request from {} for {}", sender_id, path);
+
+        // Check if we have the actor locally
+        let actor_found = {
+            let local_actors = self.local_actors.read();
+            local_actors.contains_key(&path)
+        };
+
+        // If we have the transport and the actor, respond with the location
+        if actor_found {
+            if let Some(transport) = &self.transport {
+                // Send actor discovery response
+                let response = TransportMessage::ActorDiscoveryResponse(
+                    path,
+                    vec![self.local_node_id.clone()]
+                );
+
+                let mut transport_lock = transport.transport.lock().await;
+                transport_lock.send_message(&sender_id, response).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle an actor discovery response from another node
+    pub fn handle_discovery_response(&self, path: String, locations: Vec<NodeId>) {
+        debug!("Received actor discovery response for {} with locations: {:?}", path, locations);
+
+        // If we have no pending discovery requests for this path, ignore
+        let mut pending = self.pending_discoveries.write();
+        let senders = match pending.remove(&path) {
+            Some(s) => s,
+            None => return,
+        };
+
+        // If we have a transport, create a remote actor reference
+        if let Some(transport) = &self.transport {
+            // Use the first location
+            if let Some(node_id) = locations.first() {
+                // Create a RemoteActorRef
+                let actor_path = ActorPath::new(node_id.clone(), path.clone());
+                let remote_ref = RemoteActorRef::new(
+                    actor_path.clone(),
+                    transport.transport.clone(),
+                    DeliveryGuarantee::AtLeastOnce,
+                );
+
+                // Register the remote actor
+                let mut remote_actors = self.remote_actors.write();
+                remote_actors.insert(actor_path, node_id.clone());
+
+                // Notify all pending discovery requests
+                for sender in senders {
+                    let _ = sender.send(Some(Box::new(remote_ref.clone()) as Box<dyn ActorRef>));
+                }
+                return;
+            }
+        }
+
+        // If we couldn't create a remote reference, notify failure
+        for sender in senders {
+            let _ = sender.send(None);
+        }
     }
 }
 
@@ -289,6 +430,29 @@ impl Handler<Lookup> for RegistryActor {
         } else {
             MessageResult(None)
         }
+    }
+}
+
+/// Message to discover an actor
+#[derive(Message)]
+#[rtype(result = "Option<Box<dyn ActorRef>>")]
+pub struct DiscoverActor {
+    /// Path to discover
+    pub path: String,
+}
+
+impl Handler<DiscoverActor> for RegistryActor {
+    type Result = ResponseFuture<Option<Box<dyn ActorRef>>>;
+    
+    fn handle(&mut self, msg: DiscoverActor, _ctx: &mut Self::Context) -> Self::Result {
+        let registry = match &self.registry {
+            Some(r) => r.clone(),
+            None => return Box::pin(async { None }),
+        };
+        
+        Box::pin(async move {
+            registry.discover_actor(&msg.path).await
+        })
     }
 }
 

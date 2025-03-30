@@ -8,6 +8,7 @@ use std::any::Any;
 use std::net::SocketAddr;
 use std::io;
 use std::any::TypeId;
+use std::marker::PhantomData;
 
 use actix::prelude::*;
 use parking_lot::Mutex;
@@ -23,6 +24,10 @@ use crate::node::{NodeId, NodeInfo, NodeStatus};
 use crate::config::NodeRole;
 use crate::serialization::{SerializationFormat, SerializerTrait, BincodeSerializer, JsonSerializer};
 use crate::message::{MessageEnvelope, MessageType, DeliveryGuarantee, ActorPath};
+use crate::registry::ActorRegistry;
+
+// Define MessageId type for message acknowledgements
+type MessageId = uuid::Uuid;
 
 /// Timeout for connection attempts
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -38,12 +43,16 @@ pub enum TransportMessage {
     Heartbeat(NodeInfo),
     /// Status update for a node
     StatusUpdate(NodeId, String),
-    /// Actor discovery request
-    ActorDiscovery(String),
-    /// Actor discovery response
-    ActorDiscoveryResponse(String, Vec<ActorPath>),
+    /// Ack message
+    Ack(MessageId),
+    /// Connection close notification
+    Close,
     /// Node handshake (initial connection)
     Handshake(NodeInfo),
+    /// Request the location of an actor
+    ActorDiscoveryRequest(NodeId, String),
+    /// Response with the locations of an actor
+    ActorDiscoveryResponse(String, Vec<NodeId>),
 }
 
 /// A message that is waiting for acknowledgement
@@ -90,6 +99,9 @@ pub struct P2PTransport {
     
     /// Flag indicating if transport is started
     started: bool,
+    
+    /// Registry adapter for actor discovery
+    registry_adapter: Option<Arc<ActorRegistry>>,
 }
 
 /// Actor for handling transport messages
@@ -189,6 +201,7 @@ impl P2PTransport {
             connections: Arc::new(Mutex::new(HashMap::new())),
             listener: None,
             started: false,
+            registry_adapter: None,
         };
         
         Ok(transport)
@@ -298,17 +311,6 @@ impl P2PTransport {
                 debug!("Received status update for node {}: {}", node_id, status);
                 Ok(())
             },
-            TransportMessage::ActorDiscovery(path) => {
-                // Handle actor discovery request
-                debug!("Received actor discovery request for {}", path);
-                Ok(())
-            },
-            TransportMessage::ActorDiscoveryResponse(path, locations) => {
-                // Handle actor discovery response
-                debug!("Received actor discovery response for {}, found in {} locations", 
-                       path, locations.len());
-                Ok(())
-            },
             TransportMessage::Envelope(envelope) => {
                 debug!("Received message envelope: {:?}", envelope);
                 
@@ -379,6 +381,36 @@ impl P2PTransport {
                 
                 Ok(())
             },
+            TransportMessage::ActorDiscoveryRequest(sender_id, path) => {
+                debug!("Received actor discovery request from {} for {}", sender_id, path);
+                
+                // Get the registry adapter if available
+                if let Some(registry_adapter) = &self.registry_adapter {
+                    // Clone the values for the async block
+                    let registry = registry_adapter.clone();
+                    let sender_id = sender_id.clone();
+                    let path = path.clone();
+                    
+                    // Spawn a task to handle the request
+                    tokio::spawn(async move {
+                        if let Err(e) = registry.handle_discovery_request(sender_id, path).await {
+                            error!("Error handling actor discovery request: {:?}", e);
+                        }
+                    });
+                }
+                Ok(())
+            },
+            TransportMessage::ActorDiscoveryResponse(path, locations) => {
+                debug!("Received actor discovery response for {} with locations: {:?}", path, locations);
+                
+                // Get the registry adapter if available
+                if let Some(registry_adapter) = &self.registry_adapter {
+                    // Handle the response
+                    registry_adapter.handle_discovery_response(path, locations);
+                }
+                Ok(())
+            },
+            _ => Ok(()),
         }
     }
     
@@ -898,6 +930,7 @@ impl P2PTransport {
             msg_rx: None,  // 不克隆接收器
             started: self.started,
             pending_acks: Arc::new(Mutex::new(HashMap::new())),
+            registry_adapter: self.registry_adapter.clone(),
         }
     }
 
@@ -935,6 +968,21 @@ impl P2PTransport {
     /// Get a clone of the peers map lock for testing
     pub fn get_peers_lock(&self) -> Arc<Mutex<HashMap<NodeId, NodeInfo>>> {
         self.peers.clone()
+    }
+
+    /// Add a registry adapter
+    pub fn set_registry_adapter(&mut self, registry: Arc<ActorRegistry>) {
+        self.registry_adapter = Some(registry);
+    }
+
+    /// Get a list of all known peer node IDs
+    pub fn get_peer_list(&self) -> Vec<NodeId> {
+        self.peers.lock().iter().map(|(node_id, _)| node_id.clone()).collect()
+    }
+
+    /// Check if the transport is started
+    pub fn is_started(&self) -> bool {
+        self.started
     }
 }
 
@@ -983,14 +1031,20 @@ impl Handler<TransportMessage> for MessageEnvelopeHandler {
             TransportMessage::StatusUpdate(node_id, status) => {
                 debug!("Received status update for node {}: {}", node_id, status);
             },
-            TransportMessage::ActorDiscovery(path) => {
-                debug!("Received actor discovery request for {}", path);
+            TransportMessage::ActorDiscoveryRequest(node_id, path) => {
+                debug!("Received actor discovery request from {} for {}", node_id, path);
             },
             TransportMessage::ActorDiscoveryResponse(path, locations) => {
-                debug!("Received actor discovery response for {}", path);
+                debug!("Received actor discovery response for {} with locations: {:?}", path, locations);
             },
             TransportMessage::Handshake(node_info) => {
                 debug!("Received handshake from node {}", node_info.id);
+            },
+            TransportMessage::Ack(msg_id) => {
+                debug!("Received ack for message {}", msg_id.to_string());
+            },
+            TransportMessage::Close => {
+                debug!("Received close message");
             },
         }
     }
