@@ -14,9 +14,11 @@ use crate::error::ClusterResult;
 
 mod envelope;
 mod delivery;
+mod handler;
 
 pub use envelope::MessageEnvelope;
 pub use delivery::*;
+pub use handler::MessageEnvelopeHandler;
 
 /// 表示消息的传递保证级别
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

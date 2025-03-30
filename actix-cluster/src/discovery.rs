@@ -4,7 +4,8 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use std::collections::{HashMap, HashSet};
 use async_trait::async_trait;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use crate::error::{ClusterError, ClusterResult};
 use crate::node::{NodeId, NodeInfo, NodeStatus};
@@ -248,31 +249,32 @@ impl ServiceDiscovery for LibP2PDiscovery {
     async fn discover_nodes(&mut self) -> ClusterResult<Vec<NodeInfo>> {
         let mut new_nodes = Vec::new();
         
-        if let Some(transport_arc) = &self.transport {
-            // 获取transport引用但不持有锁
-            let transport;
-            {
-                let transport_guard = transport_arc.lock().unwrap();
-                transport = transport_guard.clone();
-            }
+        // 返回本地节点和已知节点
+        let _known_nodes: Vec<NodeInfo> = self.nodes.values().cloned().collect();
+        
+        // 如果有传输层并且有bootstrap节点，尝试连接到它们
+        if self.transport.is_some() && !self.bootstrap_nodes.is_empty() {
+            let transport_ref = self.transport.as_ref().unwrap();
             
-            // 使用bootstrap节点进行发现
             for bootstrap_addr in &self.bootstrap_nodes {
                 if let Ok(addr) = bootstrap_addr.parse::<SocketAddr>() {
-                    // 创建一个临时节点ID
-                    let node_id = NodeId::new();
-                    
                     // 检查是否已经知道这个节点
                     let known_node = self.nodes.values().any(|n| n.addr == addr);
                     
                     if !known_node {
+                        // 获取transport的可变引用
+                        let mut transport = transport_ref.lock().await;
+                        
                         // 尝试连接到bootstrap节点
-                        match transport.connect(addr).await {
-                            Ok(connected_node) => {
+                        match transport.connect_to_peer(addr).await {
+                            Ok(_) => {
                                 // 添加到已知节点
-                                self.nodes.insert(connected_node.id.clone(), connected_node.clone());
-                                new_nodes.push(connected_node);
-                            }
+                                let peers = transport.get_peers();
+                                if let Some(connected_node) = peers.iter().find(|n| n.addr == addr) {
+                                    self.nodes.insert(connected_node.id.clone(), connected_node.clone());
+                                    new_nodes.push(connected_node.clone());
+                                }
+                            },
                             Err(e) => {
                                 log::warn!("Failed to connect to bootstrap node {}: {}", addr, e);
                             }

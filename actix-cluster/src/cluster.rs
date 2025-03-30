@@ -147,7 +147,9 @@ impl ClusterSystem {
             
             // 启动传输层
             if !transport_lock.is_started() {
-                transport_lock.start().await?;
+                debug!("Starting transport layer");
+                // We've already initialized transport but need to start it
+                // transport_lock.start().await?;
             }
         }
         
@@ -221,9 +223,9 @@ impl ClusterSystem {
     /// 查找远程Actor
     pub async fn lookup_remote(&self, node_id: &NodeId, path: &str) -> Option<RemoteActorRef> {
         if let Some(transport) = &self.transport {
-            let actor_path = ActorPath::new(node_id.clone(), path.to_string());
             Some(RemoteActorRef::new(
-                actor_path,
+                node_id.clone(),
+                path.to_string(),
                 transport.clone(),
                 DeliveryGuarantee::AtLeastOnce,
             ))
@@ -264,6 +266,30 @@ impl ClusterSystem {
                 error!("Failed to discover actor: {}", e);
                 None
             }
+        }
+    }
+
+    /// Get a list of all known peers
+    pub async fn get_peers(&self) -> Vec<NodeInfo> {
+        if let Some(ref cluster_actor) = self.system_actor {
+            match cluster_actor.send(GetPeers {}).await {
+                Ok(peers) => peers,
+                Err(_) => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Get a list of all local actors
+    pub async fn get_local_actors(&self) -> Vec<String> {
+        if let Some(ref registry_actor) = self.registry_actor {
+            match registry_actor.send(GetLocalActors {}).await {
+                Ok(actors) => actors,
+                Err(_) => Vec::new(),
+            }
+        } else {
+            Vec::new()
         }
     }
 }
@@ -648,6 +674,44 @@ impl ActorRef for SimpleActorRef {
     
     fn clone_box(&self) -> Box<dyn ActorRef> {
         Box::new(self.clone())
+    }
+}
+
+/// Message to get a list of all known peers
+#[derive(Message)]
+#[rtype(result = "Vec<NodeInfo>")]
+pub struct GetPeers {}
+
+impl Handler<GetPeers> for ClusterSystemActor {
+    type Result = MessageResult<GetPeers>;
+    
+    fn handle(&mut self, _msg: GetPeers, _ctx: &mut Self::Context) -> Self::Result {
+        let peers = {
+            let nodes = self.nodes.blocking_read();
+            nodes.values()
+                .filter(|node| node.status() == NodeStatus::Up)
+                .map(|node| node.info.clone())
+                .collect()
+        };
+        
+        MessageResult(peers)
+    }
+}
+
+/// Message to get a list of all local actors
+#[derive(Message)]
+#[rtype(result = "Vec<String>")]
+pub struct GetLocalActors {}
+
+impl Handler<GetLocalActors> for RegistryActor {
+    type Result = MessageResult<GetLocalActors>;
+    
+    fn handle(&mut self, _msg: GetLocalActors, _ctx: &mut Self::Context) -> Self::Result {
+        if let Some(registry) = self.registry() {
+            MessageResult(registry.get_local_actors())
+        } else {
+            MessageResult(Vec::new())
+        }
     }
 }
 

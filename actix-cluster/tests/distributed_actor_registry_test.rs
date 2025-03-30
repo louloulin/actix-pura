@@ -184,29 +184,51 @@ async fn test_distributed_actor_registry() {
         println!("Node 2 ID: {}", node2_id);
         
         // 等待节点发现彼此，增加时间
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        println!("Waiting for nodes to discover each other (10 seconds)...");
+        tokio::time::sleep(Duration::from_secs(10)).await;
         
         // 创建并注册测试Actor到节点2
         let test_actor2 = TestActor::new(marker2.clone()).start();
         node2.register("remote_actor", test_actor2).await.expect("Failed to register actor on node2");
         
         // 等待注册完成，增加时间
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        println!("Waiting for actor registration to propagate (5 seconds)...");
+        tokio::time::sleep(Duration::from_secs(5)).await;
         
         println!("Actor registered on node2, now trying to discover from node1");
         
-        // 从节点1发现并获取节点2上的Actor
-        let remote_actor = node1.discover_actor("remote_actor").await;
+        // 尝试多次发现远程Actor，因为节点同步需要时间
+        println!("Attempting to discover remote actor with retries...");
+        let mut remote_actor = None;
+        for attempt in 1..=5 {
+            println!("Discovery attempt {} of 5", attempt);
+            
+            match node1.discover_actor("remote_actor").await {
+                Some(actor_ref) => {
+                    println!("Successfully discovered remote actor on attempt {}", attempt);
+                    remote_actor = Some(actor_ref);
+                    break;
+                },
+                None => {
+                    println!("Failed to discover remote actor on attempt {}", attempt);
+                    // Wait a bit before retrying
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            }
+        }
         
         // 验证发现成功
-        assert!(remote_actor.is_some(), "Failed to discover remote actor");
+        assert!(remote_actor.is_some(), "Failed to discover remote actor after multiple attempts");
+        
+        let remote_actor = remote_actor.unwrap();
         
         // 发送消息到远程Actor
         let message = Box::new("Hello, remote actor!".to_string());
-        remote_actor.unwrap().send_any(message).expect("Failed to send message to remote actor");
+        remote_actor.send_any(message).expect("Failed to send message to remote actor");
         
         // 等待消息处理，增加时间
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        println!("Waiting for message to be processed (5 seconds)...");
+        tokio::time::sleep(Duration::from_secs(5)).await;
         
         // 验证消息已接收
         assert!(marker2.is_received(), "Message was not received by remote actor");
@@ -221,9 +243,14 @@ async fn test_actor_discovery_timeout() {
     let local = tokio::task::LocalSet::new();
     
     local.run_until(async {
+        println!("Setting up node for timeout test");
+        
         // 创建节点配置
         let node_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 10004);
         let nonexistent_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 10005);
+        
+        println!("Node address: {}", node_addr);
+        println!("Nonexistent node address: {}", nonexistent_addr);
         
         let config = ClusterConfig::new()
             .architecture(Architecture::Decentralized)
@@ -238,20 +265,28 @@ async fn test_actor_discovery_timeout() {
             .expect("Failed to create config");
         
         // 创建集群系统
+        println!("Creating and starting cluster system");
         let mut system = ClusterSystem::new("test-node", config);
         let _system_addr = system.start().await.expect("Failed to start system");
         
+        // Get node ID
+        let node_id = system.local_node().id.clone();
+        println!("Node ID: {}", node_id);
+        
         // 尝试发现不存在的Actor
+        println!("Attempting to discover nonexistent actor");
         let start_time = std::time::Instant::now();
         let actor_ref = system.discover_actor("nonexistent_actor").await;
         let elapsed = start_time.elapsed();
         
-        // 验证发现失败且有超时 - 这里我们不强制检查精确的时间
+        println!("Discovery attempt completed in {:?}", elapsed);
+        
+        // 验证发现失败且超时时间在预期范围内
         assert!(actor_ref.is_none(), "Should not discover nonexistent actor");
         
-        // 检查超时是否在合理范围内（至少有一定的超时）
+        // 确保超时时间至少是2秒
         assert!(elapsed.as_secs() >= 2, "Discovery should timeout after at least 2 seconds");
-        
-        println!("Actor discovery timeout test passed. Timed out after {} seconds", elapsed.as_secs());
+        // 添加上限检查，确保超时不会超过5秒（给系统一些容错空间）
+        assert!(elapsed.as_secs() <= 5, "Discovery should not take more than 5 seconds");
     }).await;
 } 

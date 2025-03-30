@@ -1,6 +1,7 @@
 use serde::{Serialize, Deserialize};
 use uuid::Uuid;
 use std::time::{SystemTime, UNIX_EPOCH};
+use actix;
 
 use crate::node::NodeId;
 use crate::message::DeliveryGuarantee;
@@ -25,6 +26,10 @@ pub struct MessageEnvelope {
     pub delivery_guarantee: DeliveryGuarantee,
     /// 序列化的消息内容
     pub payload: Vec<u8>,
+}
+
+impl actix::Message for MessageEnvelope {
+    type Result = ();
 }
 
 impl MessageEnvelope {

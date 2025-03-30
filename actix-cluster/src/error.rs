@@ -142,6 +142,10 @@ pub enum ClusterError {
     /// Invalid operation
     #[error("Invalid operation: {0}")]
     InvalidOperation(String),
+
+    /// Unknown peer
+    #[error("Unknown peer: {0}")]
+    UnknownPeer(NodeId),
 }
 
 /// Type alias for Result with ClusterError
