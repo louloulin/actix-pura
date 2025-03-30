@@ -6,20 +6,19 @@ use std::time::Duration;
 use actix::prelude::*;
 use actix::dev::ToEnvelope;
 use tokio::sync::{RwLock, Mutex};
-use log::{debug, error, info, warn};
-use serde::{Deserialize, Serialize};
+use log::{debug, error, info};
 
 use crate::config::ClusterConfig;
 use crate::discovery::ServiceDiscovery;
 use crate::node::{Node, NodeId, NodeInfo, NodeStatus};
 use crate::error::{ClusterError, ClusterResult};
-use crate::message::{ActorPath, MessageEnvelope, MessageType, DeliveryGuarantee, AnyMessage};
-use crate::registry::{ActorRegistry, RegistryActor, RegisterLocal, RegisterRemote, Lookup, DiscoverActor};
-use crate::transport::{RemoteActorRef, TransportMessage, P2PTransport};
+use crate::message::{MessageEnvelope, MessageType, DeliveryGuarantee, AnyMessage};
+use crate::registry::{ActorRegistry, RegistryActor, RegisterLocal, Lookup, DiscoverActor};
+use crate::transport::{RemoteActorRef, P2PTransport};
 use crate::config::NodeRole;
 
-// 导入特质
-use crate::registry::{ActorRef, LocalActorRef};
+// Import traits
+use crate::registry::ActorRef;
 
 /// Cluster architecture type
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -292,6 +291,26 @@ impl ClusterSystem {
             Vec::new()
         }
     }
+
+    /// Send a message to an actor
+    #[allow(unused_variables)]
+    pub fn send<M: 'static + actix::Message + Send>(
+        &self,
+        actor_path: String,
+        message: M,
+        _delivery_guarantee: DeliveryGuarantee,
+    ) -> ClusterResult<()> {
+        // Lookup the actor in the registry
+        if let Some(actor_ref) = self.registry.lookup(&actor_path) {
+            actor_ref.send_any(Box::new(message))?;
+            return Ok(());
+        } else {
+            // Not a local actor - attempt to route via the registry
+            // We need to implement a way to send remote messages
+            log::warn!("Actor not found locally: {}", actor_path);
+            return Err(ClusterError::ActorNotFound(actor_path));
+        }
+    }
 }
 
 /// ClusterSystemActor manages the cluster state and handles communication
@@ -521,35 +540,21 @@ impl Actor for ClusterSystemActor {
             ctx.run_interval(discovery_interval, move |act, ctx| {
                 // 使用克隆的变量进行节点发现，避免借用act
                 let discovery_clone = act.discovery.clone();
-                let nodes_clone = act.nodes.clone();
-                let config_clone = act.config.clone();
                 
-                // 创建一个独立的Future
-                let discovery_fut = async move {
+                // Create async function to discover nodes
+                ctx.spawn(async move {
                     let mut discovery = discovery_clone.lock().await;
                     discovery.discover_nodes().await
-                }.into_actor(act)
-                .map(move |res, act, _ctx| {
-                    if let Err(e) = &res {
-                        log::error!("Node discovery failed: {}", e);
-                    } else if let Ok(discovered_nodes) = res {
-                        // 处理发现的节点
-                        log::debug!("Discovered {} nodes", discovered_nodes.len());
-                        
-                        // 简单记录节点发现，实际项目中可能要更新节点信息
-                        for node_info in discovered_nodes {
-                            log::debug!("Found node: {} at {}", 
-                                node_info.id, node_info.addr);
-                        }
+                }
+                .into_actor(act)
+                .map(move |res, _act, _ctx| {
+                    if let Ok(nodes) = res {
+                        debug!("Discovered {} nodes", nodes.len());
+                        // Process discovered nodes
+                    } else {
+                        error!("Failed to discover nodes: {:?}", res);
                     }
-                });
-                
-                // 生成discovery_fut
-                ctx.spawn(discovery_fut);
-                
-                // 只记录操作不检查超时
-                log::debug!("Checking node timeouts");
-                // 实际的timeout检查应该在此处实现
+                }));
             });
         });
         

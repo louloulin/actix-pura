@@ -417,19 +417,14 @@ impl P2PTransport {
                         // Release the lock before awaiting
                         drop(_handler_lock);
                         
-                        // Get a new lock and process the message
-                        let handler_clone = handler.clone();
-                        
-                        // Rather than spawning a task, just execute it directly
-                        let result = async move {
-                            let mut handler_guard = handler_clone.lock();
-                            handler_guard.handle_message(sender_id, message_clone).await
-                        }.await;
-                        
-                        // Now handle the result
-                        match result {
-                            Ok(_) => debug!("Successfully handled envelope message from {}", sender_id_for_logging),
-                            Err(e) => error!("Error handling envelope message from {}: {:?}", sender_id_for_logging, e),
+                        // Handle the message with the registered handler
+                        if let Some(handler_clone) = self.message_handler.clone() {
+                            // Just get the handler - there's no Ok/Err from a MutexGuard
+                            let handler_guard = handler_clone.lock();
+                            // Forward message to handler
+                            if let Err(e) = handler_guard.handle_message(sender_id.clone(), message.clone()).await {
+                                error!("Error handling message: {}", e);
+                            }
                         }
                     }
                 }
@@ -769,17 +764,48 @@ impl P2PTransport {
         }
     }
 
-    /// Handle a new connection
-    async fn handle_new_connection(&mut self, mut stream: TcpStream, peer_addr: SocketAddr) -> ClusterResult<()> {
+    /// Handle a new connection from a remote peer
+    async fn handle_new_connection(&mut self, stream: TcpStream, peer_addr: SocketAddr) -> ClusterResult<()> {
         debug!("Handling new connection from {}", peer_addr);
         
         // Set TCP_NODELAY to reduce latency
         if let Err(e) = stream.set_nodelay(true) {
-            debug!("Could not set TCP_NODELAY on socket: {}", e);
-            println!("Could not set TCP_NODELAY on socket: {}", e);
+            warn!("Failed to set TCP_NODELAY on stream: {}", e);
         }
         
         // Rest of function implementation goes here
+        Ok(())
+    }
+
+    /// Send any message to the actor
+    #[allow(unused_variables)]
+    fn send_any(&self, _msg: Box<dyn std::any::Any + Send>) -> ClusterResult<()> {
+        // Implementation for sending arbitrary messages
+        unimplemented!("send_any not implemented");
+    }
+
+    /// Handle incoming message - match on specific message types
+    fn handle_message_type(&self, other_message: TransportMessage) -> ClusterResult<()> {
+        match other_message {
+            _other_message => {
+                // Log received message for debugging
+                debug!("Received unhandled message: {:?}", _other_message);
+                Ok(())
+            }
+        }
+    }
+
+    /// Process message from a peer using the handlers
+    async fn process_message_handlers(&self, envelope: &MessageEnvelope) -> ClusterResult<()> {
+        // Try to send to peer handlers first
+        let peers = self.peers.clone();
+        
+        if let Some(_handler_tx) = peers.lock().get(&envelope.target_node) {
+            // Handler logic here
+            // Currently unused, but we'll keep it for future implementation
+            debug!("Found handler for target node: {}", envelope.target_node);
+        }
+        
         Ok(())
     }
 }
@@ -1115,25 +1141,19 @@ async fn handle_incoming(
                     // Get the sender_node from peer_node_id or from the envelope
                     let sender_id = peer_node_id.clone().unwrap_or(envelope.sender_node.clone());
                     
-                    // Process the message with the handler
+                    // Clone the handler for async usage
                     let handler_clone = handler.clone();
-                    let mut handler_guard = handler_clone.lock();
-                    
-                    match handler_guard.handle_message(sender_id.clone(), message.clone()).await {
-                        Ok(_) => {
-                            debug!("Successfully handled envelope message from {}", sender_id);
-                            println!("Successfully handled envelope message from {}", sender_id);
-                        },
-                        Err(e) => {
-                            error!("Error handling envelope message from {}: {:?}", sender_id, e);
-                            println!("Error handling envelope message from {}: {:?}", sender_id, e);
-                        }
+                    // Just get the handler - there's no Ok/Err from a MutexGuard
+                    let handler_guard = handler_clone.lock();
+                    // Forward message to handler
+                    if let Err(e) = handler_guard.handle_message(sender_id.clone(), message.clone()).await {
+                        error!("Error handling message: {}", e);
                     }
                 } else {
                     debug!("No message handler available to process envelope");
                     
                     // If no handler is set, we can send the message buffer to a channel if one exists
-                    if let Some(handler_tx) = peers.lock().get(&envelope.target_node)
+                    if let Some(_handler_tx) = peers.lock().get(&envelope.target_node)
                         .and_then(|_| Some(message_buffer.clone())) {
                         debug!("Forwarding raw message buffer to channel");
                     }
