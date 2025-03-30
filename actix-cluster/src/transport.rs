@@ -416,7 +416,7 @@ impl P2PTransport {
                 // Send our handshake back
                 let handshake = TransportMessage::Handshake(self.local_node.clone());
                 
-                // 使用自有序列化方法
+                // 序列化消息
                 let serialized = match &*self.serializer {
                     s if s.type_id() == std::any::TypeId::of::<crate::serialization::BincodeSerializer>() => {
                         let serializer = crate::serialization::BincodeSerializer::new();
@@ -646,13 +646,13 @@ impl P2PTransport {
         let message_type = envelope.message_type.clone();
         let payload_size = envelope.payload.len();
         
-        println!("Sending envelope from node {} to node {}. Type: {}, payload size: {}",
+        println!("Sending envelope from node {} to node {}. Type: {:?}, payload size: {}",
                 sender_id, target_node, message_type, payload_size);
         println!("Message ID: {}, Target actor: {}", envelope.message_id, envelope.target_actor);
         
         // First check if we already have an active connection to the target
         let connection_exists = {
-            let connections_guard = self.connections.lock().await;
+            let connections_guard = self.connections.lock();
             connections_guard.contains_key(&target_node)
         };
         
@@ -677,7 +677,7 @@ impl P2PTransport {
                         target_node, peer.addr);
                 
                 // Attempt to connect to peer
-                if let Err(e) = self.connect_to_peer(&peer.addr).await {
+                if let Err(e) = self.connect_to_peer(peer.addr).await {
                     error!("Failed to connect to peer at {}: {}", peer.addr, e);
                     println!("Failed to connect to peer at {}: {}", peer.addr, e);
                     return Err(ClusterError::ConnectionFailed(format!(
@@ -687,9 +687,7 @@ impl P2PTransport {
             } else {
                 error!("Target node {} not found in peers", target_node);
                 println!("Target node {} not found in peers", target_node);
-                return Err(ClusterError::NodeNotFound(format!(
-                    "Target node {} not found in peers", target_node
-                )));
+                return Err(ClusterError::NodeNotFound(target_node.clone()));
             }
         }
         
@@ -706,26 +704,10 @@ impl P2PTransport {
             let transport_message = TransportMessage::Envelope(envelope);
             println!("Created TransportMessage::Envelope for serialization");
             
-            // Serialize the message
-            let serializer_type_id = self.serializer.type_id();
-            println!("Serializing using serializer type: {:?}", serializer_type_id);
-            println!("BincodeSerializer type_id: {:?}", std::any::TypeId::of::<crate::serialization::BincodeSerializer>());
-            println!("JsonSerializer type_id: {:?}", std::any::TypeId::of::<crate::serialization::JsonSerializer>());
-            
-            let serialization_result = if serializer_type_id == std::any::TypeId::of::<crate::serialization::BincodeSerializer>() {
-                println!("Using BincodeSerializer for serialization");
-                let concrete_serializer = crate::serialization::BincodeSerializer::new();
-                concrete_serializer.serialize(&transport_message)
-            } else if serializer_type_id == std::any::TypeId::of::<crate::serialization::JsonSerializer>() {
-                println!("Using JsonSerializer for serialization");
-                let concrete_serializer = crate::serialization::JsonSerializer::new();
-                concrete_serializer.serialize(&transport_message)
-            } else {
-                println!("Using generic serializer serialize_any");
-                self.serializer.serialize_any(&transport_message as &dyn std::any::Any)
-            };
-            
-            let serialized = match serialization_result {
+            // Serialize the message using BincodeSerializer directly
+            println!("Serializing using BincodeSerializer");
+            let concrete_serializer = crate::serialization::BincodeSerializer::new();
+            let serialized = match concrete_serializer.serialize(&transport_message) {
                 Ok(data) => {
                     println!("Serialization successful, data size: {}", data.len());
                     if !data.is_empty() {
@@ -746,10 +728,11 @@ impl P2PTransport {
             println!("Sending message with length: {} bytes", len);
             let len_bytes = len.to_be_bytes();
             
-            let mut sender = connection.sender.clone();
+            // Get a mutable reference to the socket for writing
+            let mut socket = connection.lock().await;
             
             // First send the length
-            if let Err(e) = sender.write_all(&len_bytes).await {
+            if let Err(e) = socket.write_all(&len_bytes).await {
                 error!("Failed to send message length to node {}: {}", target_node, e);
                 println!("Failed to send message length to node {}: {}", target_node, e);
                 return Err(ClusterError::MessageSendFailed(format!(
@@ -758,7 +741,7 @@ impl P2PTransport {
             }
             
             // Then send the serialized message
-            if let Err(e) = sender.write_all(&serialized).await {
+            if let Err(e) = socket.write_all(&serialized).await {
                 error!("Failed to send message payload to node {}: {}", target_node, e);
                 println!("Failed to send message payload to node {}: {}", target_node, e);
                 return Err(ClusterError::MessageSendFailed(format!(
@@ -771,9 +754,7 @@ impl P2PTransport {
         } else {
             error!("No connection found for node {}", target_node);
             println!("No connection found for node {}", target_node);
-            Err(ClusterError::NodeNotFound(format!(
-                "No connection found for node {}", target_node
-            )))
+            Err(ClusterError::NodeNotFound(target_node.clone()))
         }
     }
     
@@ -881,18 +862,19 @@ impl P2PTransport {
                         // Send handshake with our node info
                         let handshake = TransportMessage::Handshake(self.local_node.clone());
                         
-                        // 序列化消息
-                        let serialized = match &*self.serializer {
-                            s if s.type_id() == std::any::TypeId::of::<crate::serialization::BincodeSerializer>() => {
-                                let serializer = crate::serialization::BincodeSerializer::new();
-                                serializer.serialize(&handshake)?
-                            },
-                            s if s.type_id() == std::any::TypeId::of::<crate::serialization::JsonSerializer>() => {
-                                let serializer = crate::serialization::JsonSerializer::new();
-                                serializer.serialize(&handshake)?
-                            },
-                            _ => {
-                                self.serializer.serialize_any(&handshake as &dyn std::any::Any)?
+                        // Serialize the handshake message
+                        println!("Serializing handshake message using BincodeSerializer");
+                        let concrete_serializer = crate::serialization::BincodeSerializer::new();
+                        
+                        // Serialize the handshake response
+                        let serialized = match concrete_serializer.serialize(&handshake) {
+                            Ok(s) => {
+                                println!("Handshake serialization successful, size: {}", s.len());
+                                s
+                            }
+                            Err(e) => {
+                                error!("Failed to serialize handshake: {}", e);
+                                return Err(ClusterError::SerializationError(format!("Failed to serialize handshake: {}", e)));
                             }
                         };
                         
@@ -1077,8 +1059,8 @@ impl P2PTransport {
                                         continue;
                                     }
                                 }
-                            } else if serializer_type_id == TypeId::of::<JsonSerializer>() {
-                                let concrete_serializer = JsonSerializer::new();
+                            } else if serializer_type_id == TypeId::of::<crate::serialization::JsonSerializer>() {
+                                let concrete_serializer = crate::serialization::JsonSerializer::new();
                                 match concrete_serializer.serialize(&handshake) {
                                     Ok(s) => s,
                                     Err(e) => {
@@ -1128,8 +1110,8 @@ impl P2PTransport {
                             continue;
                         }
                     }
-                } else if serializer_type_id == TypeId::of::<JsonSerializer>() {
-                    let concrete_serializer = JsonSerializer::new();
+                } else if serializer_type_id == TypeId::of::<crate::serialization::JsonSerializer>() {
+                    let concrete_serializer = crate::serialization::JsonSerializer::new();
                     match concrete_serializer.serialize(&message) {
                         Ok(s) => s,
                         Err(e) => {
@@ -1251,13 +1233,11 @@ impl P2PTransport {
             let concrete_serializer = JsonSerializer::new();
             concrete_serializer.deserialize(&msg_buffer)?
         } else {
-            match self.serializer.deserialize_any(&msg_buffer)? {
-                boxed if boxed.type_id() == TypeId::of::<TransportMessage>() => {
-                    *boxed.downcast::<TransportMessage>().unwrap()
-                },
-                _ => {
-                    return Err(ClusterError::DeserializationError("Expected TransportMessage".to_string()));
-                }
+            let boxed = self.serializer.deserialize_any(&msg_buffer)?;
+            if boxed.type_id() == TypeId::of::<TransportMessage>() {
+                *boxed.downcast::<TransportMessage>().unwrap()
+            } else {
+                return Err(ClusterError::DeserializationError("Expected TransportMessage".to_string()));
             }
         };
         
@@ -1685,56 +1665,23 @@ async fn handle_incoming(
         }
         
         // 反序列化消息
-        let serializer_type_id = serializer.type_id();
-        println!("Deserializing message using serializer type: {:?}", serializer_type_id);
-        println!("BincodeSerializer type_id: {:?}", std::any::TypeId::of::<crate::serialization::BincodeSerializer>());
-        println!("JsonSerializer type_id: {:?}", std::any::TypeId::of::<crate::serialization::JsonSerializer>());
+        println!("Deserializing message using BincodeSerializer");
         
-        let deserialization_result = if serializer_type_id == std::any::TypeId::of::<crate::serialization::BincodeSerializer>() {
-            println!("Using BincodeSerializer for deserialization");
-            let concrete_serializer = crate::serialization::BincodeSerializer::new();
-            concrete_serializer.deserialize::<TransportMessage>(&msg_buffer)
-        } else if serializer_type_id == std::any::TypeId::of::<crate::serialization::JsonSerializer>() {
-            println!("Using JsonSerializer for deserialization");
-            let concrete_serializer = crate::serialization::JsonSerializer::new();
-            concrete_serializer.deserialize::<TransportMessage>(&msg_buffer)
-        } else {
-            println!("Using generic serializer deserialize_any");
-            serializer.deserialize_any(&msg_buffer)
-        };
-        
-        let message = match deserialization_result {
-            Ok(msg) if serializer_type_id == std::any::TypeId::of::<crate::serialization::BincodeSerializer>() 
-                    || serializer_type_id == std::any::TypeId::of::<crate::serialization::JsonSerializer>() => {
-                println!("Direct deserialization successful, message type: TransportMessage");
+        // Always use BincodeSerializer directly for deserialization
+        let concrete_serializer = crate::serialization::BincodeSerializer::new();
+        let message = match concrete_serializer.deserialize::<TransportMessage>(&msg_buffer) {
+            Ok(msg) => {
+                println!("Successfully deserialized message: {:?}", msg);
                 msg
-            },
-            Ok(boxed) => {
-                println!("Boxed deserialization result type: {:?}", boxed.type_id());
-                println!("TransportMessage type_id: {:?}", std::any::TypeId::of::<TransportMessage>());
-                
-                if boxed.type_id() == std::any::TypeId::of::<TransportMessage>() {
-                    println!("Boxed type matches TransportMessage, attempting downcast");
-                    match boxed.downcast::<TransportMessage>() {
-                        Ok(boxed_msg) => {
-                            println!("Downcast successful");
-                            *boxed_msg
-                        },
-                        Err(_) => {
-                            error!("Failed to downcast message despite matching type_id");
-                            println!("Failed to downcast message despite matching type_id");
-                            continue;
-                        }
-                    }
-                } else {
-                    error!("Unknown message type: {:?}", boxed.type_id());
-                    println!("Unknown message type: {:?}", boxed.type_id());
-                    continue;
-                }
             },
             Err(e) => {
                 error!("Failed to deserialize message: {:?}", e);
                 println!("Failed to deserialize message: {:?}", e);
+                println!("Message payload: {:?}", msg_buffer);
+                if msg_buffer.len() > 0 {
+                    let preview_len = std::cmp::min(msg_buffer.len(), 32);
+                    println!("Payload first {} bytes: {:?}", preview_len, &msg_buffer[0..preview_len]);
+                }
                 continue;
             }
         };
@@ -1763,34 +1710,18 @@ async fn handle_incoming(
                 let handshake = TransportMessage::Handshake(local_node_info.clone());
                 
                 // 序列化握手消息
-                let serialized = if serializer_type_id == std::any::TypeId::of::<crate::serialization::BincodeSerializer>() {
-                    let concrete_serializer = crate::serialization::BincodeSerializer::new();
-                    match concrete_serializer.serialize(&handshake) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            error!("Failed to serialize handshake: {}", e);
-                            println!("Failed to serialize handshake: {}", e);
-                            continue;
-                        }
+                println!("Serializing handshake message using BincodeSerializer");
+                let concrete_serializer = crate::serialization::BincodeSerializer::new();
+                
+                // Serialize the handshake response
+                let serialized = match concrete_serializer.serialize(&handshake) {
+                    Ok(s) => {
+                        println!("Handshake serialization successful, size: {}", s.len());
+                        s
                     }
-                } else if serializer_type_id == TypeId::of::<crate::serialization::JsonSerializer>() {
-                    let concrete_serializer = crate::serialization::JsonSerializer::new();
-                    match concrete_serializer.serialize(&handshake) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            error!("Failed to serialize handshake: {}", e);
-                            println!("Failed to serialize handshake: {}", e);
-                            continue;
-                        }
-                    }
-                } else {
-                    match serializer.serialize_any(&handshake as &dyn std::any::Any) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            error!("Failed to serialize handshake: {:?}", e);
-                            println!("Failed to serialize handshake: {:?}", e);
-                            continue;
-                        }
+                    Err(e) => {
+                        error!("Failed to serialize handshake: {}", e);
+                        return Err(ClusterError::SerializationError(format!("Failed to serialize handshake: {}", e)));
                     }
                 };
                 
@@ -1825,7 +1756,7 @@ async fn handle_incoming(
             TransportMessage::Envelope(envelope) => {
                 debug!("Received envelope message: {:?}", envelope.message_type);
                 println!("Received envelope message: {:?}", envelope.message_type);
-                println!("Envelope details: sender={}, target={}, type={}, payload_size={}", 
+                println!("Envelope details: sender={}, target={}, type={:?}, payload_size={}", 
                         envelope.sender_node, envelope.target_node, envelope.message_type, envelope.payload.len());
                 
                 // Forward to message handler if available
