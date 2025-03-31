@@ -37,6 +37,7 @@
 - Typed messages (No `Any` type)
 - Runs on stable Rust 1.68+
 - **Distributed computing capabilities** for cluster environments
+- **Performance testing tools** for benchmarking and optimization
 
 ## Usage
 
@@ -223,6 +224,30 @@ See this [chat example] which shows more comprehensive usage in a networking cli
 
 [chat example]: https://github.com/actix/examples/tree/HEAD/websockets/chat-tcp
 
+## Distributed Computing and Performance
+
+Actix now includes distributed computing features via the `actix-cluster` module, allowing you to build resilient, scalable applications across multiple nodes.
+
+### Cluster Architecture
+
+The distributed system supports both centralized and decentralized architectures, with features like:
+
+- Node discovery and membership management
+- Message routing between nodes
+- Actor distribution and load balancing
+- Fault tolerance and recovery
+
+### Performance Testing
+
+Actix-cluster includes comprehensive performance testing tools to help optimize your distributed applications:
+
+- Benchmarking utilities for measuring latency and throughput
+- Support for different load patterns (constant, burst, ramp, wave)
+- Comparison tools for different configurations (serialization, message sizes, architectures)
+- Detailed metrics collection and analysis
+
+For detailed performance testing instructions, see [PERFORMANCE_TESTING.md](actix-cluster/PERFORMANCE_TESTING.md).
+
 ## Distributed Capabilities
 
 Actix-Pura extends the Actix actor framework with distributed computing capabilities, enabling actor systems to span across multiple nodes. The distributed extension provides:
@@ -281,6 +306,85 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+## Load Testing and Benchmarking
+
+Actix-Pura includes a comprehensive load testing module designed to evaluate the performance and scalability of your distributed actor clusters. The benchmarking tools help you measure message throughput, latency, and system capacity under various loads.
+
+### Benchmark Tools
+
+The framework provides several benchmark utilities:
+
+- **Cluster Benchmark**: Tests the overall throughput of the cluster with configurable message sizes and rates
+- **Distributed Benchmark**: Measures performance across different node configurations
+- **Actor Communication Patterns**: Tests various actor communication patterns (1:1, 1:N, N:1, N:N)
+- **Node Scaling Tests**: Evaluates performance as the cluster scales up to many nodes
+
+### Running Benchmarks
+
+You can run the built-in benchmarks from the examples directory:
+
+```bash
+# Run the basic cluster benchmark
+cargo run --example cluster_benchmark
+
+# Run the distributed node scaling benchmark
+cargo run --example distributed_benchmark -- --nodes 5
+
+# Run the benchmark with custom parameters
+cargo run --example cluster_benchmark -- --duration 60 --message-size 1024 --rate 10000
+```
+
+### Custom Benchmark Scenarios
+
+You can create custom benchmark scenarios by extending the benchmark module:
+
+```rust
+use actix_pura::{
+    benchmark::{BenchmarkConfig, BenchmarkRunner, BenchmarkScenario},
+    node::NodeId,
+};
+
+// Define a custom benchmark scenario
+struct MyCustomScenario;
+
+impl BenchmarkScenario for MyCustomScenario {
+    fn setup(&self, config: &BenchmarkConfig) -> Vec<NodeId> {
+        // Create and setup nodes
+        // ...
+    }
+    
+    fn run(&self, nodes: &[NodeId]) -> BenchmarkResults {
+        // Run your benchmark logic
+        // ...
+    }
+}
+
+// Run your custom benchmark
+let config = BenchmarkConfig::default()
+    .with_duration(Duration::from_secs(30))
+    .with_message_size(512);
+    
+let runner = BenchmarkRunner::new(config);
+let results = runner.run(MyCustomScenario);
+
+println!("Throughput: {} msg/sec", results.throughput);
+println!("Avg latency: {} ms", results.avg_latency_ms);
+```
+
+### Visualizing Results
+
+The benchmark module can output results in various formats for further analysis:
+
+```bash
+# Generate CSV output 
+cargo run --example cluster_benchmark -- --output results.csv
+
+# Generate JSON output
+cargo run --example cluster_benchmark -- --output results.json --format json
+```
+
+The benchmarking module also supports real-time monitoring of test runs, providing insights into system performance during the test.
 
 ## Contributing
 
