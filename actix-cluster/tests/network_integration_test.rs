@@ -29,47 +29,23 @@ struct NetworkMessageReceiver {
 
 #[async_trait::async_trait]
 impl MessageHandler for NetworkMessageReceiver {
-    async fn handle_message(&mut self, sender: NodeId, message: TransportMessage) -> ClusterResult<()> {
-        println!("ENTRY: NetworkMessageReceiver::handle_message called from {}", sender);
-        println!("NetworkMessageReceiver received message type: {:?}", std::any::TypeId::of::<TransportMessage>());
-        println!("Message details: {:?}", message);
+    async fn handle_message(&self, sender: NodeId, message: TransportMessage) -> ClusterResult<()> {
+        println!("NetworkMessageReceiver received message from {}: {:?}", sender, message);
         
-        match &message {
-            TransportMessage::Envelope(envelope) => {
-                println!("Message is an envelope with type: {:?}", envelope.message_type);
-                println!("Envelope details: sender={}, target={}, message_id={}, payload_size={}", 
-                        envelope.sender_node, envelope.target_node, envelope.message_id, envelope.payload.len());
-                
-                if envelope.message_type == MessageType::ActorMessage {
-                    // Try to deserialize the payload to see what's inside
-                    println!("Envelope has ActorMessage type, attempting to deserialize payload");
-                    let serializer = actix_cluster::serialization::BincodeSerializer::new();
-                    match serializer.deserialize::<NetworkTestMessage>(&envelope.payload) {
-                        Ok(test_message) => {
-                            println!("Successfully deserialized test message: {:?}", test_message);
-                        }
-                        Err(e) => {
-                            println!("Failed to deserialize payload as NetworkTestMessage: {:?}", e);
-                            if envelope.payload.len() > 0 {
-                                let preview_len = std::cmp::min(envelope.payload.len(), 16);
-                                println!("Payload first {} bytes: {:?}", preview_len, &envelope.payload[0..preview_len]);
-                            }
-                        }
-                    }
-                    
-                    println!("Setting received flag to true");
-                    self.received.store(true, Ordering::SeqCst);
-                    println!("Received envelope message with payload size: {}", envelope.payload.len());
-                } else {
-                    println!("Envelope message type is not ActorMessage, but: {:?}", envelope.message_type);
-                }
-            }
-            other => {
-                println!("Message is not an envelope but: {:?}", other);
+        if let TransportMessage::Envelope(envelope) = message {
+            let mut received = self.received.lock().unwrap();
+            received.push(envelope);
+            
+            let num_received = received.len();
+            println!("Total received messages: {}", num_received);
+            
+            if num_received >= self.expected {
+                println!("Received expected number of messages: {}", self.expected);
+                let mut is_completed = self.is_completed.lock().unwrap();
+                *is_completed = true;
             }
         }
         
-        println!("NetworkMessageReceiver::handle_message completed successfully");
         Ok(())
     }
 }

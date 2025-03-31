@@ -11,6 +11,7 @@ use actix_cluster::{
 };
 use serde::{Deserialize, Serialize};
 use actix_cluster::transport::{P2PTransport, TransportMessage, MessageHandler};
+use actix_cluster::serialization::BincodeSerializer;
 
 #[derive(Debug, Clone, Message, Serialize, Deserialize)]
 #[rtype(result = "String")]
@@ -46,26 +47,51 @@ impl Handler<AnyMessage> for TestActor {
     }
 }
 
-// 创建消息处理器供测试使用
-struct RemoteTestMessageHandler {
-    message_received: Arc<AtomicBool>,
-    received_content: Arc<Mutex<Option<String>>>,
+/// Test message handler for remote messaging
+pub struct RemoteTestMessageHandler {
+    /// The content that was received
+    received_content: std::sync::Mutex<Option<String>>,
+    
+    /// Received envelope messages
+    received: std::sync::Mutex<Vec<MessageEnvelope>>,
 }
 
 impl RemoteTestMessageHandler {
-    fn new(message_received: Arc<AtomicBool>, received_content: Arc<Mutex<Option<String>>>) -> Self {
-        Self { message_received, received_content }
+    /// Create a new message handler
+    pub fn new() -> Self {
+        Self {
+            received_content: std::sync::Mutex::new(None),
+            received: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+    
+    /// Get the received content
+    pub fn get_received_content(&self) -> Option<String> {
+        self.received_content.lock().unwrap().clone()
+    }
+    
+    /// Get the received messages
+    pub fn get_received_messages(&self) -> Vec<MessageEnvelope> {
+        self.received.lock().unwrap().clone()
+    }
+    
+    /// Check if any messages were received
+    pub fn has_received_messages(&self) -> bool {
+        !self.received.lock().unwrap().is_empty()
     }
 }
 
 #[async_trait::async_trait]
 impl MessageHandler for RemoteTestMessageHandler {
-    async fn handle_message(&mut self, sender: actix_cluster::node::NodeId, message: TransportMessage) -> actix_cluster::error::ClusterResult<()> {
+    async fn handle_message(&self, sender: actix_cluster::node::NodeId, message: TransportMessage) -> actix_cluster::error::ClusterResult<()> {
         println!("RemoteTestMessageHandler received message from {}: {:?}", sender, message);
         
-        if let TransportMessage::StatusUpdate(_, content) = &message {
-            let mut received = self.received_content.lock();
-            *received = Some(content.clone());
+        if let TransportMessage::Envelope(envelope) = message {
+            // Process the message
+            if envelope.message_type == MessageType::ActorMessage {
+                let mut received = self.received_content.lock().unwrap();
+                *received = Some(envelope.payload.into_iter().map(|b| b as char).collect());
+            }
         }
         
         // 标记消息已接收

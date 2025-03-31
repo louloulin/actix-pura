@@ -808,6 +808,52 @@ impl P2PTransport {
         
         Ok(())
     }
+
+    /// Set message handler for envelope processing
+    pub fn set_message_handler(&mut self, handler: Addr<MessageEnvelopeHandler>) {
+        let handler_fn = Box::new(move |node_id: NodeId, msg: TransportMessage| {
+            if let TransportMessage::Envelope(envelope) = msg {
+                let handler_clone = handler.clone();
+                actix::spawn(async move {
+                    if let Err(e) = handler_clone.send(envelope).await {
+                        error!("Failed to forward envelope to handler: {}", e);
+                    }
+                });
+            }
+            Ok(())
+        });
+        self.message_handler = Some(Arc::new(Mutex::new(ActorMessageHandler::new(handler_fn))));
+    }
+
+    /// Add a peer to the transport (used for testing)
+    #[cfg(test)]
+    pub fn add_peer(&mut self, node_id: NodeId, node_info: NodeInfo) {
+        self.peers.lock().insert(node_id, node_info);
+    }
+    
+    /// Set message handler directly (used for testing)
+    #[cfg(test)]
+    pub fn set_message_handler_direct(&mut self, handler: Arc<Mutex<dyn MessageHandler>>) {
+        self.message_handler = Some(handler);
+    }
+    
+    /// Get the current message handler (used for testing)
+    #[cfg(test)]
+    pub fn get_message_handler(&self) -> Option<Arc<Mutex<dyn MessageHandler>>> {
+        self.message_handler.clone()
+    }
+    
+    /// Get a lock to the peers map (used for testing)
+    #[cfg(test)]
+    pub fn get_peers_lock(&self) -> parking_lot::MutexGuard<'_, HashMap<NodeId, NodeInfo>> {
+        self.peers.lock()
+    }
+    
+    /// Get a list of peers (used for testing)
+    #[cfg(test)]
+    pub fn get_peer_list(&self) -> Vec<NodeInfo> {
+        self.peers.lock().values().cloned().collect()
+    }
 }
 
 /// Remote actor reference for sending messages to actors on other nodes
@@ -858,6 +904,31 @@ impl RemoteActorRef {
         
         // Use the transport to send the message
         transport.send_message(&self.node_id, transport_message).await
+    }
+    
+    /// Send a message envelope to the remote actor (used for testing)
+    #[cfg(test)]
+    pub async fn send_envelope(&self, envelope: MessageEnvelope) -> ClusterResult<()> {
+        let mut transport = self.transport.lock().await;
+        let transport_message = TransportMessage::Envelope(envelope);
+        
+        // Use the transport to send the message
+        transport.send_message(&self.node_id, transport_message).await
+    }
+
+    /// Create a new remote actor reference from an ActorPath (used for testing)
+    #[cfg(test)]
+    pub fn new_from_path(
+        path: ActorPath,
+        transport: Arc<tokio::sync::Mutex<P2PTransport>>,
+        delivery_guarantee: DeliveryGuarantee,
+    ) -> Self {
+        Self {
+            node_id: path.node_id.clone(),
+            path: path.path.clone(),
+            transport,
+            delivery_guarantee,
+        }
     }
 }
 

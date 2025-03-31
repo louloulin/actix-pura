@@ -75,6 +75,12 @@ impl ActorPath {
     }
 }
 
+impl std::fmt::Display for ActorPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/{}", self.node_id, self.path)
+    }
+}
+
 /// 通用消息包装，使我们能在Actor系统中传递任意类型的消息
 #[derive(Debug)]
 pub struct AnyMessage(pub Box<dyn std::any::Any + Send>);

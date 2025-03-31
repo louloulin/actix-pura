@@ -29,16 +29,20 @@ struct MessageReceiver {
 
 #[async_trait::async_trait]
 impl MessageHandler for MessageReceiver {
-    async fn handle_message(&mut self, sender: NodeId, message: TransportMessage) -> ClusterResult<()> {
+    async fn handle_message(&self, sender: NodeId, message: TransportMessage) -> ClusterResult<()> {
         println!("MessageReceiver received message from {}: {:?}", sender, message);
         
-        // 检查是否是一个包含TestActorMessage的Envelope
-        if let TransportMessage::Envelope(envelope) = &message {
-            // 在实际应用中，这里应该反序列化消息并传递给本地actor
-            // 为了测试，我们只检查消息类型并设置接收标志
-            if envelope.message_type == MessageType::ActorMessage {
-                self.received.store(true, Ordering::SeqCst);
-                println!("Marking message as received!");
+        if let TransportMessage::Envelope(envelope) = message {
+            let mut received = self.received.lock().unwrap();
+            received.push(envelope);
+            
+            let num_received = received.len();
+            println!("Total received messages: {}", num_received);
+            
+            if num_received >= self.expected {
+                println!("Received expected number of messages: {}", self.expected);
+                let mut is_completed = self.is_completed.lock().unwrap();
+                *is_completed = true;
             }
         }
         
