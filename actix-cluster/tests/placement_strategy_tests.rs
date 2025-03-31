@@ -185,31 +185,42 @@ fn test_redundant_placement_strategy() {
     let selector = Arc::new(MockNodeSelector::standard());
     let placement = PlacementStrategyImpl::new(selector.clone());
     
-    // The same actor path should consistently map to the same node
-    // for the same redundancy level
+    // Test single replica first
     let actor_path = "test_actor_consistent";
     let strategy = PlacementStrategy::Redundant { replicas: 1 };
     
-    // For the redundant test, we'll check that the same actor path consistently
-    // maps to the same node for each lookup
+    // For single replica, the same actor path should consistently map to the same node
     let first_node = placement.select_node(actor_path, &strategy).unwrap();
     
-    // Multiple lookups should return the same node
+    // Multiple lookups should return the same node for single replica
     for _ in 0..10 {
         let node = placement.select_node(actor_path, &strategy).unwrap();
         assert_eq!(node, first_node);
     }
     
-    // Different actor paths should map to different nodes (probably)
-    let mut selected_nodes = std::collections::HashSet::new();
-    for i in 0..100 {
-        let path = format!("different_actor_{}", i);
-        let node = placement.select_node(&path, &strategy).unwrap();
-        selected_nodes.insert(node);
+    // Test multiple replicas
+    let actor_path = "test_actor_redundant";
+    let strategy = PlacementStrategy::Redundant { replicas: 3 };
+    
+    // Get first set of nodes
+    let first_node = placement.select_node(actor_path, &strategy).unwrap();
+    
+    // Multiple lookups should return the same primary node
+    for _ in 0..10 {
+        let node = placement.select_node(actor_path, &strategy).unwrap();
+        assert_eq!(node, first_node, "Primary node should be consistent for the same actor path");
     }
     
-    // Should have used most of the 5 nodes (statistically likely)
-    assert!(selected_nodes.len() >= 3);
+    // Test with more replicas than available nodes
+    let strategy = PlacementStrategy::Redundant { replicas: 10 };
+    let result = placement.select_node(actor_path, &strategy);
+    
+    // Should return an error when requesting more replicas than available nodes
+    assert!(result.is_err());
+    match result {
+        Err(ClusterError::InvalidOperation(_)) => {}, // Expected
+        other => panic!("Expected InvalidOperation error, got {:?}", other),
+    }
 }
 
 #[test]

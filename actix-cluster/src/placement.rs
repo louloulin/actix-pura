@@ -32,6 +32,8 @@ pub struct PlacementStrategyImpl {
     round_robin_index: Mutex<usize>,
     // Consistent hashing state
     consistent_hash_nodes: Mutex<Vec<(NodeId, u64)>>,
+    // Store redundant nodes for each actor path
+    redundant_nodes: Mutex<HashMap<String, Vec<NodeId>>>,
 }
 
 impl PlacementStrategyImpl {
@@ -41,6 +43,7 @@ impl PlacementStrategyImpl {
             selector,
             round_robin_index: Mutex::new(0),
             consistent_hash_nodes: Mutex::new(Vec::new()),
+            redundant_nodes: Mutex::new(HashMap::new()),
         }
     }
     
@@ -51,7 +54,36 @@ impl PlacementStrategyImpl {
             PlacementStrategy::RoundRobin => self.select_round_robin_node(),
             PlacementStrategy::LeastLoaded => self.select_least_loaded_node(),
             PlacementStrategy::Node(node_id) => self.select_specific_node(&NodeId(*node_id)),
-            PlacementStrategy::Redundant { replicas: _ } => self.select_consistent_hash_node(actor_path),
+            PlacementStrategy::Redundant { replicas } => {
+                // Check if we have any nodes available
+                let available_nodes = self.selector.get_active_nodes();
+                if available_nodes.is_empty() {
+                    return Err(ClusterError::NoNodesAvailable);
+                }
+                
+                // Check if we have enough nodes for the requested replicas
+                if *replicas > available_nodes.len() {
+                    return Err(ClusterError::InvalidOperation(
+                        format!("Requested {} replicas but only {} nodes available", 
+                            replicas, available_nodes.len())
+                    ));
+                }
+                
+                // Get or compute redundant nodes
+                let nodes = {
+                    let mut redundant_nodes = self.redundant_nodes.lock().unwrap();
+                    if let Some(nodes) = redundant_nodes.get(actor_path) {
+                        nodes.clone()
+                    } else {
+                        let nodes = self.select_redundant_nodes(actor_path, *replicas)?;
+                        redundant_nodes.insert(actor_path.to_string(), nodes.clone());
+                        nodes
+                    }
+                };
+                
+                // Return the first node and store others for redundancy
+                Ok(nodes[0].clone())
+            }
         }
     }
     
@@ -183,6 +215,68 @@ impl PlacementStrategyImpl {
         }
         
         hash
+    }
+
+    /// Select multiple nodes for redundancy using consistent hashing
+    fn select_redundant_nodes(&self, actor_path: &str, replicas: usize) -> ClusterResult<Vec<NodeId>> {
+        let available_nodes = self.selector.get_active_nodes();
+        
+        if available_nodes.is_empty() {
+            return Err(ClusterError::NoNodesAvailable);
+        }
+        
+        if replicas > available_nodes.len() {
+            return Err(ClusterError::InvalidOperation(
+                format!("Requested {} replicas but only {} nodes available", 
+                    replicas, available_nodes.len())
+            ));
+        }
+        
+        let mut selected_nodes = Vec::with_capacity(replicas);
+        let mut used_indices = std::collections::HashSet::new();
+        
+        // Generate hash for the actor path
+        let base_hash = self.hash_string(actor_path);
+        
+        // Select nodes using different hash variations
+        for i in 0..replicas {
+            let hash = base_hash.wrapping_add(i as u64);
+            
+            // Find the node with the closest hash that hasn't been used
+            let mut closest_distance = u64::MAX;
+            let mut selected_index = 0;
+            let mut found_unused_node = false;
+            
+            for (index, node_id) in available_nodes.iter().enumerate() {
+                if used_indices.contains(&index) {
+                    continue;
+                }
+                
+                found_unused_node = true;
+                let node_hash = self.hash_string(&node_id.to_string());
+                let distance = if node_hash > hash {
+                    node_hash - hash
+                } else {
+                    hash - node_hash
+                };
+                
+                if distance < closest_distance {
+                    closest_distance = distance;
+                    selected_index = index;
+                }
+            }
+            
+            if !found_unused_node {
+                return Err(ClusterError::InvalidOperation(
+                    format!("Not enough unique nodes available for {} replicas", replicas)
+                ));
+            }
+            
+            used_indices.insert(selected_index);
+            selected_nodes.push(available_nodes[selected_index].clone());
+        }
+        
+        Ok(selected_nodes)
     }
 }
 
