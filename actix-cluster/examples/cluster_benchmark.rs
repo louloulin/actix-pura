@@ -7,11 +7,16 @@ use tokio::sync::{Mutex, mpsc, RwLock};
 use tokio::time::{sleep, timeout};
 use std::collections::HashMap;
 use std::fmt;
+use std::collections::{VecDeque};
+use env_logger;
+use log;
 
 use actix_cluster::{
     Architecture, ClusterConfig, ClusterSystem, DiscoveryMethod, NodeRole, 
     SerializationFormat, NodeInfo, NodeId, ActorPath
 };
+use actix_cluster::message::DeliveryGuarantee;
+use serde::{Serialize, Deserialize};
 
 // 消息类型定义
 #[derive(Message, Clone)]
@@ -663,4 +668,905 @@ fn create_config(
                 })
                 .collect()
         })
+}
+
+// 配置参数
+const ACTOR_COUNT: usize = 10;    // 每个节点上的Actor数量
+const CLUSTER_NODES: usize = 10;   // 集群节点数量
+const MESSAGES_PER_ACTOR: u64 = 1000; // 每个Actor发送的消息数量
+const MESSAGE_SIZE: usize = 1024;     // 消息大小(字节)
+const BATCH_SIZE: usize = 100;        // 批处理大小
+
+// 定义可序列化的消息
+#[derive(Message, Clone, Serialize, Deserialize)]
+#[rtype(result = "()")]
+struct ClusterMessage {
+    id: u64,
+    sender_id: usize,
+    sender_node: usize,
+    timestamp: u128,
+    payload: Vec<u8>,
+}
+
+// 消息接收确认
+#[derive(Message, Clone, Serialize, Deserialize)]
+#[rtype(result = "()")]
+struct MessageAck {
+    message_id: u64,
+    sender_id: usize,
+    receiver_id: usize,
+    receiver_node: usize,
+    original_timestamp: u128,
+    receive_timestamp: u128,
+}
+
+// 结果请求
+#[derive(Message)]
+#[rtype(result = "()")]
+struct GetResults;
+
+// 测试启动消息
+#[derive(Message)]
+#[rtype(result = "()")]
+struct StartTest;
+
+// 测试Actor注册
+#[derive(Message)]
+#[rtype(result = "()")]
+struct RegisterTestActor {
+    actor_id: usize,
+    node_id: usize,
+    path: String,
+}
+
+// Actor指标数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ActorMetrics {
+    actor_id: usize,
+    node_id: usize,
+    sent_count: u64,
+    received_count: u64,
+    ack_count: u64,
+    min_latency: u64,
+    max_latency: u64,
+    avg_latency: u64,
+    p50_latency: u64,
+    p95_latency: u64,
+    p99_latency: u64,
+    throughput: f64,
+    test_duration: u64,
+}
+
+// 结果收集消息
+#[derive(Message, Clone, Serialize, Deserialize)]
+#[rtype(result = "()")]
+struct ReportMetrics(ActorMetrics);
+
+// 测试完成消息
+#[derive(Message)]
+#[rtype(result = "()")]
+struct TestCompleted;
+
+// 集群测试Actor
+struct ClusterTestActor {
+    id: usize,
+    node_id: usize,
+    cluster: Arc<ClusterSystem>,
+    start_time: Instant,
+    sent_count: u64,
+    received_count: u64,
+    ack_count: u64,
+    total_latency: u128,
+    latencies: VecDeque<u64>,
+    coordinator_path: Option<String>,
+    target_actors: Vec<String>,
+}
+
+impl ClusterTestActor {
+    fn new(id: usize, node_id: usize, cluster: Arc<ClusterSystem>) -> Self {
+        Self {
+            id,
+            node_id,
+            cluster,
+            start_time: Instant::now(),
+            sent_count: 0,
+            received_count: 0,
+            ack_count: 0,
+            total_latency: 0,
+            latencies: VecDeque::with_capacity(100),
+            coordinator_path: None,
+            target_actors: Vec::new(),
+        }
+    }
+    
+    // 计算性能指标
+    fn calculate_metrics(&self) -> ActorMetrics {
+        let test_duration = self.start_time.elapsed().as_millis();
+        
+        // 计算延迟统计
+        let avg_latency = if !self.latencies.is_empty() {
+            self.total_latency as u64 / self.latencies.len() as u64
+    } else {
+            0
+        };
+        
+        // 计算百分位数
+        let (p50, p95, p99) = if self.latencies.len() >= 10 {
+            let mut latencies: Vec<u64> = self.latencies.iter().copied().collect();
+            latencies.sort();
+            
+            let p50_idx = (latencies.len() as f64 * 0.5) as usize;
+            let p95_idx = (latencies.len() as f64 * 0.95) as usize;
+            let p99_idx = (latencies.len() as f64 * 0.99) as usize;
+            
+            (
+                *latencies.get(p50_idx).unwrap_or(&0),
+                *latencies.get(p95_idx).unwrap_or(&0),
+                *latencies.get(p99_idx).unwrap_or(&0)
+            )
+        } else {
+            (0, 0, 0)
+        };
+        
+        // 计算最小/最大延迟
+        let min_latency = self.latencies.iter().min().copied().unwrap_or(0);
+        let max_latency = self.latencies.iter().max().copied().unwrap_or(0);
+        
+        // 计算吞吐量 (消息/秒)
+        let throughput = if test_duration > 0 {
+            self.received_count as f64 / (test_duration as f64 / 1000.0)
+    } else {
+            0.0
+        };
+        
+        // 构建指标
+        ActorMetrics {
+            actor_id: self.id,
+            node_id: self.node_id,
+            sent_count: self.sent_count,
+            received_count: self.received_count,
+            ack_count: self.ack_count,
+            min_latency,
+            max_latency,
+            avg_latency,
+            p50_latency: p50,
+            p95_latency: p95,
+            p99_latency: p99,
+            throughput,
+            test_duration: test_duration as u64,
+        }
+    }
+    
+    // 发送测试结果到协调器
+    fn send_results_to_coordinator(&self, ctx: &mut <Self as Actor>::Context) {
+        if let Some(coord_path) = &self.coordinator_path {
+            let metrics = self.calculate_metrics();
+            
+            log::info!("Actor {}/{} sending results to coordinator: sent={}, received={}, acks={}",
+                     self.node_id, self.id, metrics.sent_count, metrics.received_count, metrics.ack_count);
+            
+            // 构造ReportMetrics消息
+            let report = ReportMetrics(metrics);
+            
+            // 通过集群发送到协调器
+            if let Err(e) = self.cluster.send_remote(
+                coord_path,
+                report,
+                DeliveryGuarantee::AtLeastOnce
+            ) {
+                log::error!("Failed to send results to coordinator: {:?}", e);
+            }
+    } else {
+            log::error!("No coordinator path set, can't send results");
+        }
+    }
+}
+
+impl Actor for ClusterTestActor {
+    type Context = Context<Self>;
+    
+    fn started(&mut self, _: &mut Self::Context) {
+        log::info!("ClusterTestActor {}/{} started", self.node_id, self.id);
+        self.start_time = Instant::now();
+    }
+}
+
+// 处理集群消息
+impl Handler<ClusterMessage> for ClusterTestActor {
+    type Result = ();
+    
+    fn handle(&mut self, msg: ClusterMessage, _: &mut Self::Context) -> Self::Result {
+        self.received_count += 1;
+        
+        // 收集延迟统计
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        
+        if msg.timestamp > 0 && now >= msg.timestamp {
+            let latency = now - msg.timestamp;
+            
+            // 只记录合理的延迟 (< 60秒)
+            if latency < 60000 {
+                self.total_latency += latency;
+                
+                // 存储延迟样本 (保留最近100个)
+                if self.latencies.len() >= 100 {
+                    self.latencies.pop_front();
+                }
+                self.latencies.push_back(latency as u64);
+            }
+        }
+        
+        // 记录日志，每100条消息记录一次
+        if self.received_count % 100 == 0 {
+            log::info!("Actor {}/{} received {} messages", 
+                     self.node_id, self.id, self.received_count);
+        }
+        
+        // 发送确认消息回发送者
+        self.send_ack(msg);
+    }
+}
+
+// 处理确认消息
+impl Handler<MessageAck> for ClusterTestActor {
+    type Result = ();
+    
+    fn handle(&mut self, msg: MessageAck, _: &mut Self::Context) -> Self::Result {
+        self.ack_count += 1;
+        
+        // 计算往返延迟
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        
+        if msg.original_timestamp > 0 && now >= msg.original_timestamp {
+            let rtt = now - msg.original_timestamp;
+            
+            // 只记录合理的延迟 (< 2分钟)
+            if rtt < 120000 {
+                // 可以在这里单独记录往返延迟统计
+            }
+        }
+        
+        // 每100个确认记录一次
+        if self.ack_count % 100 == 0 {
+            log::debug!("Actor {}/{} received {} acks", 
+                      self.node_id, self.id, self.ack_count);
+        }
+    }
+}
+
+impl ClusterTestActor {
+    // 发送确认消息
+    fn send_ack(&self, msg: ClusterMessage) {
+        // 构造源Actor的路径
+        let source_path = format!("test-actor-{}-{}", msg.sender_node, msg.sender_id);
+        
+        // 获取当前时间戳
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        
+        // 创建确认消息
+        let ack = MessageAck {
+            message_id: msg.id,
+            sender_id: msg.sender_id,
+            receiver_id: self.id,
+            receiver_node: self.node_id,
+            original_timestamp: msg.timestamp,
+            receive_timestamp: now,
+        };
+        
+        // 通过集群发送确认
+        if let Err(e) = self.cluster.send_remote(
+            &source_path,
+            ack,
+            DeliveryGuarantee::AtMostOnce // 确认消息可以用较低的保证级别
+        ) {
+            log::error!("Failed to send ack to {}: {:?}", source_path, e);
+        }
+    }
+}
+
+// 处理发送测试消息请求
+impl Handler<StartTest> for ClusterTestActor {
+    type Result = ResponseFuture<()>;
+    
+    fn handle(&mut self, _: StartTest, ctx: &mut Self::Context) -> Self::Result {
+        let actor_id = self.id;
+        let node_id = self.node_id;
+        let targets = self.target_actors.clone();
+        let cluster = self.cluster.clone();
+        let self_addr = ctx.address();
+        
+        Box::pin(async move {
+            if targets.is_empty() {
+                log::warn!("Actor {}/{} has no targets to send to", node_id, actor_id);
+                return;
+            }
+            
+            log::info!("Actor {}/{} starting test, sending to {} targets", 
+                     node_id, actor_id, targets.len());
+            
+            let start = Instant::now();
+            let mut sent_count = 0;
+            
+            // 计算每个目标要发送的消息数
+            let msgs_per_target = MESSAGES_PER_ACTOR / targets.len() as u64;
+            let msgs_per_batch = BATCH_SIZE.min(msgs_per_target as usize) as u64;
+            
+            // 对每个目标发送消息
+            for target_path in &targets {
+                let mut target_sent = 0;
+                
+                while target_sent < msgs_per_target {
+                    // 每批次消息数量
+                    let batch_size = msgs_per_batch.min(msgs_per_target - target_sent);
+                    
+                    for i in 0..batch_size {
+                        // 生成当前消息ID
+                        let msg_id = target_sent + i;
+                        
+                        // 获取当前时间戳
+                        let timestamp = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis();
+                        
+                        // 创建测试消息
+                        let msg = ClusterMessage {
+                            id: msg_id,
+                            sender_id: actor_id,
+                            sender_node: node_id,
+                            timestamp,
+                            payload: vec![0u8; MESSAGE_SIZE],
+                        };
+                        
+                        // 发送到远程Actor
+                        if let Err(e) = cluster.send_remote(
+                            target_path,
+                            msg,
+                            DeliveryGuarantee::AtLeastOnce
+                        ) {
+                            log::error!("Failed to send message to {}: {:?}", target_path, e);
+                        } else {
+                            sent_count += 1;
+                        }
+                    }
+                    
+                    target_sent += batch_size;
+                    
+                    // 每批次之间暂停，避免系统过载
+                    if target_sent < msgs_per_target {
+                        sleep(Duration::from_millis(50)).await;
+                    }
+                }
+                
+                // 每个目标之间暂停，避免系统过载
+                sleep(Duration::from_millis(100)).await;
+            }
+            
+            // 更新发送计数
+            self_addr.do_send(UpdateSendCount(sent_count));
+            
+            let elapsed = start.elapsed();
+            log::info!("Actor {}/{} finished sending {} messages in {:?}", 
+                     node_id, actor_id, sent_count, elapsed);
+        })
+    }
+}
+
+// 更新发送计数消息
+#[derive(Message)]
+#[rtype(result = "()")]
+struct UpdateSendCount(u64);
+
+impl Handler<UpdateSendCount> for ClusterTestActor {
+    type Result = ();
+    
+    fn handle(&mut self, msg: UpdateSendCount, _: &mut Self::Context) -> Self::Result {
+        self.sent_count = msg.0;
+    }
+}
+
+// 更新目标Actor列表
+#[derive(Message)]
+#[rtype(result = "()")]
+struct UpdateTargets {
+    targets: Vec<String>,
+    coordinator: String,
+}
+
+impl Handler<UpdateTargets> for ClusterTestActor {
+    type Result = ();
+    
+    fn handle(&mut self, msg: UpdateTargets, _: &mut Self::Context) -> Self::Result {
+        self.target_actors = msg.targets;
+        self.coordinator_path = Some(msg.coordinator);
+        
+        log::info!("Actor {}/{} updated with {} targets and coordinator {}",
+                 self.node_id, self.id, self.target_actors.len(), msg.coordinator);
+    }
+}
+
+// 处理获取结果请求
+impl Handler<GetResults> for ClusterTestActor {
+    type Result = ();
+    
+    fn handle(&mut self, _: GetResults, ctx: &mut Self::Context) -> Self::Result {
+        // 计算并发送结果到协调器
+        self.send_results_to_coordinator(ctx);
+    }
+}
+
+// 测试协调器
+struct TestCoordinator {
+    node_id: usize,
+    cluster: Arc<ClusterSystem>,
+    expected_actors: usize,
+    registered_actors: HashMap<String, (usize, usize)>, // path -> (node_id, actor_id)
+    results: HashMap<(usize, usize), ActorMetrics>, // (node_id, actor_id) -> metrics
+    start_time: Instant,
+    test_started: bool,
+}
+
+impl TestCoordinator {
+    fn new(node_id: usize, cluster: Arc<ClusterSystem>, expected_actors: usize) -> Self {
+        Self {
+            node_id,
+            cluster,
+            expected_actors,
+            registered_actors: HashMap::new(),
+            results: HashMap::new(),
+            start_time: Instant::now(),
+            test_started: false,
+        }
+    }
+    
+    // 分发目标Actor给所有测试Actor
+    fn distribute_targets(&self) {
+        if self.registered_actors.len() < self.expected_actors {
+            log::warn!("Not all actors registered yet: {}/{}", 
+                     self.registered_actors.len(), self.expected_actors);
+        }
+        
+        log::info!("Distributing targets to {} registered actors", self.registered_actors.len());
+        
+        let coordinator_path = format!("test-coordinator-{}", self.node_id);
+        let all_paths: Vec<String> = self.registered_actors.keys().cloned().collect();
+        
+        // 为每个Actor分配目标
+        for (actor_path, (node_id, actor_id)) in &self.registered_actors {
+            // 创建目标列表 (排除自己)
+            let targets: Vec<String> = all_paths.iter()
+                .filter(|&path| path != actor_path)
+                .take(10) // 每个Actor最多10个目标
+                .cloned()
+                .collect();
+            
+            // 更新目标消息
+            let update = UpdateTargets {
+                targets,
+                coordinator: coordinator_path.clone(),
+            };
+            
+            // 发送更新
+            if let Err(e) = self.cluster.send_remote(
+                actor_path,
+                update,
+                DeliveryGuarantee::AtLeastOnce
+            ) {
+                log::error!("Failed to update targets for {}/{}: {:?}", 
+                          node_id, actor_id, e);
+            }
+        }
+    }
+    
+    // 启动测试
+    fn start_test(&mut self, ctx: &mut <Self as Actor>::Context) {
+        if self.test_started {
+            return;
+        }
+        
+        self.test_started = true;
+        self.start_time = Instant::now();
+        
+        log::info!("Starting test with {} actors", self.registered_actors.len());
+        
+        // 向所有Actor发送开始测试消息
+        for (actor_path, (node_id, actor_id)) in &self.registered_actors {
+            if let Err(e) = self.cluster.send_remote(
+                actor_path,
+                StartTest {},
+                DeliveryGuarantee::AtLeastOnce
+            ) {
+                log::error!("Failed to start test for {}/{}: {:?}", 
+                          node_id, actor_id, e);
+            }
+        }
+        
+        // 设置定时器收集结果
+        ctx.run_later(Duration::from_secs(120), |_, ctx| {
+            ctx.address().do_send(CollectAllResults);
+        });
+    }
+    
+    // 分析并输出结果
+    fn analyze_results(&self) {
+        if self.results.is_empty() {
+            log::error!("No results received!");
+            return;
+        }
+        
+        let total_duration = self.start_time.elapsed();
+        let total_actors = self.results.len();
+        let total_sent: u64 = self.results.values().map(|m| m.sent_count).sum();
+        let total_received: u64 = self.results.values().map(|m| m.received_count).sum();
+        let total_acks: u64 = self.results.values().map(|m| m.ack_count).sum();
+        
+        // 计算消息成功率
+        let delivery_rate = if total_sent > 0 {
+            (total_received as f64 / total_sent as f64) * 100.0
+        } else {
+            0.0
+        };
+        
+        let ack_rate = if total_sent > 0 {
+            (total_acks as f64 / total_sent as f64) * 100.0
+        } else {
+            0.0
+        };
+        
+        // 聚合延迟统计
+        let mut all_latencies = Vec::new();
+        let mut min_latency = u64::MAX;
+        let mut max_latency = 0;
+        
+        for metrics in self.results.values() {
+            if metrics.min_latency > 0 && metrics.min_latency < min_latency {
+                min_latency = metrics.min_latency;
+            }
+            
+            if metrics.max_latency > max_latency {
+                max_latency = metrics.max_latency;
+            }
+            
+            if metrics.avg_latency > 0 {
+                all_latencies.push(metrics.avg_latency);
+            }
+        }
+        
+        // 确保最小延迟有效
+        if min_latency == u64::MAX {
+            min_latency = 0;
+        }
+        
+        // 计算平均延迟
+        let avg_latency = if !all_latencies.is_empty() {
+            all_latencies.iter().sum::<u64>() / all_latencies.len() as u64
+        } else {
+            0
+        };
+        
+        // 计算吞吐量
+        let total_throughput: f64 = self.results.values().map(|m| m.throughput).sum();
+        
+        // 按节点分组计算统计
+        let mut node_stats: HashMap<usize, Vec<&ActorMetrics>> = HashMap::new();
+        
+        for metrics in self.results.values() {
+            node_stats.entry(metrics.node_id)
+                .or_insert_with(Vec::new)
+                .push(metrics);
+        }
+        
+        // 输出整体结果
+        log::info!("\n==== CLUSTER BENCHMARK RESULTS ====");
+        log::info!("Test duration: {:?}", total_duration);
+        log::info!("Total actors: {}/{}", total_actors, self.expected_actors);
+        log::info!("Messages sent: {}", total_sent);
+        log::info!("Messages received: {}", total_received);
+        log::info!("Acknowledgements received: {}", total_acks);
+        log::info!("Message delivery rate: {:.2}%", delivery_rate);
+        log::info!("Acknowledgement rate: {:.2}%", ack_rate);
+        log::info!("Min latency: {} ms", min_latency);
+        log::info!("Avg latency: {} ms", avg_latency);
+        log::info!("Max latency: {} ms", max_latency);
+        log::info!("Total throughput: {:.2} msg/sec", total_throughput);
+        log::info!("Avg throughput per actor: {:.2} msg/sec", 
+                 if total_actors > 0 { total_throughput / total_actors as f64 } else { 0.0 });
+        
+        // 输出每个节点的结果
+        log::info!("\n==== NODE STATISTICS ====");
+        
+        let mut node_ids: Vec<usize> = node_stats.keys().cloned().collect();
+        node_ids.sort();
+        
+        for &node_id in &node_ids {
+            if let Some(metrics) = node_stats.get(&node_id) {
+                let node_sent: u64 = metrics.iter().map(|m| m.sent_count).sum();
+                let node_received: u64 = metrics.iter().map(|m| m.received_count).sum();
+                let node_acks: u64 = metrics.iter().map(|m| m.ack_count).sum();
+                let node_throughput: f64 = metrics.iter().map(|m| m.throughput).sum();
+                
+                log::info!("Node {}: actors={}, sent={}, received={}, acks={}, throughput={:.2} msg/sec",
+                         node_id, metrics.len(), node_sent, node_received, node_acks, node_throughput);
+            }
+        }
+    }
+}
+
+impl Actor for TestCoordinator {
+    type Context = Context<Self>;
+    
+    fn started(&mut self, _: &mut Self::Context) {
+        log::info!("TestCoordinator started on node {}, expecting {} actors", 
+                 self.node_id, self.expected_actors);
+    }
+}
+
+// 处理Actor注册
+impl Handler<RegisterTestActor> for TestCoordinator {
+    type Result = ();
+    
+    fn handle(&mut self, msg: RegisterTestActor, ctx: &mut Self::Context) -> Self::Result {
+        // 注册Actor
+        self.registered_actors.insert(
+            msg.path.clone(),
+            (msg.node_id, msg.actor_id)
+        );
+        
+        log::info!("Registered actor {}/{} (path: {}), total: {}/{}",
+                 msg.node_id, msg.actor_id, msg.path,
+                 self.registered_actors.len(), self.expected_actors);
+        
+        // 当所有Actor都注册完成后开始测试
+        if self.registered_actors.len() >= self.expected_actors && !self.test_started {
+            log::info!("All actors registered, distributing targets and starting test");
+            self.distribute_targets();
+            
+            // 稍微延迟测试开始，确保所有Actor都收到目标更新
+            ctx.run_later(Duration::from_secs(5), |coord, ctx| {
+                coord.start_test(ctx);
+            });
+        }
+    }
+}
+
+// 处理指标报告
+impl Handler<ReportMetrics> for TestCoordinator {
+    type Result = ();
+    
+    fn handle(&mut self, msg: ReportMetrics, _: &mut Self::Context) -> Self::Result {
+        let actor_id = msg.0.actor_id;
+        let node_id = msg.0.node_id;
+        
+        self.results.insert((node_id, actor_id), msg.0.clone());
+        
+        log::info!("Received metrics from {}/{}, total: {}/{}",
+                 node_id, actor_id, self.results.len(), self.expected_actors);
+        
+        // 如果所有结果都已收集，分析结果
+        if self.results.len() >= self.expected_actors {
+            log::info!("All results collected, analyzing...");
+            self.analyze_results();
+        }
+    }
+}
+
+// 收集所有结果消息
+#[derive(Message)]
+#[rtype(result = "()")]
+struct CollectAllResults;
+
+impl Handler<CollectAllResults> for TestCoordinator {
+    type Result = ();
+    
+    fn handle(&mut self, _: CollectAllResults, ctx: &mut Self::Context) -> Self::Result {
+        log::info!("Collecting results from all actors...");
+        
+        // 向所有Actor发送获取结果请求
+        for (actor_path, (node_id, actor_id)) in &self.registered_actors {
+            if let Err(e) = self.cluster.send_remote(
+                actor_path,
+                GetResults {},
+                DeliveryGuarantee::AtLeastOnce
+            ) {
+                log::error!("Failed to request results from {}/{}: {:?}", 
+                          node_id, actor_id, e);
+            }
+        }
+        
+        // 设置超时，确保测试最终会完成
+        ctx.run_later(Duration::from_secs(30), |coord, ctx| {
+            // 即使没有收到所有结果，也分析已有数据
+            log::warn!("Results collection timeout, analyzing available data: {}/{}",
+                     coord.results.len(), coord.expected_actors);
+            coord.analyze_results();
+            
+            // 发送测试完成消息，通知系统可以关闭
+            ctx.address().do_send(TestCompleted);
+        });
+    }
+}
+
+// 处理测试完成
+impl Handler<TestCompleted> for TestCoordinator {
+    type Result = ();
+    
+    fn handle(&mut self, _: TestCompleted, ctx: &mut Self::Context) -> Self::Result {
+        log::info!("Test completed, stopping system");
+        
+        // 延迟停止系统，确保日志能够输出
+        actix_rt::spawn(async {
+            sleep(Duration::from_secs(2)).await;
+            System::current().stop();
+        });
+    }
+}
+
+#[actix_rt::main]
+async fn main() -> std::io::Result<()> {
+    // 初始化日志
+    env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
+    
+    log::info!("Starting cluster benchmark with {} actors on {} nodes",
+             ACTOR_COUNT, CLUSTER_NODES);
+    
+    // 创建集群节点
+    let mut cluster_systems = Vec::new();
+    let mut coordinator_addr = None;
+    
+    // 在本地模拟多个集群节点
+    for node_id in 0..CLUSTER_NODES {
+        let port = 10000 + node_id as u16;
+        
+        // 创建集群配置
+        let config = ClusterConfig::default()
+            .architecture(Architecture::Decentralized)
+            .node_role(actix_cluster::config::NodeRole::Peer)
+            .bind_addr(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port))
+            .serialization_format(SerializationFormat::Json)
+            .cluster_name(format!("benchmark-cluster"))
+            .discovery_method(DiscoveryMethod::Manual(
+                (0..CLUSTER_NODES).map(|i| {
+                    SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 10000 + i as u16)
+                }).collect()
+            ));
+        
+        // 创建集群系统
+        let cluster = ClusterSystem::new(&format!("node-{}", node_id), config);
+        
+        // 启动集群
+        match cluster.start().await {
+            Ok(_) => {
+                log::info!("Started cluster node {}", node_id);
+                
+                // 在第一个节点上创建协调器
+                if node_id == 0 {
+                    let expected_actors = ACTOR_COUNT * CLUSTER_NODES;
+                    let coordinator = TestCoordinator::new(node_id, Arc::new(cluster.clone()), expected_actors).start();
+                    
+                    // 将协调器注册到集群
+                    if let Err(e) = cluster.register_recipient(
+                        &format!("test-coordinator-{}", node_id),
+                        coordinator.recipient::<RegisterTestActor>()
+                    ).await {
+                        log::error!("Failed to register coordinator for RegisterTestActor: {:?}", e);
+                    }
+                    
+                    if let Err(e) = cluster.register_recipient(
+                        &format!("test-coordinator-{}", node_id),
+                        coordinator.recipient::<ReportMetrics>()
+                    ).await {
+                        log::error!("Failed to register coordinator for ReportMetrics: {:?}", e);
+                    }
+                    
+                    coordinator_addr = Some(coordinator);
+                }
+                
+                cluster_systems.push(Arc::new(cluster));
+            },
+            Err(e) => {
+                log::error!("Failed to start cluster node {}: {:?}", node_id, e);
+            }
+        }
+        
+        // 每创建一个节点暂停一下，避免资源冲突
+        sleep(Duration::from_millis(500)).await;
+    }
+    
+    log::info!("Started {} cluster nodes", cluster_systems.len());
+    
+    // 遍历所有节点创建测试Actor
+    for (node_idx, cluster) in cluster_systems.iter().enumerate() {
+        log::info!("Creating {} actors on node {}", ACTOR_COUNT, node_idx);
+        
+        for actor_idx in 0..ACTOR_COUNT {
+            // 创建测试Actor
+            let test_actor = ClusterTestActor::new(actor_idx, node_idx, cluster.clone()).start();
+            
+            // 生成Actor路径
+            let actor_path = format!("test-actor-{}-{}", node_idx, actor_idx);
+            
+            // 注册Actor到集群
+            if let Err(e) = cluster.register_recipient(
+                &actor_path,
+                test_actor.recipient::<ClusterMessage>()
+            ).await {
+                log::error!("Failed to register actor for ClusterMessage: {:?}", e);
+            }
+            
+            if let Err(e) = cluster.register_recipient(
+                &actor_path,
+                test_actor.recipient::<MessageAck>()
+            ).await {
+                log::error!("Failed to register actor for MessageAck: {:?}", e);
+            }
+            
+            if let Err(e) = cluster.register_recipient(
+                &actor_path,
+                test_actor.recipient::<UpdateTargets>()
+            ).await {
+                log::error!("Failed to register actor for UpdateTargets: {:?}", e);
+            }
+            
+            if let Err(e) = cluster.register_recipient(
+                &actor_path,
+                test_actor.recipient::<StartTest>()
+            ).await {
+                log::error!("Failed to register actor for StartTest: {:?}", e);
+            }
+            
+            if let Err(e) = cluster.register_recipient(
+                &actor_path,
+                test_actor.recipient::<GetResults>()
+            ).await {
+                log::error!("Failed to register actor for GetResults: {:?}", e);
+            }
+            
+            // 向协调器注册Actor
+            if let Some(coordinator_path) = coordinator_addr.as_ref().map(|_| format!("test-coordinator-0")) {
+                let register_msg = RegisterTestActor {
+                    actor_id: actor_idx,
+                    node_id: node_idx,
+                    path: actor_path.clone(),
+                };
+                
+                if let Err(e) = cluster.send_remote(
+                    &coordinator_path,
+                    register_msg,
+                    DeliveryGuarantee::AtLeastOnce
+                ) {
+                    log::error!("Failed to register actor with coordinator: {:?}", e);
+                }
+            }
+            
+            // 每创建10个Actor暂停一下
+            if actor_idx % 10 == 9 {
+                sleep(Duration::from_millis(100)).await;
+            }
+        }
+    }
+    
+    // 等待测试完成
+    log::info!("All actors created and registered, waiting for test to complete");
+    
+    // 设置全局超时
+    let timeout = Duration::from_secs(600); // 10分钟超时
+    let start_time = Instant::now();
+    
+    while start_time.elapsed() < timeout {
+        sleep(Duration::from_secs(1)).await;
+    }
+    
+    log::warn!("Global timeout reached after {:?}, stopping", timeout);
+    System::current().stop();
+    
+    Ok(())
 } 
