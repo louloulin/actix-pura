@@ -518,25 +518,40 @@ impl P2PTransport {
                 if let Some(registry_adapter) = &self.registry_adapter {
                     // Clone the values for the async block
                     let registry = registry_adapter.clone();
-                    let sender_id = sender_id.clone();
-                    let path = path.clone();
+                    let sender_id_clone = sender_id.clone();
+                    let path_clone = path.clone();
                     
                     // Handle the request directly instead of spawning a task
-                    if let Err(e) = registry.handle_discovery_request(sender_id, path).await {
+                    if let Err(e) = registry.handle_discovery_request(&sender_id, path).await {
                         error!("Error handling actor discovery request: {:?}", e);
+                        println!("Error handling actor discovery request: {:?}", e);
+                    } else {
+                        debug!("Successfully processed actor discovery request from {}", sender_id_clone);
+                        println!("Successfully processed actor discovery request from {}", sender_id_clone);
                     }
                 } else {
                     debug!("No registry adapter available to handle actor discovery request");
+                    println!("No registry adapter available to handle actor discovery request from {}", sender_id);
                 }
                 Ok(())
             },
             TransportMessage::ActorDiscoveryResponse(path, locations) => {
                 debug!("Received actor discovery response for {} with locations: {:?}", path, locations);
+                println!("Received actor discovery response for {} with locations: {:?}", path, locations);
                 
                 // Get the registry adapter if available
                 if let Some(registry_adapter) = &self.registry_adapter {
                     // Handle the response
-                    registry_adapter.handle_discovery_response(path, locations);
+                    if let Some(actor_ref) = registry_adapter.handle_discovery_response(path, locations) {
+                        debug!("Successfully created actor reference from discovery response");
+                        println!("Successfully created actor reference from discovery response");
+                    } else {
+                        debug!("Failed to create actor reference from discovery response");
+                        println!("Failed to create actor reference from discovery response");
+                    }
+                } else {
+                    debug!("No registry adapter available to handle actor discovery response");
+                    println!("No registry adapter available to handle actor discovery response");
                 }
                 Ok(())
             },
@@ -837,6 +852,11 @@ impl P2PTransport {
     /// 为测试目的获取消息处理器
     pub fn get_message_handler_for_testing(&self) -> Option<Arc<Mutex<dyn MessageHandler>>> {
         self.message_handler.clone()
+    }
+
+    /// Get connections map for testing
+    pub fn connections_for_testing(&self) -> Arc<Mutex<HashMap<NodeId, Arc<TokioMutex<TcpStream>>>>> {
+        self.connections.clone()
     }
 
     /// 为测试目的直接发送消息，不依赖连接状态

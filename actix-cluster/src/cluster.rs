@@ -48,7 +48,7 @@ pub struct ClusterSystem {
     system_actor: Option<Addr<ClusterSystemActor>>,
     
     /// P2P transport for decentralized architecture
-    transport: Option<Arc<Mutex<crate::transport::P2PTransport>>>,
+    pub transport: Option<Arc<Mutex<crate::transport::P2PTransport>>>,
     
     /// Actor注册表
     registry: Arc<ActorRegistry>,
@@ -94,12 +94,14 @@ impl ClusterSystem {
         info!("Starting cluster system...");
         debug!("Local node: {:?}", self.local_node);
         debug!("Config: {:?}", self.config);
+        println!("Starting cluster system with local node: {:?}", self.local_node);
         
         // 创建传输层
         let transport = match self.config.architecture {
             Architecture::Decentralized => {
                 // 对于去中心化架构，使用P2P传输
                 info!("Creating P2P transport for decentralized architecture");
+                println!("Creating P2P transport for decentralized architecture");
                 let transport = P2PTransport::new(
                     self.local_node.clone(),
                     self.config.serialization_format,
@@ -110,6 +112,7 @@ impl ClusterSystem {
                 if self.local_node.role == NodeRole::Peer {
                     // 对于中心化架构中的对等节点，也使用P2P传输
                     info!("Creating P2P transport for centralized architecture (peer node)");
+                    println!("Creating P2P transport for centralized architecture (peer node)");
                     let transport = P2PTransport::new(
                         self.local_node.clone(),
                         self.config.serialization_format,
@@ -118,6 +121,7 @@ impl ClusterSystem {
                 } else {
                     // 对于中心化架构中的主节点，目前不需要传输层
                     info!("No transport needed for centralized master node");
+                    println!("No transport needed for centralized master node");
                     None
                 }
             }
@@ -129,26 +133,44 @@ impl ClusterSystem {
         let registry_actor = RegistryActor::new(self.registry.clone()).start();
         self.registry_actor = Some(registry_actor);
         
-        // 创建一个新的registry对象，避免借用Arc
-        let mut registry = ActorRegistry::new(self.local_node.id.clone());
+        println!("Registry actor started");
         
+        // Create a new instance of the registry with the correct node ID
+        let mut new_registry = ActorRegistry::new(self.local_node.id.clone());
+        
+        // If we have a transport, set it on the registry first
         if let Some(transport) = &transport {
-            registry.set_transport(transport.clone());
+            println!("Setting transport for registry");
+            new_registry.set_transport(transport.clone());
         }
         
-        // 更新registry
-        self.registry = Arc::new(registry);
+        // Replace the old registry with the new one that has transport set
+        self.registry = Arc::new(new_registry);
         
-        // 如果有传输层，设置registry adapter
+        // Now that we have a registry with transport, update the registry_actor
+        if let Some(registry_actor) = &self.registry_actor {
+            // Update the registry actor with our new registry
+            registry_actor.do_send(crate::registry::UpdateRegistry {
+                registry: self.registry.clone(),
+            });
+        }
+        
+        // If we have a transport, set the registry adapter
         if let Some(transport) = &transport {
+            println!("Setting registry adapter for transport");
             let mut transport_lock = transport.lock().await;
+            
+            // Set the registry adapter with our updated registry that has transport set
             transport_lock.set_registry_adapter(self.registry.clone());
             
             // 启动传输层
             if !transport_lock.is_started() {
                 debug!("Starting transport layer");
-                // We've already initialized transport but need to start it
-                // transport_lock.start().await?;
+                println!("Starting transport layer");
+                transport_lock.init().await?;
+                
+                // Let the transport layer know about itself
+                println!("Transport layer started successfully");
             }
         }
         
@@ -165,6 +187,7 @@ impl ClusterSystem {
         let addr = system_actor.start();
         self.system_actor = Some(addr.clone());
         
+        println!("Cluster system started successfully");
         Ok(addr)
     }
     
