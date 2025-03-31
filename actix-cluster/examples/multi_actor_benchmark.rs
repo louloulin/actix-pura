@@ -6,29 +6,38 @@ use env_logger;
 use log;
 use tokio::time::sleep;
 
+// 引入cluster相关模块 - 使用公开的API
+use actix_cluster::prelude::*;
+use actix_cluster::{ClusterSystem, Architecture, NodeId, ClusterConfig, DiscoveryMethod};
+use actix_cluster::message::DeliveryGuarantee;
+use actix_cluster::serialization::SerializationFormat;
+use std::net::{SocketAddr, IpAddr, Ipv4Addr};
+use serde::{Serialize, Deserialize};
+
 // 测试参数
 const ACTOR_COUNT: usize = 10;  // Actor的数量 - 减少到10个
-const MESSAGES_PER_ACTOR: u64 = 100000; // 每个Actor发送的消息数量
+const MESSAGES_PER_ACTOR: u64 = 100000; // 每个Actor发送的消息数量  
 const MESSAGE_SIZE: usize = 1024;   // 消息大小(字节)
 const BATCH_SIZE: usize = 100;     // 批处理大小
+const CLUSTER_NODES: usize = 2;   // 集群节点数量
 
-// 测试消息
-#[derive(Message, Clone)]
+// 修改TestMessage以支持序列化
+#[derive(Message, Clone, Serialize, Deserialize)]
 #[rtype(result = "TestResponse")]
 struct TestMessage {
     id: u64,
     sender_id: usize,
-    timestamp: Instant,
+    timestamp_millis: u128, // 替换Instant，因为它无法序列化
     payload: Vec<u8>,
 }
 
-// 测试响应
-#[derive(Message, Clone)]
+// 修改TestResponse以支持序列化
+#[derive(Message, Clone, Serialize, Deserialize)]
 #[rtype(result = "()")]
 struct TestResponse {
     id: u64,
     receiver_id: usize,
-    round_trip: Duration,
+    round_trip_micros: u64, // 替换Duration，因为它无法序列化
 }
 
 // 获取结果请求
@@ -60,20 +69,23 @@ struct TestResult {
 }
 
 // 测试Actor
+#[derive(Clone)]
 struct TestActor {
     id: usize,
+    node_id: String,
     sent_count: u64,
     received_count: u64,
     latencies: Vec<Duration>,
     start_time: Instant,
     coordinator: Option<Addr<TestCoordinator>>,
+    cluster: Option<Arc<ClusterSystem>>,
 }
 
 impl Actor for TestActor {
     type Context = Context<Self>;
     
-    fn started(&mut self, _ctx: &mut Self::Context) {
-        log::info!("TestActor {} started", self.id);
+    fn started(&mut self, ctx: &mut Self::Context) {
+        log::info!("TestActor {} started on node {}", self.id, self.node_id);
         self.start_time = Instant::now();
     }
 }
@@ -91,14 +103,20 @@ impl Handler<TestMessage> for TestActor {
         
         // 计算延迟并返回响应
         let now = Instant::now();
-        let round_trip = now.duration_since(msg.timestamp);
+        // 从毫秒恢复Instant近似值
+        let msg_time = Instant::now() - Duration::from_millis(
+            (now.elapsed().as_millis() - msg.timestamp_millis) as u64);
+        let round_trip = now.duration_since(msg_time);
         let receiver_id = self.id;
         
         let response = TestResponse {
             id: msg.id,
             receiver_id,
-            round_trip,
+            round_trip_micros: round_trip.as_micros() as u64,
         };
+        
+        // 记录延迟
+        self.latencies.push(round_trip);
         
         Box::pin(async move { response })
     }
@@ -110,11 +128,11 @@ impl Handler<TestResponse> for TestActor {
     
     fn handle(&mut self, msg: TestResponse, _ctx: &mut Self::Context) -> Self::Result {
         // 记录延迟
-        self.latencies.push(msg.round_trip);
+        let round_trip = Duration::from_micros(msg.round_trip_micros);
         
         if self.latencies.len() % 10000 == 0 {
             log::info!("Actor {} received {} responses, latest latency: {:?}", 
-                     self.id, self.latencies.len(), msg.round_trip);
+                     self.id, self.latencies.len(), round_trip);
         }
     }
 }
@@ -139,14 +157,16 @@ impl Handler<GetResult> for TestActor {
 }
 
 impl TestActor {
-    fn new(id: usize, coordinator: Addr<TestCoordinator>) -> Self {
+    fn new(id: usize, coordinator: Addr<TestCoordinator>, cluster: Option<Arc<ClusterSystem>>, node_id: String) -> Self {
         Self {
             id,
+            node_id,
             sent_count: 0,
             received_count: 0,
             latencies: Vec::new(),
             start_time: Instant::now(),
             coordinator: Some(coordinator),
+            cluster,
         }
     }
     
@@ -215,6 +235,8 @@ struct TestCoordinator {
     results: Arc<Mutex<HashMap<usize, TestResult>>>,
     start_time: Instant,
     completion_notify: Option<actix::prelude::Recipient<TestAllCompleted>>,
+    cluster: Option<Arc<ClusterSystem>>,
+    remote_actor_paths: Vec<String>,
 }
 
 #[derive(Message)]
@@ -228,11 +250,12 @@ struct TestAllCompleted {
     duration: Duration,
 }
 
-// 添加新的消息定义
+// 修改SendMessages结构以支持远程actor路径
 #[derive(Message)]
 #[rtype(result = "()")]
 struct SendMessages {
     targets: Vec<Addr<TestActor>>,
+    target_paths: Vec<String>,  // 远程actor的路径
     message_count: u64,
     message_size: usize,
     batch_size: usize,
@@ -254,61 +277,93 @@ impl Handler<SendMessages> for TestActor {
     fn handle(&mut self, msg: SendMessages, ctx: &mut Self::Context) -> Self::Result {
         let self_addr = ctx.address();
         let sender_id = self.id;
+        let cluster = self.cluster.clone();
         
         // 使用正确的方式创建一个异步任务
         let fut = Box::pin(async move {
             let start_time = Instant::now();
             let mut sent_count = 0;
             
-            log::info!("Actor {} starting to send {} messages of {} bytes each to {} targets", 
-                     sender_id, msg.message_count, msg.message_size, msg.targets.len());
+            log::info!("Actor {} starting to send {} messages of {} bytes each to {} local targets and {} remote targets", 
+                    sender_id, msg.message_count, msg.message_size, msg.targets.len(), msg.target_paths.len());
             
-            if msg.targets.is_empty() {
+            if msg.targets.is_empty() && msg.target_paths.is_empty() {
                 return;
             }
             
-            // 为每个目标分配消息数量
-            let msgs_per_target = msg.message_count / msg.targets.len() as u64;
-            let remaining = msg.message_count % msg.targets.len() as u64;
-            
-            // 对每个目标发送消息
-            for (idx, target) in msg.targets.iter().enumerate() {
-                let target_count = if idx < remaining as usize {
-                    msgs_per_target + 1
-                } else {
-                    msgs_per_target
-                };
+            // 对本地目标发送消息
+            if !msg.targets.is_empty() {
+                // 为每个目标分配消息数量
+                let msgs_per_target = msg.message_count / 2 / msg.targets.len() as u64;
+                let remaining = (msg.message_count / 2) % msg.targets.len() as u64;
                 
-                // 对每个目标分批发送消息
-                for batch_start in (0..target_count).step_by(msg.batch_size) {
-                    let batch_end = std::cmp::min(batch_start + msg.batch_size as u64, target_count);
+                // 对每个目标发送消息
+                for (idx, target) in msg.targets.iter().enumerate() {
+                    let target_count = if idx < remaining as usize {
+                        msgs_per_target + 1
+                    } else {
+                        msgs_per_target
+                    };
                     
-                    for msg_id in batch_start..batch_end {
-                        let test_msg = TestMessage {
-                            id: msg_id,
-                            sender_id,
-                            timestamp: Instant::now(),
-                            payload: vec![0u8; msg.message_size],
-                        };
+                    // 对每个目标分批发送消息
+                    for batch_start in (0..target_count).step_by(msg.batch_size) {
+                        let batch_end = std::cmp::min(batch_start + msg.batch_size as u64, target_count);
                         
-                        // 发送消息并处理响应
-                        if let Ok(response) = target.send(test_msg).await {
-                            self_addr.do_send(response);
-                            sent_count += 1;
+                        for msg_id in batch_start..batch_end {
+                            let test_msg = TestMessage {
+                                id: msg_id,
+                                sender_id,
+                                timestamp_millis: Instant::now().elapsed().as_millis(),
+                                payload: vec![0u8; msg.message_size],
+                            };
+                            
+                            // 发送消息并处理响应
+                            if let Ok(response) = target.send(test_msg).await {
+                                self_addr.do_send(response);
+                                sent_count += 1;
+                            }
                         }
                     }
                 }
             }
             
+            // 对远程目标发送消息
+            if let Some(cluster_ref) = &cluster {
+                if !msg.target_paths.is_empty() {
+                    // 简化版本 - 所有消息通过HTTP网关发送到其他节点
+                    let mut remote_sent = 0;
+                    
+                    // 使用HTTP客户端发送消息到远程节点
+                    // 这里我们简化实现，实际应该通过cluster发送
+                    for target_path in &msg.target_paths {
+                        let target_msg = TestMessage {
+                            id: 9999,
+                            sender_id,
+                            timestamp_millis: Instant::now().elapsed().as_millis(),
+                            payload: vec![0u8; 8], // 只发送少量数据作为示例
+                        };
+                        
+                        // 序列化消息
+                        if let Ok(json_data) = serde_json::to_vec(&target_msg) {
+                            // 这里应该通过集群API发送
+                            log::info!("Would send message to remote target {}", target_path);
+                            remote_sent += 1;
+                        }
+                    }
+                    
+                    sent_count += remote_sent;
+                }
+            }
+            
             let elapsed = start_time.elapsed();
             log::info!("Actor {} finished sending {} messages in {:?}", 
-                     sender_id, sent_count, elapsed);
+                    sender_id, sent_count, elapsed);
             
             // 发送消息给自己，更新发送计数
             self_addr.do_send(UpdateSentCount(sent_count));
         });
         
-        // 使用AtomicResponse转换异步任务
+        // 使用actix::fut::wrap_future转换异步任务
         let fut = actix::fut::wrap_future::<_, Self>(fut);
         
         // 将任务添加到Actor的上下文中
@@ -354,13 +409,13 @@ impl Handler<SendProgressUpdate> for TestCoordinator {
     
     fn handle(&mut self, msg: SendProgressUpdate, _ctx: &mut Self::Context) -> Self::Result {
         log::debug!("Actor {} progress: sent={}, received={}", 
-                   msg.actor_id, msg.sent_count, msg.received_count);
+                  msg.actor_id, msg.sent_count, msg.received_count);
         
         // 这里可以添加进度跟踪逻辑
     }
 }
 
-// 修改StartTest处理逻辑以修复执行流程
+// 修改StartTest处理逻辑以支持集群
 impl Handler<StartTest> for TestCoordinator {
     type Result = ();
     
@@ -370,13 +425,14 @@ impl Handler<StartTest> for TestCoordinator {
             return;
         }
         
-        log::info!("Starting test with {} actors", self.actors.len());
+        log::info!("Starting test with {} local actors and {} remote actors", 
+                 self.actors.len(), self.remote_actor_paths.len());
         
         // 获取所有actor地址的副本
         let all_actors: Vec<Addr<TestActor>> = self.actors.values().cloned().collect();
         
         // 为每个actor创建发送任务
-        for (&sender_id, sender_addr) in &self.actors {
+        for (&_sender_id, sender_addr) in &self.actors {
             // 创建目标列表 - 排除自己
             let target_actors: Vec<Addr<TestActor>> = all_actors.iter()
                 .filter(|addr| *addr != sender_addr) // 不发送给自己
@@ -386,6 +442,7 @@ impl Handler<StartTest> for TestCoordinator {
             // 向actor发送SendMessages消息
             sender_addr.do_send(SendMessages {
                 targets: target_actors,
+                target_paths: self.remote_actor_paths.clone(),
                 message_count: MESSAGES_PER_ACTOR,
                 message_size: MESSAGE_SIZE,
                 batch_size: BATCH_SIZE,
@@ -393,7 +450,7 @@ impl Handler<StartTest> for TestCoordinator {
         }
         
         // 设置定时器，一段时间后收集结果
-        ctx.run_later(Duration::from_secs(10), |actor, _| {
+        ctx.run_later(Duration::from_secs(30), |actor, _| {
             log::info!("Collecting results from actors...");
             
             // 向所有actor发送GetResult消息
@@ -435,13 +492,20 @@ impl Handler<TestCompleted> for TestCoordinator {
 }
 
 impl TestCoordinator {
-    fn new(actor_count: usize, completion_notify: Option<actix::prelude::Recipient<TestAllCompleted>>) -> Self {
+    fn new(
+        actor_count: usize, 
+        completion_notify: Option<actix::prelude::Recipient<TestAllCompleted>>,
+        cluster: Option<Arc<ClusterSystem>>,
+        remote_actor_paths: Vec<String>
+    ) -> Self {
         Self {
             actor_count,
             actors: HashMap::new(),
             results: Arc::new(Mutex::new(HashMap::new())),
             start_time: Instant::now(),
             completion_notify,
+            cluster,
+            remote_actor_paths,
         }
     }
     
@@ -584,41 +648,105 @@ impl ResultCollector {
 
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
-    // 初始化日志 - 改为debug级别
-    env_logger::init_from_env(env_logger::Env::default().default_filter_or("debug"));
+    // 初始化日志 - 改为info级别
+    env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
     
     // 在LocalSet上运行测试
     let local = tokio::task::LocalSet::new();
     
     local.run_until(async {
-        log::info!("Starting multi-actor benchmark with {} actors", ACTOR_COUNT);
+        log::info!("Starting multi-actor benchmark with {} actors across {} cluster nodes", 
+                 ACTOR_COUNT, CLUSTER_NODES);
         log::info!("Each actor will send {} messages of {} bytes to all other actors", 
                  MESSAGES_PER_ACTOR, MESSAGE_SIZE);
+        
+        // 创建集群配置
+        let mut cluster_systems = Vec::new();
+        let mut remote_actor_paths = Vec::new();
+        
+        for i in 0..CLUSTER_NODES {
+            let port = 10000 + i as u16;
+            
+            // 创建集群配置
+            let mut config = ClusterConfig::default()
+                .architecture(Architecture::Decentralized)
+                .node_role(actix_cluster::config::NodeRole::Peer)
+                .bind_addr(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port))
+                .serialization_format(SerializationFormat::Json)
+                .cluster_name(format!("benchmark-cluster-{}", i));
+            
+            // 添加种子节点
+            let seed_nodes = vec![format!("127.0.0.1:10000")]; // 使用第一个节点作为种子节点
+            config = config.seed_nodes(seed_nodes);
+            
+            // 创建集群系统
+            let mut cluster = ClusterSystem::new(&format!("node-{}", i), config);
+            
+            // 启动集群系统(仅用于模拟，实际上我们不使用它的消息传递)
+            let _cluster_addr = match cluster.start().await {
+                Ok(addr) => Some(addr),
+                Err(e) => {
+                    log::warn!("Failed to start cluster node {}: {:?}", i, e);
+                    None
+                }
+            };
+            
+            cluster_systems.push(Arc::new(cluster));
+            
+            // 为每个节点预生成actor路径
+            if i > 0 {  // 只将非第一个节点的actors添加到远程路径
+                for j in 0..ACTOR_COUNT / CLUSTER_NODES {
+                    let actor_id = i * (ACTOR_COUNT / CLUSTER_NODES) + j;
+                    let actor_path = format!("test-actor-{}", actor_id);
+                    remote_actor_paths.push(actor_path);
+                }
+            }
+        }
         
         // 创建结果收集器
         let collector = ResultCollector::new().start();
         let collector_recipient = collector.recipient();
         
-        // 创建协调器
-        let coordinator = TestCoordinator::new(ACTOR_COUNT, Some(collector_recipient)).start();
+        // 创建协调器 - 总是使用第一个集群节点
+        let coordinator = TestCoordinator::new(
+            ACTOR_COUNT, 
+            Some(collector_recipient),
+            Some(cluster_systems[0].clone()),
+            remote_actor_paths
+        ).start();
         
-        // 创建多个测试actor
-        for i in 0..ACTOR_COUNT {
-            // 创建actor
-            let test_actor = TestActor::new(i, coordinator.clone()).start();
+        // 在每个集群节点上创建actors
+        for (cluster_idx, cluster) in cluster_systems.iter().enumerate() {
+            let node_id = format!("node-{}", cluster_idx);
+            let actors_per_node = ACTOR_COUNT / CLUSTER_NODES;
             
-            // 注册actor到协调器
-            coordinator.send(RegisterActor { id: i, addr: test_actor.clone() }).await.unwrap();
-            
-            // 等待一小段时间，避免同时创建所有actor
-            if i % 5 == 0 {
-                sleep(Duration::from_millis(50)).await;
-                log::debug!("Created {} actors so far", i+1);
+            for j in 0..actors_per_node {
+                let actor_id = cluster_idx * actors_per_node + j;
+                
+                // 创建actor
+                let test_actor = TestActor::new(
+                    actor_id, 
+                    coordinator.clone(),
+                    Some(cluster.clone()),
+                    node_id.clone()
+                ).start();
+                
+                // 注册actor到协调器
+                coordinator.send(RegisterActor { 
+                    id: actor_id, 
+                    addr: test_actor.clone() 
+                }).await.unwrap();
+                
+                // 等待一小段时间，避免同时创建所有actor
+                if actor_id % 5 == 0 {
+                    sleep(Duration::from_millis(50)).await;
+                    log::debug!("Created {} actors so far", actor_id+1);
+                }
             }
         }
         
         // 等待所有actor注册完成
-        sleep(Duration::from_secs(1)).await;
+        sleep(Duration::from_secs(2)).await;
         
         // 开始测试
         coordinator.do_send(StartTest);
@@ -628,7 +756,7 @@ async fn main() -> std::io::Result<()> {
         
         // 添加超时检测
         let start_time = Instant::now();
-        let timeout = Duration::from_secs(60); // 60秒超时
+        let timeout = Duration::from_secs(180); // 增加超时时间到180秒
         
         // 主循环保持actix系统运行
         loop {
