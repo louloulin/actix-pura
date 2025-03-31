@@ -713,37 +713,6 @@ impl P2PTransport {
         self.started
     }
 
-    /// Send a message to the remote actor
-    pub async fn send<M: serde::Serialize + 'static>(&mut self, message: M) -> ClusterResult<()> {
-        // Use the updated serialization approach - 这里使用self.serializer，不需要锁
-        let payload = match &*self.serializer {
-            s if s.type_id() == std::any::TypeId::of::<crate::serialization::BincodeSerializer>() => {
-                let serializer = crate::serialization::BincodeSerializer::new();
-                serializer.serialize(&message)?
-            },
-            s if s.type_id() == std::any::TypeId::of::<crate::serialization::JsonSerializer>() => {
-                let serializer = crate::serialization::JsonSerializer::new();
-                serializer.serialize(&message)?
-            },
-            _ => {
-                self.serializer.serialize_any(&message as &dyn std::any::Any)?
-            }
-        };
-        
-        // Create message envelope
-        let envelope = MessageEnvelope::new(
-            self.local_node.id.clone(),
-            self.local_node.id.clone(),  // 这是一个placeholder，实际用途中应该是目标节点ID
-            "".to_string(),              // 同样是placeholder
-            MessageType::ActorMessage,
-            DeliveryGuarantee::AtMostOnce,
-            payload,
-        );
-        
-        // Send the envelope - 现在self已经是可变的
-        self.send_envelope(envelope).await
-    }
-
     /// Connect to a peer node
     pub async fn connect_to_peer(&mut self, peer_addr: SocketAddr) -> ClusterResult<()> {
         info!("Attempting to connect to peer at {}", peer_addr);
@@ -874,6 +843,7 @@ impl P2PTransport {
     pub async fn send_envelope_direct_for_test(&mut self, target_node: NodeId, envelope: MessageEnvelope) -> ClusterResult<()> {
         // 直接检查有没有对应的节点信息
         if !self.peers.lock().contains_key(&target_node) {
+            println!("Node not found in peers: {}", target_node);
             return Err(ClusterError::NodeNotFound(target_node));
         }
         
