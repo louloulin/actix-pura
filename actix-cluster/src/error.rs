@@ -150,6 +150,10 @@ pub enum ClusterError {
     /// No message handler configured
     #[error("No message handler configured")]
     NoMessageHandler,
+
+    /// Transport not available or not initialized
+    #[error("Transport not available or not initialized")]
+    TransportNotAvailable,
 }
 
 /// Type alias for Result with ClusterError

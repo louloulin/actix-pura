@@ -224,7 +224,7 @@ impl P2PTransport {
         };
         
         info!("Using serialization format: {:?}", serialization_format);
-
+        
         // Create channels for message passing
         let (tx, rx) = mpsc::channel(100);
         
@@ -523,12 +523,12 @@ impl P2PTransport {
                     
                     // Handle the request directly instead of spawning a task
                     if let Err(e) = registry.handle_discovery_request(&sender_id, path).await {
-                        error!("Error handling actor discovery request: {:?}", e);
+                            error!("Error handling actor discovery request: {:?}", e);
                         println!("Error handling actor discovery request: {:?}", e);
                     } else {
                         debug!("Successfully processed actor discovery request from {}", sender_id_clone);
                         println!("Successfully processed actor discovery request from {}", sender_id_clone);
-                    }
+                        }
                 } else {
                     debug!("No registry adapter available to handle actor discovery request");
                     println!("No registry adapter available to handle actor discovery request from {}", sender_id);
@@ -570,9 +570,9 @@ impl P2PTransport {
             let mut stream = stream_mutex.lock().await;
             
             // Send the message length first (as big-endian bytes)
-            let len = serialized.len() as u32;
-            let len_bytes = len.to_be_bytes();
-            
+        let len = serialized.len() as u32;
+        let len_bytes = len.to_be_bytes();
+        
             // Write the length
             stream.write_all(&len_bytes).await
                 .map_err(|e| ClusterError::NetworkError(format!("Failed to write message length: {}", e)))?;
@@ -717,7 +717,7 @@ impl P2PTransport {
     pub fn get_sender(&self) -> Option<mpsc::Sender<(NodeId, TransportMessage)>> {
         self.msg_tx.clone()
     }
-    
+
     /// Set registry adapter for actor discovery
     pub fn set_registry_adapter(&mut self, registry: Arc<ActorRegistry>) {
         self.registry_adapter = Some(registry);
@@ -739,10 +739,10 @@ impl P2PTransport {
                 
                 // Set up the connection
                 self.handle_new_connection(stream, peer_addr).await?;
-                Ok(())
-            },
-            Err(e) => {
-                error!("Failed to connect to peer at {}: {}", peer_addr, e);
+                        Ok(())
+                    },
+                    Err(e) => {
+                        error!("Failed to connect to peer at {}: {}", peer_addr, e);
                 Err(ClusterError::ConnectionFailed(peer_addr.to_string()))
             }
         }
@@ -804,7 +804,7 @@ impl P2PTransport {
                     }
                 });
             }
-            Ok(())
+        Ok(())
         });
         self.message_handler = Some(Arc::new(Mutex::new(ActorMessageHandler::new(handler_fn))));
     }
@@ -891,6 +891,86 @@ impl P2PTransport {
         // 没有处理器，返回错误
         println!("Error: No message handler for node {}", self.local_node.id);
         Err(ClusterError::NoMessageHandler)
+    }
+
+    /// Checks if a node is connected
+    pub fn is_connected(&self, node_id: &NodeId) -> bool {
+        let connections = self.connections.lock();
+        connections.contains_key(node_id)
+    }
+
+    /// Attempt to reconnect to a peer by ID
+    pub async fn reconnect_to_peer(&self, node_id: &NodeId) -> ClusterResult<bool> {
+        // First check if we're already connected
+        if self.is_connected(node_id) {
+            debug!("Already connected to peer {}", node_id);
+            return Ok(true);
+        }
+
+        // Get peer info without holding the lock across await points
+        let peer_info = {
+            let nodes_lock = self.peers.lock();
+            nodes_lock.get(node_id).cloned()
+        };
+
+        // If peer not found, return error
+        let peer = match peer_info {
+            Some(info) => info,
+            None => {
+                error!("Cannot reconnect to unknown peer: {}", node_id);
+                return Err(ClusterError::NodeNotFound(node_id.clone()));
+            }
+        };
+
+        // Now attempt to connect
+        debug!("Attempting to reconnect to peer: {} at {}", node_id, peer.addr);
+        match TcpStream::connect(peer.addr).await {
+            Ok(stream) => {
+                info!("Successfully reconnected to peer: {}", node_id);
+                // Add connection to the map
+                let mut connections_lock = self.connections.lock();
+                connections_lock.insert(node_id.clone(), Arc::new(TokioMutex::new(stream)));
+                Ok(true)
+            }
+            Err(e) => {
+                warn!("Failed to reconnect to peer {}: {}", node_id, e);
+                Ok(false)
+            }
+        }
+    }
+
+    /// Attempts to reconnect to all disconnected peers
+    ///
+    /// This method can be called periodically to ensure that the node maintains
+    /// connections to all known peers in the cluster.
+    pub async fn reconnect_to_all_disconnected_peers(&self) -> ClusterResult<usize> {
+        let nodes_lock = self.peers.lock();
+        let connections_lock = self.connections.lock();
+        
+        // Find all peers that we know about but aren't connected to
+        let disconnected_peers: Vec<NodeId> = nodes_lock.keys()
+            .filter(|id| !connections_lock.contains_key(*id) && **id != self.local_node.id)
+            .cloned()
+            .collect();
+        
+        // Release locks
+        drop(nodes_lock);
+        drop(connections_lock);
+        
+        let mut reconnected_count = 0;
+        
+        // Try to reconnect to each disconnected peer
+        for peer_id in disconnected_peers {
+            match self.reconnect_to_peer(&peer_id).await {
+                Ok(true) => {
+                    reconnected_count += 1;
+                },
+                _ => {} // Ignore failures
+            }
+        }
+        
+        debug!("Reconnected to {} disconnected peers", reconnected_count);
+        Ok(reconnected_count)
     }
 }
 
@@ -1093,7 +1173,7 @@ mod tests {
 
 /// Handle an incoming connection
 async fn handle_incoming(
-    stream: TcpStream, 
+    stream: TcpStream,
     addr: SocketAddr,
     local_node_info: NodeInfo,
     serializer: Box<dyn SerializerTrait>,
@@ -1181,7 +1261,7 @@ async fn handle_incoming(
         let message = match serializer.deserialize_any(&message_buffer) {
             Ok(any) => {
                 if let Some(msg) = any.downcast_ref::<TransportMessage>() {
-                    println!("Successfully deserialized message: {:?}", msg);
+                println!("Successfully deserialized message: {:?}", msg);
                     msg.clone()
                 } else {
                     error!("Failed to deserialize message to TransportMessage type");

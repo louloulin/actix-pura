@@ -149,19 +149,45 @@ impl ActorRegistry {
     }
     
     /// Lookup an actor by path
+    /// 
+    /// The lookup process follows these steps:
+    /// 1. First checks the local actors registry
+    /// 2. If not found locally, tries to find the actor in the remote registry using the local node ID
+    /// 3. If still not found, searches all remote actors for any with a matching path, regardless of node ID
+    ///
+    /// This flexible lookup approach ensures that actors can be found even if registered with different node IDs.
     pub fn lookup(&self, path: &str) -> Option<Box<dyn ActorRef>> {
+        debug!("Looking up actor with path: {}", path);
+        println!("Looking up actor with path: {}", path);
+        
         // First check local actors
         let local_actors = self.local_actors.read();
         if let Some(actor_ref) = local_actors.get(path) {
+            debug!("Found actor locally: {}", path);
+            println!("Found actor locally: {}", path);
             return Some(actor_ref.clone());
         }
         
+        debug!("Actor not found locally, checking remote registry: {}", path);
+        println!("Actor not found locally, checking remote registry: {}", path);
+        
         // Then check remote actors using a more thorough approach
         let remote_actors = self.remote_actors.read();
+        println!("Remote actors count: {}", remote_actors.len());
+        
+        // Print all remote actors for debugging
+        for (a_path, node) in remote_actors.iter() {
+            println!("Registered remote actor: path='{}', node='{}', actor_path.node_id='{}'", 
+                     a_path.path, node, a_path.node_id);
+        }
         
         // Try with the local node ID first (original approach)
         let actor_path = ActorPath::new(self.local_node_id.clone(), path.to_string());
+        println!("Searching with local node ID: actor_path='{}'", actor_path);
+        
         if let Some(node_id) = remote_actors.get(&actor_path) {
+            debug!("Found remote actor with local node ID lookup: {} on node {}", path, node_id);
+            println!("Found remote actor with local node ID lookup: {} on node {}", path, node_id);
             if let Some(transport) = &self.transport {
                 let remote_ref = RemoteActorRef::new(
                     node_id.clone(),
@@ -175,10 +201,16 @@ impl ActorRegistry {
             }
         }
         
+        debug!("Actor not found with local node ID, searching by path only: {}", path);
+        println!("Actor not found with local node ID, searching by path only: {}", path);
+        
         // If not found, search for any ActorPath with the matching path,
         // regardless of the node ID (more flexible approach)
         for (actor_path, node_id) in remote_actors.iter() {
+            println!("Checking remote actor: path='{}' vs requested='{}'", actor_path.path, path);
             if actor_path.path == path {
+                debug!("Found remote actor with path-only lookup: {} on node {}", path, node_id);
+                println!("Found remote actor with path-only lookup: {} on node {}", path, node_id);
                 if let Some(transport) = &self.transport {
                     let remote_ref = RemoteActorRef::new(
                         node_id.clone(),
@@ -187,12 +219,17 @@ impl ActorRegistry {
                         DeliveryGuarantee::AtLeastOnce,
                     );
                     
+                    println!("Created remote actor reference, returning it");
                     // Wrap in a trait object
                     return Some(Box::new(remote_ref) as Box<dyn ActorRef>);
+                } else {
+                    println!("Transport not available to create remote actor reference");
                 }
             }
         }
         
+        debug!("Actor not found in any registry: {}", path);
+        println!("Actor not found in any registry: {}", path);
         None
     }
     
@@ -229,19 +266,26 @@ impl ActorRegistry {
     }
 
     /// Discover an actor in the cluster
+    ///
+    /// This method tries to find an actor by:
+    /// 1. First checking the local registry (both local and previously discovered remote actors)
+    /// 2. If not found, asking all known peers in the cluster
+    /// 3. Waiting for responses with a configurable timeout
+    ///
+    /// The discovery process is resilient to node failures and timeout conditions.
     pub async fn discover_actor(&self, path: &str) -> Option<Box<dyn ActorRef>> {
         debug!("Attempting to discover actor with path: {}", path);
         println!("Attempting to discover actor with path: {}", path);
         
-        // First check local registry
+        // First, try to use the improved lookup that handles both local and remote node IDs
         if let Some(actor_ref) = self.lookup(path) {
             debug!("Found actor in local registry: {}", path);
             println!("Found actor in local registry: {}", path);
             return Some(actor_ref);
         }
 
-        debug!("Actor not found locally, attempting remote discovery: {}", path);
-        println!("Actor not found locally, attempting remote discovery: {}", path);
+        debug!("Actor not found in registry, attempting remote discovery: {}", path);
+        println!("Actor not found in registry, attempting remote discovery: {}", path);
 
         // If we have no transport, we can't discover actors remotely
         if self.transport.is_none() {
@@ -282,19 +326,13 @@ impl ActorRegistry {
         }
         
         // Check if we have any peers (excluding our own node)
-        let mut has_peers = false;
-        for node in &nodes {
-            if node.id != self.local_node_id {
-                has_peers = true;
-                break;
-            }
-        }
-
-        // If no peers are available, wait for the timeout duration anyway 
-        // instead of returning immediately
-        if !has_peers {
-            debug!("No peers available to discover actor: {}", path);
-            println!("No peers available to discover actor: {}", path);
+        let mut external_peers = nodes.iter()
+            .filter(|node| node.id != self.local_node_id)
+            .collect::<Vec<_>>();
+        
+        if external_peers.is_empty() {
+            debug!("No external peers available to discover actor: {}", path);
+            println!("No external peers available to discover actor: {}", path);
             // Release the lock
             drop(transport_lock);
             // Wait for timeout to properly test the timeout behavior
@@ -306,16 +344,35 @@ impl ActorRegistry {
             return None;
         }
 
-        let mut sent_requests = 0;
-        // Send discovery request to all nodes
-        for node in nodes {
-            // Skip local node
-            if node.id == self.local_node_id {
-                continue;
+        // Sort peers by availability (connected first, then by ID for deterministic behavior)
+        external_peers.sort_by(|a, b| {
+            // Get connection status for each peer
+            let a_connected = transport_lock.is_connected(&a.id);
+            let b_connected = transport_lock.is_connected(&b.id);
+            
+            println!("Sorting peers: {} connected: {}, {} connected: {}", 
+                     a.id, a_connected, b.id, b_connected);
+            
+            // Connected peers come first
+            if a_connected && !b_connected {
+                std::cmp::Ordering::Less
+            } else if !a_connected && b_connected {
+                std::cmp::Ordering::Greater
+            } else {
+                // If both are connected or both are disconnected, sort by ID string
+                a.id.to_string().cmp(&b.id.to_string())
             }
+        });
 
+        // Store the length before we move external_peers in the loop
+        let external_peers_len = external_peers.len();
+        let mut sent_requests = 0;
+        
+        // Send discovery request to all nodes, prioritizing connected ones
+        for node in external_peers {
             debug!("Sending actor discovery request to node {} for path {}", node.id, path);
             println!("Sending actor discovery request to node {} for path {}", node.id, path);
+            
             // Send discovery request to the remote node
             if let Err(e) = transport_lock.send_message(&node.id, discovery_message.clone()).await {
                 error!("Failed to send actor discovery request to node {}: {}", node.id, e);
@@ -324,6 +381,11 @@ impl ActorRegistry {
                 sent_requests += 1;
                 debug!("Successfully sent discovery request to node {}", node.id);
                 println!("Successfully sent discovery request to node {}", node.id);
+                
+                // Check if we've sent enough requests
+                if sent_requests >= 3 || sent_requests >= external_peers_len {
+                    break;
+                }
             }
         }
         

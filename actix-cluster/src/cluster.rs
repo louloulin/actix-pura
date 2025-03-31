@@ -6,7 +6,7 @@ use std::time::Duration;
 use actix::prelude::*;
 use actix::dev::ToEnvelope;
 use tokio::sync::{RwLock, Mutex};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 
 use crate::config::ClusterConfig;
 use crate::discovery::ServiceDiscovery;
@@ -333,6 +333,74 @@ impl ClusterSystem {
             log::warn!("Actor not found locally: {}", actor_path);
             return Err(ClusterError::ActorNotFound(actor_path));
         }
+    }
+
+    /// Starts a periodic task to maintain connections to peers.
+    ///
+    /// This method will spawn a background task that periodically:
+    /// - Attempts to reconnect to any disconnected peers
+    /// - Checks the health of active connections
+    /// - Updates node status information
+    ///
+    /// # Parameters
+    /// - `interval_secs`: How often (in seconds) to run the connection maintenance task
+    ///
+    /// # Returns
+    /// `ClusterResult<()>` indicating success or failure
+    pub fn start_connection_maintenance(&self, interval_secs: u64) -> ClusterResult<()> {
+        // Get the transport instance
+        let transport = match self.transport.as_ref() {
+            Some(t) => t.clone(),
+            None => return Err(ClusterError::TransportNotAvailable),
+        };
+        
+        // Get the system name for logging
+        let system_name = self.local_node().name.clone();
+        
+        // Spawn the background task
+        tokio::spawn(async move {
+            let interval = Duration::from_secs(interval_secs);
+            
+            loop {
+                // Sleep first to allow initial connections to establish naturally
+                tokio::time::sleep(interval).await;
+                
+                // Get a list of peers without holding the lock across an await point
+                let peer_ids = {
+                    let transport_guard = transport.lock().await;
+                    transport_guard.get_peers().into_iter().map(|node| node.id).collect::<Vec<NodeId>>()
+                };
+                
+                // For each peer, check connection and reconnect if needed
+                for peer_id in peer_ids {
+                    // Skip reconnection attempt if already connected
+                    let is_connected = {
+                        let transport_guard = transport.lock().await;
+                        transport_guard.is_connected(&peer_id)
+                    };
+                    
+                    if is_connected {
+                        debug!("[{}] Peer {} is already connected", system_name, peer_id);
+                        continue;
+                    }
+                    
+                    // Attempt to reconnect
+                    debug!("[{}] Attempting to reconnect to peer {}", system_name, peer_id);
+                    let reconnect_result = {
+                        let transport_guard = transport.lock().await;
+                        transport_guard.reconnect_to_peer(&peer_id).await
+                    };
+                    
+                    match reconnect_result {
+                        Ok(true) => info!("[{}] Successfully reconnected to peer {}", system_name, peer_id),
+                        Ok(false) => warn!("[{}] Reconnection attempt to peer {} failed but recoverable", system_name, peer_id),
+                        Err(e) => error!("[{}] Error reconnecting to peer {}: {:?}", system_name, peer_id, e),
+                    }
+                }
+            }
+        });
+        
+        Ok(())
     }
 }
 

@@ -1,18 +1,19 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::Arc;
-use std::time::Duration;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::HashMap;
+use std::str::FromStr;
+use std::net::{SocketAddr, IpAddr, Ipv4Addr};
+use std::time::Duration;
+use std::sync::Arc;
 
 use actix::prelude::*;
 use actix_cluster::{
-    ClusterSystem, ClusterConfig, Architecture, NodeRole, DiscoveryMethod,
-    node::NodeId,
-    message::{AnyMessage, MessageEnvelope, MessageType, DeliveryGuarantee},
-    transport::TransportMessage,
-    registry::ActorRef,
+    cluster::{ClusterSystem, Architecture},
+    config::{NodeRole, ClusterConfig, DiscoveryMethod},
+    message::AnyMessage,
     serialization::SerializationFormat,
+    transport::{P2PTransport, TransportMessage},
     error::ClusterResult,
+    node::{NodeId, NodeInfo},
 };
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
@@ -277,11 +278,15 @@ async fn test_distributed_actor_registry() {
             .expect("Failed to create config");
         
         // Create a cluster system
-        let node = ClusterSystem::new("test-node", config);
+        let mut node = ClusterSystem::new("test-node", config);
         let node_id = node.local_node().id.clone();
         
         println!("Created node with ID: {}", node_id);
         println!("Remote node ID: {}", remote_node_id);
+        
+        // Start the node to initialize transport
+        node.start().await.expect("Failed to start node");
+        println!("Node started with transport initialized");
         
         // Access the registry directly for testing
         let registry = node.registry();
@@ -381,5 +386,119 @@ async fn test_actor_discovery_timeout() {
         assert!(elapsed.as_secs() >= 2, "Discovery should timeout after at least 2 seconds");
         // Add upper limit check to ensure timeout does not exceed 5 seconds (give system some tolerance)
         assert!(elapsed.as_secs() <= 5, "Discovery should not take more than 5 seconds");
+    }).await;
+}
+
+#[tokio::test]
+async fn test_connection_maintenance() {
+    // Initialize a local set for handling tasks
+    let local = tokio::task::LocalSet::new();
+
+    local.run_until(async {
+        println!("Starting connection maintenance test...");
+
+        // Setup node addresses
+        let node1_addr = SocketAddr::from_str("127.0.0.1:10006").unwrap();
+        let node2_addr = SocketAddr::from_str("127.0.0.1:10007").unwrap();
+
+        // Configure the first node
+        let config1 = ClusterConfig::new()
+            .architecture(Architecture::Decentralized)
+            .node_role(NodeRole::Peer)
+            .bind_addr(node1_addr)
+            .cluster_name("test-cluster".to_string())
+            .discovery(DiscoveryMethod::Static {
+                seed_nodes: vec![node2_addr.to_string()]
+            })
+            .serialization_format(SerializationFormat::Json)
+            .build()
+            .unwrap();
+
+        // Configure the second node
+        let config2 = ClusterConfig::new()
+            .architecture(Architecture::Decentralized)
+            .node_role(NodeRole::Peer)
+            .bind_addr(node2_addr)
+            .cluster_name("test-cluster".to_string())
+            .discovery(DiscoveryMethod::Static {
+                seed_nodes: vec![node1_addr.to_string()]
+            })
+            .serialization_format(SerializationFormat::Json)
+            .build()
+            .unwrap();
+
+        // Initialize the cluster systems
+        let mut node1 = ClusterSystem::new("node1", config1);
+        let mut node2 = ClusterSystem::new("node2", config2);
+
+        println!("Nodes created, starting...");
+
+        // Start the nodes
+        node1.start().await.unwrap();
+        node2.start().await.unwrap();
+
+        println!("Nodes started, setting up peer connections...");
+
+        // Get both node's transport
+        let transport1 = node1.transport.as_ref().unwrap().clone();
+        let transport2 = node2.transport.as_ref().unwrap().clone();
+
+        // Manually add peers to each other's peer list
+        {
+            let transport1_guard = transport1.lock().await;
+            let mut node1_peers = transport1_guard.peers_lock_for_testing();
+            node1_peers.insert(
+                node2.local_node().id.clone(),
+                NodeInfo::new(
+                    node2.local_node().id.clone(),
+                    node2.local_node().name.clone(),
+                    node2.local_node().role.clone(),
+                    node2_addr
+                )
+            );
+        }
+
+        {
+            let transport2_guard = transport2.lock().await;
+            let mut node2_peers = transport2_guard.peers_lock_for_testing();
+            node2_peers.insert(
+                node1.local_node().id.clone(),
+                NodeInfo::new(
+                    node1.local_node().id.clone(), 
+                    node1.local_node().name.clone(),
+                    node1.local_node().role.clone(),
+                    node1_addr
+                )
+            );
+        }
+
+        // Start connection maintenance on both nodes
+        node1.start_connection_maintenance(1).unwrap();
+        node2.start_connection_maintenance(1).unwrap();
+
+        println!("Connection maintenance started, waiting for connections to establish...");
+
+        // Allow some time for connection attempts
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        // Verify that peers can see each other
+        let node1_transport = node1.transport.as_ref().unwrap().clone();
+        let node2_transport = node2.transport.as_ref().unwrap().clone();
+
+        // Check if connections were established
+        let node1_connected = {
+            let transport1_guard = node1_transport.lock().await;
+            transport1_guard.is_connected(&node2.local_node().id)
+        };
+        
+        let node2_connected = {
+            let transport2_guard = node2_transport.lock().await;
+            transport2_guard.is_connected(&node1.local_node().id)
+        };
+        
+        assert!(node1_connected);
+        assert!(node2_connected);
+
+        println!("Connection maintenance test completed successfully!");
     }).await;
 } 
