@@ -11,6 +11,7 @@ use actix_cluster::{
     serialization::SerializationFormat,
     error::ClusterResult,
     message::{MessageEnvelope, MessageType, DeliveryGuarantee, ActorPath},
+    testing,
 };
 use parking_lot::Mutex;
 use tokio::sync::Mutex as TokioMutex;
@@ -33,17 +34,9 @@ impl MessageHandler for MessageReceiver {
         println!("MessageReceiver received message from {}: {:?}", sender, message);
         
         if let TransportMessage::Envelope(envelope) = message {
-            let mut received = self.received.lock().unwrap();
-            received.push(envelope);
-            
-            let num_received = received.len();
-            println!("Total received messages: {}", num_received);
-            
-            if num_received >= self.expected {
-                println!("Received expected number of messages: {}", self.expected);
-                let mut is_completed = self.is_completed.lock().unwrap();
-                *is_completed = true;
-            }
+            // 收到消息，设置标志
+            self.received.store(true, Ordering::SeqCst);
+            println!("Message received and flag set to true");
         }
         
         Ok(())
@@ -88,17 +81,18 @@ async fn test_remote_actor_communication() {
     
     // 设置节点2的消息接收器
     let receiver = MessageReceiver { received: message_received.clone() };
-    transport2.set_message_handler_direct(Arc::new(Mutex::new(receiver)));
+    testing::set_message_handler_direct_for_test(&mut transport2, Arc::new(Mutex::new(receiver)));
     
     // 手动添加节点信息到对方的peers列表
-    transport1.add_peer(node2_id.clone(), node2_info.clone());
-    transport2.add_peer(node1_id.clone(), node1_info.clone());
+    testing::add_peer_for_test(&mut transport1, node2_id.clone(), node2_info.clone());
+    testing::add_peer_for_test(&mut transport2, node1_id.clone(), node1_info.clone());
     
     // 创建一个RemoteActorRef来发送消息到远程actor
     println!("Creating RemoteActorRef for target actor");
-    let target_actor_path = ActorPath::new(node2_id.clone(), "test_actor".to_string());
+    let target_actor_path = "test_actor".to_string();
     let transport1_arc = Arc::new(TokioMutex::new(transport1));
     let remote_ref = RemoteActorRef::new(
+        node2_id.clone(),
         target_actor_path,
         transport1_arc.clone(),
         DeliveryGuarantee::AtMostOnce,
@@ -114,31 +108,29 @@ async fn test_remote_actor_communication() {
     let serializer = actix_cluster::serialization::BincodeSerializer::new();
     let payload = serializer.serialize(&test_message).expect("Failed to serialize message");
     
-    // 创建消息信封
-    let envelope = MessageEnvelope::new(
-        node1_id.clone(),
-        node2_id.clone(),
-        "test_actor".to_string(),
-        MessageType::ActorMessage,
-        DeliveryGuarantee::AtMostOnce,
-        payload,
-    );
-    
     // 发送消息信封
     println!("Sending message envelope to remote actor");
-    let result = remote_ref.send_envelope(envelope.clone()).await;
-    assert!(result.is_ok(), "Failed to send message envelope: {:?}", result);
+    let result = remote_ref.send(test_message).await;
+    assert!(result.is_ok(), "Failed to send message: {:?}", result);
     
     // 模拟消息到达节点2并被处理
     // 在真实场景中，这部分由网络传输完成，但在测试中我们手动模拟
     println!("Simulating message reception on node 2");
-    if let Some(handler) = transport2.get_message_handler() {
+    if let Some(handler) = testing::get_message_handler_for_test(&transport2) {
         let node_id_clone = node1_id.clone();
-        let message_clone = TransportMessage::Envelope(envelope);
+        let test_envelope = MessageEnvelope::new(
+            node1_id.clone(),
+            node2_id.clone(),
+            "test_actor".to_string(),
+            MessageType::ActorMessage,
+            DeliveryGuarantee::AtMostOnce,
+            payload.clone(),
+        );
+        let message_clone = TransportMessage::Envelope(test_envelope);
         let handler_clone = handler.clone();
         
         tokio::task::spawn_blocking(move || {
-            let mut handler_locked = handler_clone.lock();
+            let handler_locked = handler_clone.lock();
             
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -195,16 +187,17 @@ async fn test_send_typed_message() {
     
     // 设置节点2的消息接收器
     let receiver = MessageReceiver { received: message_received.clone() };
-    transport2.set_message_handler_direct(Arc::new(Mutex::new(receiver)));
+    testing::set_message_handler_direct_for_test(&mut transport2, Arc::new(Mutex::new(receiver)));
     
     // 手动添加节点信息到对方的peers列表
-    transport1.add_peer(node2_id.clone(), node2_info.clone());
-    transport2.add_peer(node1_id.clone(), node1_info.clone());
+    testing::add_peer_for_test(&mut transport1, node2_id.clone(), node2_info.clone());
+    testing::add_peer_for_test(&mut transport2, node1_id.clone(), node1_info.clone());
     
     // 创建一个RemoteActorRef来发送消息到远程actor
-    let target_actor_path = ActorPath::new(node2_id.clone(), "typed_test_actor".to_string());
+    let target_actor_path = "typed_test_actor".to_string();
     let transport1_arc = Arc::new(TokioMutex::new(transport1));
     let remote_ref = RemoteActorRef::new(
+        node2_id.clone(),
         target_actor_path,
         transport1_arc.clone(),
         DeliveryGuarantee::AtMostOnce,

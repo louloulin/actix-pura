@@ -8,14 +8,11 @@ use actix::prelude::*;
 use actix_cluster::{
     Architecture, ClusterConfig, ClusterSystem, DeliveryGuarantee, DiscoveryMethod,
     MessageEnvelope, MessageType, NodeRole, SerializationFormat, AnyMessage,
-    config::{ClusterConfig, DiscoveryMethod, NodeRole},
     node::NodeId,
     transport::{P2PTransport, TransportMessage, MessageHandler},
-    serialization::SerializationFormat,
     testing,
 };
 use serde::{Deserialize, Serialize};
-use actix_cluster::transport::{P2PTransport, TransportMessage, MessageHandler};
 use actix_cluster::serialization::BincodeSerializer;
 
 #[derive(Debug, Clone, Message, Serialize, Deserialize)]
