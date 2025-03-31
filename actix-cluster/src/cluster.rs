@@ -736,6 +736,10 @@ impl Handler<MessageEnvelope> for ClusterSystemActor {
                             debug!("Updated last seen for node {}", envelope.sender_node);
                         }
                     },
+                    MessageType::Custom(custom_type) => {
+                        // Handle custom message types
+                        debug!("Received custom message type: {}", custom_type);
+                    }
                 }
             }
             .into_actor(self)

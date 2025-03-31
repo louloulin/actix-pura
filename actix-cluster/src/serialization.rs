@@ -222,6 +222,16 @@ pub fn create_serializer_trait(format: SerializationFormat) -> Box<dyn Serialize
     }
 }
 
+/// Convenience function to serialize a value using Bincode
+pub fn serialize<T: Serialize>(value: &T) -> Result<Vec<u8>, ClusterError> {
+    BincodeSerializer::new().serialize(value)
+}
+
+/// Convenience function to deserialize a value using Bincode
+pub fn deserialize<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, ClusterError> {
+    BincodeSerializer::new().deserialize(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

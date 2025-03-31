@@ -11,7 +11,7 @@ use crate::error::ClusterResult;
 
 /// Unique identifier for a node in the cluster
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct NodeId(Uuid);
+pub struct NodeId(pub Uuid);
 
 impl NodeId {
     /// Create a new random node ID

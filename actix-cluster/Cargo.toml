@@ -9,6 +9,10 @@ license = "MIT OR Apache-2.0"
 keywords = ["actor", "actix", "distributed", "cluster"]
 categories = ["asynchronous", "network-programming"]
 
+[features]
+default = []
+placement_tests = []
+
 [dependencies]
 actix = { path = "../actix" }
 tokio = { version = "1.28", features = ["full"] }
@@ -28,6 +32,8 @@ multiaddr = "0.17"
 parking_lot = "0.12"
 lru = "0.8.0"
 rand = "0.8.5"
+fnv = "1.0.7"
+chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

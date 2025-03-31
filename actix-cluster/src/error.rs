@@ -154,6 +154,26 @@ pub enum ClusterError {
     /// Transport not available or not initialized
     #[error("Transport not available or not initialized")]
     TransportNotAvailable,
+    
+    /// Protocol error during message exchange
+    #[error("Protocol error: {0}")]
+    ProtocolError(String),
+    
+    /// Transport layer error
+    #[error("Transport error: {0}")]
+    TransportError(String),
+    
+    /// No nodes available for operation
+    #[error("No nodes available")]
+    NoNodesAvailable,
+    
+    /// Feature not implemented
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
+    
+    /// Component not initialized
+    #[error("Not initialized: {0}")]
+    NotInitialized(String),
 }
 
 /// Type alias for Result with ClusterError

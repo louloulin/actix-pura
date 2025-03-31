@@ -54,6 +54,33 @@ pub enum TransportMessage {
     ActorDiscoveryRequest(NodeId, String),
     /// Response with the locations of an actor
     ActorDiscoveryResponse(String, Vec<NodeId>),
+    /// Pub/Sub broker message
+    BrokerMessage(crate::broker::BrokerMessage),
+    /// Subscription message for broker
+    BrokerSubscribe {
+        /// Topic to subscribe to
+        topic: String,
+        /// Node that is subscribing
+        node_id: NodeId,
+        /// Subscription options
+        options: crate::broker::SubscriptionOptions,
+    },
+    /// Unsubscribe message for broker
+    BrokerUnsubscribe {
+        /// Topic to unsubscribe from
+        topic: String,
+        /// Node that is unsubscribing
+        node_id: NodeId,
+    },
+    /// Acknowledgment for a broker message
+    BrokerAck(crate::broker::MessageAck),
+    /// Subscribe to a topic
+    Subscribe {
+        /// Topic to subscribe to
+        topic: String,
+        /// Subscription options
+        options: crate::broker::SubscriptionOptions,
+    },
 }
 
 /// A message that is waiting for acknowledgement

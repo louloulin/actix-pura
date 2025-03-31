@@ -32,7 +32,7 @@ pub enum DeliveryGuarantee {
 }
 
 /// 消息信封的类型
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MessageType {
     /// 标准Actor消息
     ActorMessage,
@@ -44,6 +44,8 @@ pub enum MessageType {
     Ping,
     /// Pong消息 - 回应Ping
     Pong,
+    /// Custom message type with string identifier
+    Custom(String),
 }
 
 /// Actor路径，用于标识集群中的Actor
