@@ -11,7 +11,7 @@ use actix::prelude::*;
 use actix::dev::ToEnvelope;
 use log::{debug, error, info};
 use parking_lot::RwLock;
-use rand::Rng;
+use rand::random;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
@@ -113,9 +113,17 @@ pub struct ActorRegistry {
     /// Map of pending actor discovery requests, keyed by path
     pending_discoveries: RwLock<HashMap<String, Vec<oneshot::Sender<Option<Box<dyn ActorRef>>>>>>,
     /// Cache of recently looked up actors for performance
-    lookup_cache: RwLock<HashMap<String, (Box<dyn ActorRef>, std::time::Instant)>>,
+    lookup_cache: RwLock<HashMap<String, (Box<dyn ActorRef>, Instant)>>,
     /// Cache TTL in seconds
     cache_ttl: u64,
+    /// Cache hit counter
+    cache_hits: RwLock<u64>,
+    /// Cache miss counter
+    cache_misses: RwLock<u64>,
+    /// Maximum cache size (0 means unlimited)
+    max_cache_size: usize,
+    /// Whether the cache is enabled
+    cache_enabled: bool,
 }
 
 impl ActorRegistry {
@@ -129,6 +137,10 @@ impl ActorRegistry {
             pending_discoveries: RwLock::new(HashMap::new()),
             lookup_cache: RwLock::new(HashMap::new()),
             cache_ttl: 60, // 60 seconds by default
+            cache_hits: RwLock::new(0),
+            cache_misses: RwLock::new(0),
+            max_cache_size: 1000, // Default max cache size
+            cache_enabled: true,  // Cache enabled by default
         }
     }
     
@@ -141,16 +153,94 @@ impl ActorRegistry {
     pub fn set_cache_ttl(&mut self, ttl: u64) {
         self.cache_ttl = ttl;
     }
+    
+    /// Get the current cache TTL in seconds
+    pub fn cache_ttl(&self) -> u64 {
+        self.cache_ttl
+    }
+    
+    /// Set maximum cache size
+    pub fn set_max_cache_size(&mut self, max_size: usize) {
+        self.max_cache_size = max_size;
+        
+        // If new max size is smaller than current cache size, trim the cache
+        if max_size > 0 {
+            let mut cache = self.lookup_cache.write();
+            if cache.len() > max_size {
+                // Convert to vec, sort by timestamp (oldest first), and keep only the newest entries
+                let mut entries: Vec<_> = cache.drain().collect();
+                entries.sort_by(|a, b| a.1.1.cmp(&b.1.1));
+                
+                // Keep only the newest entries up to max_size
+                entries.truncate(max_size);
+                
+                // Put back into the cache
+                for (path, entry) in entries {
+                    cache.insert(path, entry);
+                }
+            }
+        }
+    }
+    
+    /// Get the maximum cache size
+    pub fn max_cache_size(&self) -> usize {
+        self.max_cache_size
+    }
+    
+    /// Enable the cache
+    pub fn enable_cache(&mut self) {
+        self.cache_enabled = true;
+    }
+    
+    /// Disable the cache
+    pub fn disable_cache(&mut self) {
+        self.cache_enabled = false;
+        // Clear the cache when disabled
+        self.lookup_cache.write().clear();
+    }
+    
+    /// Check if the cache is enabled
+    pub fn is_cache_enabled(&self) -> bool {
+        self.cache_enabled
+    }
+    
+    /// Get cache statistics
+    pub fn cache_stats(&self) -> (usize, u64, u64) {
+        let size = self.lookup_cache.read().len();
+        let hits = *self.cache_hits.read();
+        let misses = *self.cache_misses.read();
+        (size, hits, misses)
+    }
+    
+    /// Clear the cache and reset statistics
+    pub fn clear_cache(&self) {
+        let mut cache = self.lookup_cache.write();
+        cache.clear();
+        
+        let mut hits = self.cache_hits.write();
+        let mut misses = self.cache_misses.write();
+        *hits = 0;
+        *misses = 0;
+        
+        debug!("Cache cleared and statistics reset");
+    }
 
     /// Clean expired cache entries
     fn clean_cache(&self) {
-        let now = std::time::Instant::now();
-        let ttl = std::time::Duration::from_secs(self.cache_ttl);
+        let now = Instant::now();
+        let ttl = Duration::from_secs(self.cache_ttl);
         
         let mut cache = self.lookup_cache.write();
+        let initial_size = cache.len();
+        
         cache.retain(|_, (_, timestamp)| {
             now.duration_since(*timestamp) < ttl
         });
+        
+        let removed = initial_size - cache.len();
+        if removed > 0 {
+            debug!("Cleaned {} expired entries from actor lookup cache", removed);
+        }
     }
     
     /// Register a local actor with the registry
@@ -195,22 +285,33 @@ impl ActorRegistry {
         debug!("Looking up actor with path: {}", path);
         println!("Looking up actor with path: {}", path);
         
-        // Occasionally clean the cache (5% probability)
-        if rand::random::<f32>() < 0.05 {
-            self.clean_cache();
-        }
-        
-        // First check cache
-        {
-            let cache = self.lookup_cache.read();
-            if let Some((actor_ref, timestamp)) = cache.get(path) {
-                let now = std::time::Instant::now();
-                if now.duration_since(*timestamp) < std::time::Duration::from_secs(self.cache_ttl) {
-                    debug!("Found actor in cache: {}", path);
-                    println!("Found actor in cache: {}", path);
-                    return Some(actor_ref.clone());
+        // Only use cache if enabled
+        if self.cache_enabled {
+            // Occasionally clean the cache (5% probability)
+            if random::<f32>() < 0.05 {
+                self.clean_cache();
+            }
+            
+            // First check cache
+            {
+                let cache = self.lookup_cache.read();
+                if let Some((actor_ref, timestamp)) = cache.get(path) {
+                    let now = Instant::now();
+                    if now.duration_since(*timestamp) < Duration::from_secs(self.cache_ttl) {
+                        // Increment cache hit counter
+                        let mut hits = self.cache_hits.write();
+                        *hits += 1;
+                        
+                        debug!("Found actor in cache: {}", path);
+                        println!("Found actor in cache: {}", path);
+                        return Some(actor_ref.clone());
+                    }
                 }
             }
+            
+            // Increment cache miss counter
+            let mut misses = self.cache_misses.write();
+            *misses += 1;
         }
         
         // First check local actors
@@ -219,14 +320,29 @@ impl ActorRegistry {
             debug!("Found actor locally: {}", path);
             println!("Found actor locally: {}", path);
             
-            // Add to cache
-            let actor_ref_clone = actor_ref.clone();
-            drop(local_actors);
+            // Add to cache if enabled
+            if self.cache_enabled {
+                let actor_ref_clone = actor_ref.clone();
+                drop(local_actors);
+                
+                let mut cache = self.lookup_cache.write();
+                
+                // Check if we need to enforce max cache size
+                if self.max_cache_size > 0 && cache.len() >= self.max_cache_size {
+                    // Remove oldest entry
+                    if let Some((oldest_key, _)) = cache.iter()
+                        .min_by_key(|(_, (_, timestamp))| *timestamp) {
+                        let oldest_key = oldest_key.clone();
+                        cache.remove(&oldest_key);
+                    }
+                }
+                
+                cache.insert(path.to_string(), (actor_ref_clone.clone(), Instant::now()));
+                
+                return Some(actor_ref_clone);
+            }
             
-            let mut cache = self.lookup_cache.write();
-            cache.insert(path.to_string(), (actor_ref_clone.clone(), std::time::Instant::now()));
-            
-            return Some(actor_ref_clone);
+            return Some(actor_ref.clone());
         }
         
         debug!("Actor not found locally, checking remote registry: {}", path);
@@ -257,15 +373,31 @@ impl ActorRegistry {
                     DeliveryGuarantee::AtLeastOnce,
                 );
                 
-                // Cache the result
-                let remote_box = Box::new(remote_ref.clone()) as Box<dyn ActorRef>;
-                drop(remote_actors);
+                // Cache the result if cache is enabled
+                if self.cache_enabled {
+                    let remote_box = Box::new(remote_ref.clone()) as Box<dyn ActorRef>;
+                    drop(remote_actors);
+                    
+                    let mut cache = self.lookup_cache.write();
+                    
+                    // Check if we need to enforce max cache size
+                    if self.max_cache_size > 0 && cache.len() >= self.max_cache_size {
+                        // Remove oldest entry
+                        if let Some((oldest_key, _)) = cache.iter()
+                            .min_by_key(|(_, (_, timestamp))| *timestamp) {
+                            let oldest_key = oldest_key.clone();
+                            cache.remove(&oldest_key);
+                        }
+                    }
+                    
+                    cache.insert(path.to_string(), (remote_box.clone(), Instant::now()));
+                    
+                    // Wrap in a trait object
+                    return Some(remote_box);
+                }
                 
-                let mut cache = self.lookup_cache.write();
-                cache.insert(path.to_string(), (remote_box.clone(), std::time::Instant::now()));
-                
-                // Wrap in a trait object
-                return Some(remote_box);
+                // Wrap in a trait object without caching
+                return Some(Box::new(remote_ref) as Box<dyn ActorRef>);
             }
         }
         
@@ -289,15 +421,31 @@ impl ActorRegistry {
                     
                     println!("Created remote actor reference, returning it");
                     
-                    // Cache the result
-                    let remote_box = Box::new(remote_ref.clone()) as Box<dyn ActorRef>;
-                    drop(remote_actors);
+                    // Cache the result if cache is enabled
+                    if self.cache_enabled {
+                        let remote_box = Box::new(remote_ref.clone()) as Box<dyn ActorRef>;
+                        drop(remote_actors);
+                        
+                        let mut cache = self.lookup_cache.write();
+                        
+                        // Check if we need to enforce max cache size
+                        if self.max_cache_size > 0 && cache.len() >= self.max_cache_size {
+                            // Remove oldest entry
+                            if let Some((oldest_key, _)) = cache.iter()
+                                .min_by_key(|(_, (_, timestamp))| *timestamp) {
+                                let oldest_key = oldest_key.clone();
+                                cache.remove(&oldest_key);
+                            }
+                        }
+                        
+                        cache.insert(path.to_string(), (remote_box.clone(), Instant::now()));
+                        
+                        // Wrap in a trait object
+                        return Some(remote_box);
+                    }
                     
-                    let mut cache = self.lookup_cache.write();
-                    cache.insert(path.to_string(), (remote_box.clone(), std::time::Instant::now()));
-                    
-                    // Wrap in a trait object
-                    return Some(remote_box);
+                    // Wrap in a trait object without caching
+                    return Some(Box::new(remote_ref) as Box<dyn ActorRef>);
                 } else {
                     println!("Transport not available to create remote actor reference");
                 }

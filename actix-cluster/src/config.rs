@@ -64,6 +64,67 @@ pub enum DiscoveryMethod {
     },
 }
 
+/// Cache configuration options for the actor registry
+#[derive(Debug, Clone)]
+pub struct CacheConfig {
+    /// Whether the actor lookup cache is enabled
+    enabled: bool,
+    /// Time-to-live for cache entries in seconds
+    ttl: u64,
+    /// Maximum number of cache entries (0 means unlimited)
+    max_size: usize,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ttl: 60,  // 60 seconds by default
+            max_size: 1000,
+        }
+    }
+}
+
+impl CacheConfig {
+    /// Create a new cache configuration
+    pub fn new() -> Self {
+        Self::default()
+    }
+    
+    /// Set whether the cache is enabled
+    pub fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+    
+    /// Set the cache TTL in seconds
+    pub fn ttl(mut self, ttl: u64) -> Self {
+        self.ttl = ttl;
+        self
+    }
+    
+    /// Set the maximum cache size
+    pub fn max_size(mut self, max_size: usize) -> Self {
+        self.max_size = max_size;
+        self
+    }
+    
+    /// Get whether the cache is enabled
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+    
+    /// Get the cache TTL in seconds
+    pub fn get_ttl(&self) -> u64 {
+        self.ttl
+    }
+    
+    /// Get the maximum cache size
+    pub fn get_max_size(&self) -> usize {
+        self.max_size
+    }
+}
+
 /// Cluster configuration builder
 #[derive(Debug, Clone)]
 pub struct ClusterConfig {
@@ -108,6 +169,9 @@ pub struct ClusterConfig {
     
     /// Cluster name
     pub cluster_name: String,
+    
+    /// Cache configuration
+    cache_config: CacheConfig,
 }
 
 impl Default for ClusterConfig {
@@ -127,6 +191,7 @@ impl Default for ClusterConfig {
             tls_cert_path: None,
             tls_key_path: None,
             cluster_name: "actix-cluster".to_string(),
+            cache_config: CacheConfig::default(),
         }
     }
 }
@@ -221,6 +286,17 @@ impl ClusterConfig {
     pub fn cluster_name(mut self, name: String) -> Self {
         self.cluster_name = name;
         self
+    }
+    
+    /// Set the cache configuration
+    pub fn cache_config(mut self, cache_config: CacheConfig) -> Self {
+        self.cache_config = cache_config;
+        self
+    }
+    
+    /// Get the cache configuration
+    pub fn get_cache_config(&self) -> &CacheConfig {
+        &self.cache_config
     }
     
     /// Validate and build the configuration

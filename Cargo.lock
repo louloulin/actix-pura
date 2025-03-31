@@ -54,6 +54,7 @@ dependencies = [
  "multiaddr",
  "once_cell",
  "parking_lot",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "signal-hook",

@@ -74,8 +74,20 @@ impl ClusterSystem {
         // Create discovery service based on configuration
         let discovery = crate::discovery::create_discovery_service(config.discovery.clone());
         
-        // 创建注册表
-        let registry = Arc::new(ActorRegistry::new(local_node.id.clone()));
+        // 创建注册表并配置缓存
+        let mut registry = ActorRegistry::new(local_node.id.clone());
+        
+        // Configure the registry cache if needed
+        let cache_config = config.get_cache_config();
+        if cache_config.is_enabled() {
+            registry.set_cache_ttl(cache_config.get_ttl());
+            registry.set_max_cache_size(cache_config.get_max_size());
+        } else {
+            registry.disable_cache();
+        }
+        
+        // 将注册表包装在Arc中
+        let registry = Arc::new(registry);
         
         ClusterSystem {
             config,
@@ -137,6 +149,15 @@ impl ClusterSystem {
         
         // Create a new instance of the registry with the correct node ID
         let mut new_registry = ActorRegistry::new(self.local_node.id.clone());
+        
+        // Configure the registry cache from config
+        let cache_config = self.config.get_cache_config();
+        if cache_config.is_enabled() {
+            new_registry.set_cache_ttl(cache_config.get_ttl());
+            new_registry.set_max_cache_size(cache_config.get_max_size());
+        } else {
+            new_registry.disable_cache();
+        }
         
         // If we have a transport, set it on the registry first
         if let Some(transport) = &transport {

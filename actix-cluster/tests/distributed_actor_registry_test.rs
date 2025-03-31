@@ -9,11 +9,12 @@ use actix::prelude::*;
 use actix_cluster::{
     cluster::{ClusterSystem, Architecture},
     config::{NodeRole, ClusterConfig, DiscoveryMethod},
-    message::AnyMessage,
+    message::{AnyMessage, ActorPath},
     serialization::SerializationFormat,
     transport::{P2PTransport, TransportMessage},
     error::ClusterResult,
     node::{NodeId, NodeInfo},
+    ActorRef, LocalActorRef,
 };
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
@@ -511,8 +512,13 @@ async fn test_lookup_cache_performance() {
     local.run_until(async {
         println!("Starting lookup cache performance test...");
         
-        // Create node configuration
+        // Create node configuration with custom cache settings
         let node_addr = SocketAddr::from_str("127.0.0.1:10008").unwrap();
+        
+        // Create a custom cache config with short TTL and small size
+        let cache_config = actix_cluster::config::CacheConfig::new()
+            .ttl(5)  // 5 seconds TTL
+            .max_size(20); // Max 20 entries
         
         let config = ClusterConfig::new()
             .architecture(Architecture::Decentralized)
@@ -520,6 +526,7 @@ async fn test_lookup_cache_performance() {
             .bind_addr(node_addr)
             .cluster_name("test-cluster".to_string())
             .serialization_format(SerializationFormat::Bincode)
+            .cache_config(cache_config)
             .build()
             .expect("Failed to create config");
         
@@ -529,6 +536,11 @@ async fn test_lookup_cache_performance() {
         
         // Get the registry
         let registry = system.registry();
+        
+        // Verify cache settings were applied
+        assert_eq!(5, registry.cache_ttl(), "Cache TTL should be 5 seconds");
+        assert_eq!(20, registry.max_cache_size(), "Max cache size should be 20");
+        assert!(registry.is_cache_enabled(), "Cache should be enabled");
         
         // Register 10 local actors
         for i in 0..10 {
@@ -575,6 +587,40 @@ async fn test_lookup_cache_performance() {
         println!("Cache performance improvement: {:.1}x faster", 
                 cold_lookup_time.as_nanos() as f64 / warm_lookup_time.as_nanos() as f64);
         assert!(warm_lookup_time < cold_lookup_time, "Cached lookup should be faster");
+        
+        // Check cache statistics
+        let (cache_size, cache_hits, cache_misses) = registry.cache_stats();
+        println!("Cache statistics - Size: {}, Hits: {}, Misses: {}", cache_size, cache_hits, cache_misses);
+        assert_eq!(cache_size, 10, "Cache should contain 10 entries");
+        assert_eq!(cache_hits, 10, "Should have 10 cache hits from the second lookup");
+        assert!(cache_misses >= 10, "Should have at least 10 cache misses from the first lookup");
+        
+        // Test max size enforcement - add 15 more entries to exceed max size (20)
+        for i in 10..25 {
+            let actor_path = format!("test_actor_{}", i);
+            let test_actor = TestActor::new(Arc::new(MessageReceived::new())).start();
+            
+            let local_ref = LocalActorRef::new(test_actor, actor_path.clone());
+            registry.register_local(
+                actor_path, 
+                Box::new(local_ref) as Box<dyn ActorRef>
+            ).expect("Failed to register local actor");
+            
+            // Look up to put in cache
+            registry.lookup(&format!("test_actor_{}", i));
+        }
+        
+        // Check cache size doesn't exceed max
+        let (cache_size, _, _) = registry.cache_stats();
+        println!("Cache size after adding 15 more actors: {}", cache_size);
+        assert!(cache_size <= 20, "Cache size should not exceed max size of 20");
+        
+        // Test cache clear functionality
+        registry.clear_cache();
+        let (cache_size, cache_hits, cache_misses) = registry.cache_stats();
+        assert_eq!(cache_size, 0, "Cache should be empty after clearing");
+        assert_eq!(cache_hits, 0, "Cache hits should be reset");
+        assert_eq!(cache_misses, 0, "Cache misses should be reset");
         
         // Test the cache invalidation - deregister an actor and verify it's not in cache
         registry.deregister_local("test_actor_0").expect("Failed to deregister actor");
