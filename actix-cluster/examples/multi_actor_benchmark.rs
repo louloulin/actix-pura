@@ -8,7 +8,7 @@ use tokio::time::sleep;
 
 // 测试参数
 const ACTOR_COUNT: usize = 10;  // Actor的数量 - 减少到10个
-const MESSAGES_PER_ACTOR: u64 = 1000; // 每个Actor发送的消息数量
+const MESSAGES_PER_ACTOR: u64 = 100000; // 每个Actor发送的消息数量
 const MESSAGE_SIZE: usize = 1024;   // 消息大小(字节)
 const BATCH_SIZE: usize = 100;     // 批处理大小
 
@@ -237,11 +237,6 @@ struct SendMessages {
     message_size: usize,
     batch_size: usize,
 }
-
-// 获取Actor自身引用
-//[derive(Message)]
-//[rtype(result = "Box<TestActor>")]
-//struct GetSelf;
 
 impl Actor for TestCoordinator {
     type Context = Context<Self>;
