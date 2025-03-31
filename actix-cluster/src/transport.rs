@@ -854,6 +854,21 @@ impl P2PTransport {
     pub fn get_peer_list(&self) -> Vec<NodeInfo> {
         self.peers.lock().values().cloned().collect()
     }
+
+    /// 获取对等节点的锁 - 仅用于测试
+    pub fn peers_lock_for_testing(&self) -> parking_lot::MutexGuard<'_, HashMap<NodeId, NodeInfo>> {
+        self.peers.lock()
+    }
+
+    /// 为测试目的设置消息处理器
+    pub fn message_handler_for_testing(&mut self, handler: Arc<Mutex<dyn MessageHandler>>) {
+        self.message_handler = Some(handler);
+    }
+
+    /// 为测试目的获取消息处理器
+    pub fn get_message_handler_for_testing(&self) -> Option<Arc<Mutex<dyn MessageHandler>>> {
+        self.message_handler.clone()
+    }
 }
 
 /// Remote actor reference for sending messages to actors on other nodes
@@ -930,11 +945,21 @@ impl RemoteActorRef {
             delivery_guarantee,
         }
     }
+
+    /// 为测试目的获取内部传输组件
+    pub fn transport_for_testing(&self) -> &Arc<tokio::sync::Mutex<P2PTransport>> {
+        &self.transport
+    }
+    
+    /// 为测试目的获取节点ID
+    pub fn node_id_for_testing(&self) -> &NodeId {
+        &self.node_id
+    }
 }
 
 impl crate::registry::ActorRef for RemoteActorRef {
     fn send_any(&self, msg: Box<dyn std::any::Any + Send>) -> ClusterResult<()> {
-        // Default implementation that returns an error, as we can't handle arbitrary types
+        // Default implementation that returns an error, as we can't handle arbitrary types directly
         // In practice, serialization should be handled at a higher level
         Err(ClusterError::SerializationError("RemoteActorRef can't handle arbitrary Any types directly".to_string()))
     }

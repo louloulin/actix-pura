@@ -19,6 +19,10 @@ pub mod message;
 pub mod security;
 pub mod sync;
 
+// 添加测试工具模块，用于测试和集成测试
+#[doc(hidden)]
+pub mod testing;
+
 pub use cluster::{ClusterSystem, Architecture};
 pub use config::{ClusterConfig, NodeRole, DiscoveryMethod};
 pub use node::{Node, NodeId, NodeInfo, NodeStatus, PlacementStrategy};

@@ -11,6 +11,7 @@ use actix_cluster::{
     serialization::SerializationFormat,
     error::ClusterResult,
     message::{MessageEnvelope, MessageType, DeliveryGuarantee, ActorPath},
+    testing,
 };
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -24,7 +25,36 @@ struct NetworkTestMessage {
 
 // 消息接收处理器
 struct NetworkMessageReceiver {
-    received: Arc<AtomicBool>,
+    // 存储收到的消息信封
+    received: std::sync::Mutex<Vec<MessageEnvelope>>,
+    // 标记是否收到消息
+    received_flag: Arc<AtomicBool>,
+    // 预期接收的消息数量
+    expected: usize,
+    // 标记测试是否完成
+    is_completed: std::sync::Mutex<bool>,
+}
+
+impl NetworkMessageReceiver {
+    // 创建新的接收器
+    fn new(received_flag: Arc<AtomicBool>, expected: usize) -> Self {
+        Self {
+            received: std::sync::Mutex::new(Vec::new()),
+            received_flag,
+            expected,
+            is_completed: std::sync::Mutex::new(false),
+        }
+    }
+    
+    // 检查是否已完成
+    fn is_completed(&self) -> bool {
+        *self.is_completed.lock().unwrap()
+    }
+    
+    // 获取接收到的消息数量
+    fn received_count(&self) -> usize {
+        self.received.lock().unwrap().len()
+    }
 }
 
 #[async_trait::async_trait]
@@ -44,6 +74,9 @@ impl MessageHandler for NetworkMessageReceiver {
                 let mut is_completed = self.is_completed.lock().unwrap();
                 *is_completed = true;
             }
+            
+            // 更新标志，表明收到了消息
+            self.received_flag.store(true, Ordering::SeqCst);
         }
         
         Ok(())
@@ -95,8 +128,8 @@ async fn test_network_communication() {
             .expect("Failed to create transport2");
         
         // 在传输层2上设置消息处理器
-        let receiver = NetworkMessageReceiver { received: message_received.clone() };
-        transport2.set_message_handler_direct(Arc::new(Mutex::new(receiver)));
+        let receiver = NetworkMessageReceiver::new(message_received.clone(), 1);
+        testing::set_message_handler_direct_for_test(&mut transport2, Arc::new(Mutex::new(receiver)));
         
         println!("Starting transport on node 2 (receiver)");
         // 启动传输层2
@@ -116,14 +149,13 @@ async fn test_network_communication() {
         
         // 手动将节点2添加为节点1的对等节点
         println!("Adding node 2 as peer to node 1");
-        transport1.add_peer(node2_id.clone(), node2_info.clone());
+        testing::add_peer_for_test(&mut transport1, node2_id.clone(), node2_info.clone());
         
         // Verify node 2 is in the peers list of node 1
         {
-            let peers = transport1.get_peers_lock();
-            let peers_guard = peers.lock();
-            println!("Node 1 peers: {:?}", peers_guard.keys().collect::<Vec<_>>());
-            assert!(peers_guard.contains_key(&node2_id), "Node 2 should be in the peers list of node 1");
+            let peers = testing::get_peers_lock_for_test(&transport1);
+            println!("Node 1 peers: {:?}", peers.keys().collect::<Vec<_>>());
+            assert!(peers.contains_key(&node2_id), "Node 2 should be in the peers list of node 1");
         }
         
         println!("Establishing connection from node 1 to node 2");
@@ -141,9 +173,9 @@ async fn test_network_communication() {
         }
         
         // Verify connection exists indirectly - we can check by getting the peer list
-        let peer_list = transport1.get_peer_list();
+        let peer_list = testing::get_peer_list_for_test(&transport1);
         println!("Node 1 peers after connection: {:?}", peer_list);
-        assert!(peer_list.contains(&node2_id), "Node 2 should be in the peer list of node 1");
+        assert!(peer_list.iter().any(|n| n.id == node2_id), "Node 2 should be in the peer list of node 1");
         
         // 创建测试消息
         let test_message = NetworkTestMessage {
@@ -170,7 +202,7 @@ async fn test_network_communication() {
         
         println!("Sending message from node 1 to node 2");
         // 发送消息到节点2
-        match transport1.send_envelope(envelope).await {
+        match testing::send_envelope_for_test(&mut transport1, envelope).await {
             Ok(_) => println!("Successfully sent envelope to node 2"),
             Err(e) => panic!("Failed to send envelope: {:?}", e),
         }
@@ -237,8 +269,8 @@ async fn test_bidirectional_communication() {
         );
         
         // 创建消息处理器
-        let receiver1 = NetworkMessageReceiver { received: node1_received.clone() };
-        let receiver2 = NetworkMessageReceiver { received: node2_received.clone() };
+        let receiver1 = NetworkMessageReceiver::new(node1_received.clone(), 1);
+        let receiver2 = NetworkMessageReceiver::new(node2_received.clone(), 1);
         
         println!("Creating transports for bidirectional test");
         // 创建传输层
@@ -249,8 +281,8 @@ async fn test_bidirectional_communication() {
             .expect("Failed to create transport2");
         
         // 设置消息处理器
-        transport1.set_message_handler_direct(Arc::new(Mutex::new(receiver1)));
-        transport2.set_message_handler_direct(Arc::new(Mutex::new(receiver2)));
+        testing::set_message_handler_direct_for_test(&mut transport1, Arc::new(Mutex::new(receiver1)));
+        testing::set_message_handler_direct_for_test(&mut transport2, Arc::new(Mutex::new(receiver2)));
         
         println!("Starting both transports");
         // 启动传输层
@@ -263,20 +295,18 @@ async fn test_bidirectional_communication() {
         
         // 手动添加对等节点信息
         println!("Adding peer information to both nodes");
-        transport1.add_peer(node2_id.clone(), node2_info.clone());
-        transport2.add_peer(node1_id.clone(), node1_info.clone());
+        testing::add_peer_for_test(&mut transport1, node2_id.clone(), node2_info.clone());
+        testing::add_peer_for_test(&mut transport2, node1_id.clone(), node1_info.clone());
         
         // Verify peers lists
         {
-            let peers1 = transport1.get_peers_lock();
-            let peers1_guard = peers1.lock();
-            println!("Node 1 peers: {:?}", peers1_guard.keys().collect::<Vec<_>>());
-            assert!(peers1_guard.contains_key(&node2_id), "Node 2 should be in the peers list of node 1");
+            let peers1 = testing::get_peers_lock_for_test(&transport1);
+            println!("Node 1 peers: {:?}", peers1.keys().collect::<Vec<_>>());
+            assert!(peers1.contains_key(&node2_id), "Node 2 should be in the peers list of node 1");
             
-            let peers2 = transport2.get_peers_lock();
-            let peers2_guard = peers2.lock();
-            println!("Node 2 peers: {:?}", peers2_guard.keys().collect::<Vec<_>>());
-            assert!(peers2_guard.contains_key(&node1_id), "Node 1 should be in the peers list of node 2");
+            let peers2 = testing::get_peers_lock_for_test(&transport2);
+            println!("Node 2 peers: {:?}", peers2.keys().collect::<Vec<_>>());
+            assert!(peers2.contains_key(&node1_id), "Node 1 should be in the peers list of node 2");
         }
         
         println!("Establishing connections between nodes");
@@ -291,8 +321,8 @@ async fn test_bidirectional_communication() {
         tokio::time::sleep(Duration::from_secs(3)).await;
         
         // Check peer lists after connection
-        println!("Node 1 peers after connection: {:?}", transport1.get_peer_list());
-        println!("Node 2 peers after connection: {:?}", transport2.get_peer_list());
+        println!("Node 1 peers after connection: {:?}", testing::get_peer_list_for_test(&transport1));
+        println!("Node 2 peers after connection: {:?}", testing::get_peer_list_for_test(&transport2));
         
         // 创建测试消息从节点1到节点2
         let message1to2 = NetworkTestMessage {
@@ -318,7 +348,7 @@ async fn test_bidirectional_communication() {
         
         println!("Sending message from node 1 to node 2");
         // 发送消息到节点2
-        match transport1.send_envelope(envelope1to2).await {
+        match testing::send_envelope_for_test(&mut transport1, envelope1to2).await {
             Ok(_) => println!("Successfully sent envelope from node 1 to node 2"),
             Err(e) => panic!("Failed to send envelope1to2: {:?}", e),
         }
@@ -359,7 +389,7 @@ async fn test_bidirectional_communication() {
         
         println!("Sending message from node 2 to node 1");
         // 发送消息到节点1
-        match transport2.send_envelope(envelope2to1).await {
+        match testing::send_envelope_for_test(&mut transport2, envelope2to1).await {
             Ok(_) => println!("Successfully sent envelope from node 2 to node 1"),
             Err(e) => panic!("Failed to send envelope2to1: {:?}", e),
         }
