@@ -1,7 +1,7 @@
 <div align="center">
-  <h1>Actix</h1>
+  <h1>Actix-Pura</h1>
   <p>
-    <strong>Actor framework for Rust</strong>
+    <strong>Actor framework for Rust with distributed capabilities</strong>
   </p>
   <p>
 
@@ -36,6 +36,7 @@
 - Actor supervision
 - Typed messages (No `Any` type)
 - Runs on stable Rust 1.68+
+- **Distributed computing capabilities** for cluster environments
 
 ## Usage
 
@@ -222,6 +223,65 @@ See this [chat example] which shows more comprehensive usage in a networking cli
 
 [chat example]: https://github.com/actix/examples/tree/HEAD/websockets/chat-tcp
 
+## Distributed Capabilities
+
+Actix-Pura extends the Actix actor framework with distributed computing capabilities, enabling actor systems to span across multiple nodes. The distributed extension provides:
+
+### Key Distributed Features
+
+- **Node Management**: Unique identification and status tracking for nodes
+- **Cluster Architecture**: Support for centralized and decentralized architectures 
+- **P2P Transport**: Peer-to-peer communication between cluster nodes
+- **Service Discovery**: Automatic discovery of nodes within the cluster
+- **Message Delivery**: Reliable actor message transport with different delivery guarantees
+- **Master Election**: Leader election for centralized cluster coordination
+- **Message Broker**: Publish-subscribe pattern for topic-based messaging
+
+### Distributed Usage Example
+
+```rust
+use actix_pura::{
+    node::{NodeId, NodeInfo, NodeStatus},
+    config::{ClusterConfig, NodeRole},
+    ClusterSystem,
+    message::DeliveryGuarantee,
+};
+use std::net::SocketAddr;
+
+#[actix::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Configure the cluster
+    let config = ClusterConfig::default();
+    
+    // Create a node ID and info
+    let node_id = NodeId::new();
+    let addr: SocketAddr = "127.0.0.1:8000".parse()?;
+    
+    let node_info = NodeInfo::new(
+        node_id,
+        "node-1".to_string(),
+        NodeRole::Worker,
+        addr,
+    );
+    
+    // Initialize the cluster system
+    let cluster = ClusterSystem::new(config, node_info).await?;
+    
+    // Start the cluster and join
+    cluster.start().await?;
+    
+    // Send message to a remote actor
+    cluster.send_remote(
+        &target_node_id,
+        "remote-actor",
+        my_message,
+        DeliveryGuarantee::AtLeastOnce,
+    ).await?;
+    
+    Ok(())
+}
+```
+
 ## Contributing
 
 All contributions are welcome, if you have a feature request don't hesitate to open an issue!
@@ -238,3 +298,4 @@ at your option.
 ## Code of Conduct
 
 Contribution to the actix repo is organized under the terms of the Contributor Covenant. The Actix team promises to intervene to uphold that code of conduct.
+
