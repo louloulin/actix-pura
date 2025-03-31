@@ -10,8 +10,20 @@ use crate::config::NodeRole;
 use crate::error::ClusterResult;
 
 /// Unique identifier for a node in the cluster
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Copy)]
 pub struct NodeId(pub Uuid);
+
+impl PartialOrd for NodeId {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.0.cmp(&other.0))
+    }
+}
+
+impl Ord for NodeId {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.cmp(&other.0)
+    }
+}
 
 impl NodeId {
     /// Create a new random node ID

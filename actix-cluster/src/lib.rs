@@ -21,6 +21,7 @@ pub mod sync;
 pub mod migration;
 pub mod placement;
 pub mod actor;
+pub mod master;
 
 // 添加测试工具模块，用于测试和集成测试
 #[doc(hidden)]

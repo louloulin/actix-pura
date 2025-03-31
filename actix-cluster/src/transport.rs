@@ -26,6 +26,7 @@ use crate::serialization::{SerializationFormat, SerializerTrait, BincodeSerializ
 use crate::message::{MessageEnvelope, MessageType, DeliveryGuarantee, ActorPath};
 use crate::message::MessageEnvelopeHandler;
 use crate::registry::ActorRegistry;
+use crate::master::{ElectionMessage, MasterState};
 
 // Define MessageId type for message acknowledgements
 type MessageId = uuid::Uuid;
@@ -38,24 +39,39 @@ const ACK_TIMEOUT: Duration = Duration::from_secs(5);
 /// Transport message types for P2P communication
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TransportMessage {
-    /// Actor communication message
-    Envelope(MessageEnvelope),
-    /// Heartbeat from a node
+    /// Actor message
+    ActorMessage(MessageEnvelope),
+    
+    /// Broker message
+    BrokerMessage(crate::broker::BrokerMessage),
+    
+    /// Heartbeat message
     Heartbeat(NodeInfo),
+    
+    /// Election message
+    Election(ElectionMessage),
+    
+    /// Master state update
+    MasterState(MasterState),
+    
     /// Status update for a node
     StatusUpdate(NodeId, String),
+    
     /// Ack message
     Ack(MessageId),
+    
     /// Connection close notification
     Close,
+    
     /// Node handshake (initial connection)
     Handshake(NodeInfo),
+    
     /// Request the location of an actor
     ActorDiscoveryRequest(NodeId, String),
+    
     /// Response with the locations of an actor
     ActorDiscoveryResponse(String, Vec<NodeId>),
-    /// Pub/Sub broker message
-    BrokerMessage(crate::broker::BrokerMessage),
+    
     /// Subscription message for broker
     BrokerSubscribe {
         /// Topic to subscribe to
@@ -65,6 +81,7 @@ pub enum TransportMessage {
         /// Subscription options
         options: crate::broker::SubscriptionOptions,
     },
+    
     /// Unsubscribe message for broker
     BrokerUnsubscribe {
         /// Topic to unsubscribe from
@@ -72,8 +89,10 @@ pub enum TransportMessage {
         /// Node that is unsubscribing
         node_id: NodeId,
     },
+    
     /// Acknowledgment for a broker message
     BrokerAck(crate::broker::MessageAck),
+    
     /// Subscribe to a topic
     Subscribe {
         /// Topic to subscribe to
@@ -81,6 +100,9 @@ pub enum TransportMessage {
         /// Subscription options
         options: crate::broker::SubscriptionOptions,
     },
+
+    /// Message envelope for actor communication
+    Envelope(MessageEnvelope),
 }
 
 /// A message that is waiting for acknowledgement
