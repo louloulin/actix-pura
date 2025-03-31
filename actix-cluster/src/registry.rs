@@ -5,12 +5,13 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use actix::prelude::*;
 use actix::dev::ToEnvelope;
 use log::{debug, error, info};
 use parking_lot::RwLock;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 
@@ -111,6 +112,10 @@ pub struct ActorRegistry {
     transport: Option<Arc<TransportAdapter>>,
     /// Map of pending actor discovery requests, keyed by path
     pending_discoveries: RwLock<HashMap<String, Vec<oneshot::Sender<Option<Box<dyn ActorRef>>>>>>,
+    /// Cache of recently looked up actors for performance
+    lookup_cache: RwLock<HashMap<String, (Box<dyn ActorRef>, std::time::Instant)>>,
+    /// Cache TTL in seconds
+    cache_ttl: u64,
 }
 
 impl ActorRegistry {
@@ -122,12 +127,30 @@ impl ActorRegistry {
             remote_actors: RwLock::new(HashMap::new()),
             transport: None,
             pending_discoveries: RwLock::new(HashMap::new()),
+            lookup_cache: RwLock::new(HashMap::new()),
+            cache_ttl: 60, // 60 seconds by default
         }
     }
     
     /// Set the transport for sending messages to remote actors
     pub fn set_transport(&mut self, transport: Arc<tokio::sync::Mutex<P2PTransport>>) {
         self.transport = Some(Arc::new(TransportAdapter::new(transport)));
+    }
+    
+    /// Set cache TTL in seconds
+    pub fn set_cache_ttl(&mut self, ttl: u64) {
+        self.cache_ttl = ttl;
+    }
+
+    /// Clean expired cache entries
+    fn clean_cache(&self) {
+        let now = std::time::Instant::now();
+        let ttl = std::time::Duration::from_secs(self.cache_ttl);
+        
+        let mut cache = self.lookup_cache.write();
+        cache.retain(|_, (_, timestamp)| {
+            now.duration_since(*timestamp) < ttl
+        });
     }
     
     /// Register a local actor with the registry
@@ -137,35 +160,73 @@ impl ActorRegistry {
             return Err(ClusterError::ActorAlreadyRegistered(path));
         }
         
-        actors.insert(path, actor_ref);
+        actors.insert(path.clone(), actor_ref);
+        
+        // Invalidate cache entry if exists
+        let mut cache = self.lookup_cache.write();
+        cache.remove(&path);
+        
         Ok(())
     }
     
     /// Register a remote actor with the registry
     pub fn register_remote(&self, path: ActorPath, node_id: NodeId) -> ClusterResult<()> {
         let mut actors = self.remote_actors.write();
-        actors.insert(path, node_id);
+        actors.insert(path.clone(), node_id);
+        
+        // Invalidate cache entry if exists
+        let mut cache = self.lookup_cache.write();
+        cache.remove(&path.path);
+        
         Ok(())
     }
     
     /// Lookup an actor by path
     /// 
     /// The lookup process follows these steps:
-    /// 1. First checks the local actors registry
-    /// 2. If not found locally, tries to find the actor in the remote registry using the local node ID
-    /// 3. If still not found, searches all remote actors for any with a matching path, regardless of node ID
+    /// 1. First checks the cache for a recent lookup result
+    /// 2. If not in cache, checks the local actors registry
+    /// 3. If not found locally, tries to find the actor in the remote registry using the local node ID
+    /// 4. If still not found, searches all remote actors for any with a matching path, regardless of node ID
+    /// 5. Caches successful lookups for future performance
     ///
     /// This flexible lookup approach ensures that actors can be found even if registered with different node IDs.
     pub fn lookup(&self, path: &str) -> Option<Box<dyn ActorRef>> {
         debug!("Looking up actor with path: {}", path);
         println!("Looking up actor with path: {}", path);
         
+        // Occasionally clean the cache (5% probability)
+        if rand::random::<f32>() < 0.05 {
+            self.clean_cache();
+        }
+        
+        // First check cache
+        {
+            let cache = self.lookup_cache.read();
+            if let Some((actor_ref, timestamp)) = cache.get(path) {
+                let now = std::time::Instant::now();
+                if now.duration_since(*timestamp) < std::time::Duration::from_secs(self.cache_ttl) {
+                    debug!("Found actor in cache: {}", path);
+                    println!("Found actor in cache: {}", path);
+                    return Some(actor_ref.clone());
+                }
+            }
+        }
+        
         // First check local actors
         let local_actors = self.local_actors.read();
         if let Some(actor_ref) = local_actors.get(path) {
             debug!("Found actor locally: {}", path);
             println!("Found actor locally: {}", path);
-            return Some(actor_ref.clone());
+            
+            // Add to cache
+            let actor_ref_clone = actor_ref.clone();
+            drop(local_actors);
+            
+            let mut cache = self.lookup_cache.write();
+            cache.insert(path.to_string(), (actor_ref_clone.clone(), std::time::Instant::now()));
+            
+            return Some(actor_ref_clone);
         }
         
         debug!("Actor not found locally, checking remote registry: {}", path);
@@ -196,8 +257,15 @@ impl ActorRegistry {
                     DeliveryGuarantee::AtLeastOnce,
                 );
                 
+                // Cache the result
+                let remote_box = Box::new(remote_ref.clone()) as Box<dyn ActorRef>;
+                drop(remote_actors);
+                
+                let mut cache = self.lookup_cache.write();
+                cache.insert(path.to_string(), (remote_box.clone(), std::time::Instant::now()));
+                
                 // Wrap in a trait object
-                return Some(Box::new(remote_ref) as Box<dyn ActorRef>);
+                return Some(remote_box);
             }
         }
         
@@ -220,8 +288,16 @@ impl ActorRegistry {
                     );
                     
                     println!("Created remote actor reference, returning it");
+                    
+                    // Cache the result
+                    let remote_box = Box::new(remote_ref.clone()) as Box<dyn ActorRef>;
+                    drop(remote_actors);
+                    
+                    let mut cache = self.lookup_cache.write();
+                    cache.insert(path.to_string(), (remote_box.clone(), std::time::Instant::now()));
+                    
                     // Wrap in a trait object
-                    return Some(Box::new(remote_ref) as Box<dyn ActorRef>);
+                    return Some(remote_box);
                 } else {
                     println!("Transport not available to create remote actor reference");
                 }
@@ -240,6 +316,10 @@ impl ActorRegistry {
             return Err(ClusterError::ActorNotFound(path.to_string()));
         }
         
+        // Invalidate cache entry
+        let mut cache = self.lookup_cache.write();
+        cache.remove(path);
+        
         Ok(())
     }
     
@@ -249,6 +329,10 @@ impl ActorRegistry {
         if actors.remove(path).is_none() {
             return Err(ClusterError::ActorNotFound(path.path.clone()));
         }
+        
+        // Invalidate cache entry
+        let mut cache = self.lookup_cache.write();
+        cache.remove(&path.path);
         
         Ok(())
     }

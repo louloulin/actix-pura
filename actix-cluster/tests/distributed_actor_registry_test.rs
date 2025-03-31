@@ -501,4 +501,97 @@ async fn test_connection_maintenance() {
 
         println!("Connection maintenance test completed successfully!");
     }).await;
+}
+
+#[tokio::test]
+async fn test_lookup_cache_performance() {
+    // Use a LocalSet to properly handle spawn_local
+    let local = tokio::task::LocalSet::new();
+    
+    local.run_until(async {
+        println!("Starting lookup cache performance test...");
+        
+        // Create node configuration
+        let node_addr = SocketAddr::from_str("127.0.0.1:10008").unwrap();
+        
+        let config = ClusterConfig::new()
+            .architecture(Architecture::Decentralized)
+            .node_role(NodeRole::Peer)
+            .bind_addr(node_addr)
+            .cluster_name("test-cluster".to_string())
+            .serialization_format(SerializationFormat::Bincode)
+            .build()
+            .expect("Failed to create config");
+        
+        // Create cluster system
+        let mut system = ClusterSystem::new("test-node", config);
+        let system_addr = system.start().await.expect("Failed to start system");
+        
+        // Get the registry
+        let registry = system.registry();
+        
+        // Register 10 local actors
+        for i in 0..10 {
+            let actor_path = format!("test_actor_{}", i);
+            let test_actor = TestActor::new(Arc::new(MessageReceived::new())).start();
+            
+            let local_ref = LocalActorRef::new(test_actor, actor_path.clone());
+            registry.register_local(
+                actor_path, 
+                Box::new(local_ref) as Box<dyn ActorRef>
+            ).expect("Failed to register local actor");
+        }
+        
+        // Register 10 remote actors
+        let remote_node_id = NodeId::new();
+        for i in 0..10 {
+            let actor_path = format!("remote_actor_{}", i);
+            let path = ActorPath::new(remote_node_id.clone(), actor_path);
+            registry.register_remote(path, remote_node_id.clone())
+                .expect("Failed to register remote actor");
+        }
+        
+        // Performance test 1: First lookup (cold)
+        let start_time = std::time::Instant::now();
+        for i in 0..10 {
+            let actor_path = format!("test_actor_{}", i);
+            let actor_ref = registry.lookup(&actor_path);
+            assert!(actor_ref.is_some(), "Actor should be found");
+        }
+        let cold_lookup_time = start_time.elapsed();
+        println!("Cold lookup time for 10 local actors: {:?}", cold_lookup_time);
+        
+        // Performance test 2: Second lookup (warm cache)
+        let start_time = std::time::Instant::now();
+        for i in 0..10 {
+            let actor_path = format!("test_actor_{}", i);
+            let actor_ref = registry.lookup(&actor_path);
+            assert!(actor_ref.is_some(), "Actor should be found");
+        }
+        let warm_lookup_time = start_time.elapsed();
+        println!("Warm lookup time for 10 local actors: {:?}", warm_lookup_time);
+        
+        // Verify the cache is working by confirming the warm lookup is faster
+        println!("Cache performance improvement: {:.1}x faster", 
+                cold_lookup_time.as_nanos() as f64 / warm_lookup_time.as_nanos() as f64);
+        assert!(warm_lookup_time < cold_lookup_time, "Cached lookup should be faster");
+        
+        // Test the cache invalidation - deregister an actor and verify it's not in cache
+        registry.deregister_local("test_actor_0").expect("Failed to deregister actor");
+        let lookup_after_deregister = registry.lookup("test_actor_0");
+        assert!(lookup_after_deregister.is_none(), "Actor should not be found after deregistration");
+        
+        // Register it again and verify it can be found
+        let new_actor = TestActor::new(Arc::new(MessageReceived::new())).start();
+        let local_ref = LocalActorRef::new(new_actor, "test_actor_0".to_string());
+        registry.register_local(
+            "test_actor_0".to_string(),
+            Box::new(local_ref) as Box<dyn ActorRef>
+        ).expect("Failed to register new actor");
+        
+        let lookup_after_register = registry.lookup("test_actor_0");
+        assert!(lookup_after_register.is_some(), "Actor should be found after registration");
+        
+        println!("Lookup cache performance test completed successfully!");
+    }).await;
 } 
