@@ -146,6 +146,10 @@ pub enum ClusterError {
     /// Unknown peer
     #[error("Unknown peer: {0}")]
     UnknownPeer(NodeId),
+
+    /// No message handler configured
+    #[error("No message handler configured")]
+    NoMessageHandler,
 }
 
 /// Type alias for Result with ClusterError

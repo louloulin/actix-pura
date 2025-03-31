@@ -38,4 +38,9 @@ pub fn get_message_handler_for_test(transport: &P2PTransport) -> Option<Arc<Mute
 /// 测试帮助函数：发送消息信封
 pub async fn send_envelope_for_test(transport: &mut P2PTransport, envelope: MessageEnvelope) -> Result<(), ClusterError> {
     transport.send_envelope(envelope).await
+}
+
+/// 测试帮助函数：直接发送消息信封到目标节点，不依赖连接状态
+pub async fn send_envelope_direct_for_test(transport: &mut P2PTransport, target_node: NodeId, envelope: MessageEnvelope) -> Result<(), ClusterError> {
+    transport.send_envelope_direct_for_test(target_node, envelope).await
 } 

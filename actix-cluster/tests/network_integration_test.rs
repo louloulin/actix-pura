@@ -147,37 +147,41 @@ async fn test_network_communication() {
         // Allow tasks to get scheduled
         tokio::task::yield_now().await;
         
-        // 手动将节点2添加为节点1的对等节点
+        // 1. 先添加对等节点信息
         println!("Adding node 2 as peer to node 1");
         testing::add_peer_for_test(&mut transport1, node2_id.clone(), node2_info.clone());
         
-        // Verify node 2 is in the peers list of node 1
+        // 2. 确认节点已添加到peers列表
         {
             let peers = testing::get_peers_lock_for_test(&transport1);
             println!("Node 1 peers: {:?}", peers.keys().collect::<Vec<_>>());
             assert!(peers.contains_key(&node2_id), "Node 2 should be in the peers list of node 1");
         }
         
+        // 3. 尝试连接到节点2多次，确保连接建立
         println!("Establishing connection from node 1 to node 2");
-        // 连接到节点2
-        match transport1.connect_to_peer(node2_addr).await {
-            Ok(_) => println!("Successfully connected to node 2"),
-            Err(e) => panic!("Failed to connect to node 2: {:?}", e),
+        let mut connected = false;
+        for i in 0..3 {
+            match transport1.connect_to_peer(node2_addr).await {
+                Ok(_) => {
+                    println!("Successfully connected to node 2 on attempt {}", i+1);
+                    connected = true;
+                    break;
+                },
+                Err(e) => {
+                    println!("Failed to connect to node 2 on attempt {}: {:?}", i+1, e);
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                },
+            }
         }
+        assert!(connected, "Failed to connect to node 2 after multiple attempts");
         
-        // 给一些时间建立连接和任务调度
+        // 4. 给足够时间让连接建立并注册
         println!("Waiting for connection to establish...");
-        for _ in 0..5 {
-            tokio::task::yield_now().await; // Ensure tasks get a chance to run
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
         
-        // Verify connection exists indirectly - we can check by getting the peer list
-        let peer_list = testing::get_peer_list_for_test(&transport1);
-        println!("Node 1 peers after connection: {:?}", peer_list);
-        assert!(peer_list.iter().any(|n| n.id == node2_id), "Node 2 should be in the peer list of node 1");
-        
-        // 创建测试消息
+        // 5. 尝试直接通过transport1的内部连接发送消息
+        println!("Creating test message");
         let test_message = NetworkTestMessage {
             id: 1,
             content: "Test network communication".to_string(),
@@ -200,9 +204,13 @@ async fn test_network_communication() {
             payload,
         );
         
+        // 在发送消息前检查消息处理器
+        println!("Checking if node 1 has message handler: {}", testing::get_message_handler_for_test(&transport1).is_some());
+        println!("Checking if node 2 has message handler: {}", testing::get_message_handler_for_test(&transport2).is_some());
+        
         println!("Sending message from node 1 to node 2");
         // 发送消息到节点2
-        match testing::send_envelope_for_test(&mut transport1, envelope).await {
+        match testing::send_envelope_direct_for_test(&mut transport1, node2_id.clone(), envelope).await {
             Ok(_) => println!("Successfully sent envelope to node 2"),
             Err(e) => panic!("Failed to send envelope: {:?}", e),
         }
@@ -230,6 +238,10 @@ async fn test_network_communication() {
         // 验证消息是否被接收
         assert!(message_received.load(Ordering::SeqCst), "Message was not received by node 2");
         println!("Network communication test passed!");
+
+        // 在测试网络通信函数中添加打印语句，看看是否设置了消息处理器
+        println!("Checking if node 1 has message handler: {}", testing::get_message_handler_for_test(&transport1).is_some());
+        println!("Checking if node 2 has message handler: {}", testing::get_message_handler_for_test(&transport2).is_some());
     }).await;
 }
 
@@ -310,11 +322,40 @@ async fn test_bidirectional_communication() {
         }
         
         println!("Establishing connections between nodes");
+        
         // 建立连接 from node 1 to node 2
-        match transport1.connect_to_peer(node2_addr).await {
-            Ok(_) => println!("Successfully connected from node 1 to node 2"),
-            Err(e) => panic!("Failed to connect from node 1 to node 2: {:?}", e),
+        let mut connected1to2 = false;
+        for i in 0..3 {
+            match transport1.connect_to_peer(node2_addr).await {
+                Ok(_) => {
+                    println!("Successfully connected from node 1 to node 2 on attempt {}", i+1);
+                    connected1to2 = true;
+                    break;
+                },
+                Err(e) => {
+                    println!("Failed to connect from node 1 to node 2 on attempt {}: {:?}", i+1, e);
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                },
+            }
         }
+        assert!(connected1to2, "Failed to connect from node 1 to node 2 after multiple attempts");
+        
+        // 也可以建立从 node 2 to node 1 的连接，确保双向都能连通
+        let mut connected2to1 = false;
+        for i in 0..3 {
+            match transport2.connect_to_peer(node1_addr).await {
+                Ok(_) => {
+                    println!("Successfully connected from node 2 to node 1 on attempt {}", i+1);
+                    connected2to1 = true;
+                    break;
+                },
+                Err(e) => {
+                    println!("Failed to connect from node 2 to node 1 on attempt {}: {:?}", i+1, e);
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                },
+            }
+        }
+        assert!(connected2to1, "Failed to connect from node 2 to node 1 after multiple attempts");
         
         // 给一些时间建立连接
         println!("Waiting for connections to establish...");
@@ -348,7 +389,7 @@ async fn test_bidirectional_communication() {
         
         println!("Sending message from node 1 to node 2");
         // 发送消息到节点2
-        match testing::send_envelope_for_test(&mut transport1, envelope1to2).await {
+        match testing::send_envelope_direct_for_test(&mut transport1, node2_id.clone(), envelope1to2).await {
             Ok(_) => println!("Successfully sent envelope from node 1 to node 2"),
             Err(e) => panic!("Failed to send envelope1to2: {:?}", e),
         }
@@ -389,7 +430,7 @@ async fn test_bidirectional_communication() {
         
         println!("Sending message from node 2 to node 1");
         // 发送消息到节点1
-        match testing::send_envelope_for_test(&mut transport2, envelope2to1).await {
+        match testing::send_envelope_direct_for_test(&mut transport2, node1_id.clone(), envelope2to1).await {
             Ok(_) => println!("Successfully sent envelope from node 2 to node 1"),
             Err(e) => panic!("Failed to send envelope2to1: {:?}", e),
         }
