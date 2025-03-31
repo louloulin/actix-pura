@@ -355,7 +355,7 @@ impl Node {
     pub fn update_info(&mut self, info: NodeInfo) -> ClusterResult<()> {
         // Keep the same ID
         if self.info.id != info.id {
-            return Err(crate::error::ClusterError::NodeExistsError(
+            return Err(crate::error::ClusterError::InvalidOperation(
                 format!("Cannot update node info with different ID: {} != {}", 
                     self.info.id, info.id)
             ));

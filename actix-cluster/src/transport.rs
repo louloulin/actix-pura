@@ -103,6 +103,9 @@ pub enum TransportMessage {
 
     /// Message envelope for actor communication
     Envelope(MessageEnvelope),
+    
+    /// Consensus message (Raft protocol)
+    Consensus(Vec<u8>),
 }
 
 /// A message that is waiting for acknowledgement
@@ -480,6 +483,38 @@ impl P2PTransport {
                 
                 Ok(())
             },
+            TransportMessage::Consensus(ref data) => {
+                debug!("Received consensus message of size: {} bytes", data.len());
+                
+                // Forward to message handler
+                if let Some(handler) = &self.message_handler {
+                    let _handler_lock = handler.lock();
+                    debug!("Forwarding consensus message to handler");
+                    
+                    // Clone for async handler
+                    let message_clone = message.clone();
+                    
+                    // Release the lock before awaiting
+                    drop(_handler_lock);
+                    
+                    // Get the local node ID for sender
+                    let sender_id = self.local_node.id.clone();
+                    
+                    // Handle the message with the registered handler
+                    if let Some(handler_clone) = self.message_handler.clone() {
+                        // Just get the handler - there's no Ok/Err from a MutexGuard
+                        let handler_guard = handler_clone.lock();
+                        // 使用cloned的message而不是原始message来避免partial move
+                        if let Err(e) = handler_guard.handle_message(sender_id.clone(), message_clone).await {
+                            error!("Error handling consensus message: {}", e);
+                        }
+                    }
+                } else {
+                    error!("No message handler available for consensus message");
+                }
+                
+                Ok(())
+            },
             TransportMessage::Handshake(node_info) => {
                 debug!("Received handshake from node {}", node_info.id);
                 
@@ -611,7 +646,12 @@ impl P2PTransport {
     /// Send a message to a specific node
     pub async fn send_message(&mut self, node_id: &NodeId, message: TransportMessage) -> ClusterResult<()> {
         // Check if we have a connection to this node
-        if let Some(stream_mutex) = self.connections.lock().get(node_id).cloned() {
+        let stream_mutex_opt = {
+            let connections = self.connections.lock();
+            connections.get(node_id).cloned()
+        };
+        
+        if let Some(stream_mutex) = stream_mutex_opt {
             // Serialize the message
             let serialized = self.serializer.serialize_any(&message as &dyn std::any::Any)?;
             
@@ -619,9 +659,9 @@ impl P2PTransport {
             let mut stream = stream_mutex.lock().await;
             
             // Send the message length first (as big-endian bytes)
-        let len = serialized.len() as u32;
-        let len_bytes = len.to_be_bytes();
-        
+            let len = serialized.len() as u32;
+            let len_bytes = len.to_be_bytes();
+            
             // Write the length
             stream.write_all(&len_bytes).await
                 .map_err(|e| ClusterError::NetworkError(format!("Failed to write message length: {}", e)))?;

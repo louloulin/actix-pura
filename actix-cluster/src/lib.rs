@@ -6,45 +6,48 @@
 #![deny(rust_2018_idioms, nonstandard_style, future_incompatible)]
 #![warn(missing_docs)]
 
+pub mod actor;
+pub mod broker;
 pub mod cluster;
 pub mod config;
-pub mod node;
+pub mod consensus;
+pub mod consensus_network;
 pub mod discovery;
-pub mod transport;
-pub mod registry;
-pub mod broker;
 pub mod error;
-pub mod serialization;
-pub mod message;
-pub mod security;
-pub mod sync;
-pub mod migration;
-pub mod placement;
-pub mod actor;
 pub mod master;
+pub mod message;
+pub mod migration;
+pub mod node;
+pub mod placement;
+pub mod registry;
+pub mod security;
+pub mod serialization;
+pub mod sync;
+pub mod transport;
 
 // 添加测试工具模块，用于测试和集成测试
 #[doc(hidden)]
 pub mod testing;
 
-pub use cluster::{ClusterSystem, Architecture};
-pub use config::{ClusterConfig, NodeRole, DiscoveryMethod};
-pub use node::{Node, NodeId, NodeInfo, NodeStatus, PlacementStrategy};
+pub use actor::{ClusterSystemActor, DistributedActor};
+pub use cluster::{Architecture, ClusterSystem};
+pub use config::{ClusterConfig, DiscoveryMethod, NodeRole};
+pub use consensus::{ConsensusActor, ConsensusCommand, ConsensusResponse, ConsensusState, GetConsensusState};
 pub use discovery::ServiceDiscovery;
 pub use error::{ClusterError, ClusterResult};
-pub use serialization::{SerializationFormat, Serializer, SerializerTrait, BincodeSerializer, JsonSerializer};
-pub use message::{ActorPath, MessageEnvelope, MessageType, DeliveryGuarantee, AnyMessage};
-pub use registry::{ActorRef, LocalActorRef};
-pub use migration::{MigrationManager, MigrationStatus, MigrationReason, MigrationOptions, MigratableActor};
+pub use message::{ActorPath, AnyMessage, DeliveryGuarantee, MessageEnvelope, MessageType};
+pub use migration::{MigratableActor, MigrationManager, MigrationOptions, MigrationReason, MigrationStatus};
+pub use node::{Node, NodeId, NodeInfo, NodeStatus, PlacementStrategy};
 pub use placement::{NodeSelector, PlacementStrategyImpl};
-pub use actor::{DistributedActor, ClusterSystemActor};
+pub use registry::{ActorRef, LocalActorRef};
+pub use serialization::{BincodeSerializer, JsonSerializer, SerializationFormat, Serializer, SerializerTrait};
 
 /// Re-exports from the actix crate
 pub mod prelude {
     pub use actix::prelude::*;
     pub use crate::{
-        ClusterSystem, ClusterConfig, Architecture, NodeRole, DiscoveryMethod,
-        Node, NodeId, NodeInfo, PlacementStrategy, SerializationFormat,
-        DistributedActor, MigratableActor, MigrationReason,
+        Architecture, ClusterConfig, ClusterSystem, ConsensusActor, ConsensusCommand, ConsensusState,
+        DiscoveryMethod, DistributedActor, MigratableActor, MigrationReason, Node, NodeId, NodeInfo,
+        NodeRole, PlacementStrategy, SerializationFormat,
     };
 } 

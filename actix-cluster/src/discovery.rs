@@ -140,7 +140,7 @@ impl ServiceDiscovery for StaticDiscovery {
             node.status = status;
             Ok(())
         } else {
-            Err(ClusterError::NodeNotFoundError(format!("Node not found: {}", node_id)))
+            Err(ClusterError::NodeNotFound(node_id.clone()))
         }
     }
     
@@ -300,7 +300,7 @@ impl ServiceDiscovery for LibP2PDiscovery {
             node.status = status;
             Ok(())
         } else {
-            Err(ClusterError::NodeNotFoundError(format!("Node not found: {}", node_id)))
+            Err(ClusterError::NodeNotFound(node_id.clone()))
         }
     }
     
@@ -402,7 +402,7 @@ impl ServiceDiscovery for MockDiscovery {
             node.status = status;
             Ok(())
         } else {
-            Err(ClusterError::NodeNotFoundError(format!("Node not found: {}", node_id)))
+            Err(ClusterError::NodeNotFound(node_id.clone()))
         }
     }
     

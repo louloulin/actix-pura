@@ -52,11 +52,11 @@ impl MessageReceived {
     fn set_received(&self, message: String) {
         *self.received.lock() = Some(message);
     }
-
+    
     fn is_received(&self) -> bool {
         self.received.lock().is_some()
     }
-
+    
     fn get_content(&self) -> Option<String> {
         self.received.lock().clone()
     }
