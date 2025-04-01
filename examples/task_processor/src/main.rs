@@ -73,7 +73,8 @@ enum TaskPriority {
     High,
 }
 
-#[derive(MessageResponse, Serialize, Deserialize, Clone, Debug)]
+#[derive(MessageResponse, Serialize, Deserialize, Clone, Debug, Message)]
+#[rtype(result = "()")]
 struct TaskResult {
     task_id: String,
     status: TaskStatus,
@@ -195,7 +196,7 @@ impl JobDispatcherActor {
         });
         
         // Return the least loaded worker
-        candidates.first().map(|(id, _)| id.clone())
+        candidates.first().map(|(id, _)| (*id).clone())
     }
 }
 
@@ -409,14 +410,18 @@ impl Handler<AnyMessage> for JobDispatcherActor {
     type Result = ();
     
     fn handle(&mut self, msg: AnyMessage, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(task) = msg.downcast_ref::<Task>() {
-            self.handle(task.clone(), ctx);
-        } else if let Some(reg_msg) = msg.downcast_ref::<RegisterWorker>() {
-            self.handle(reg_msg.clone(), ctx);
-        } else if let Some(hb_msg) = msg.downcast_ref::<Heartbeat>() {
-            self.handle(hb_msg.clone(), ctx);
-        } else if let Some(result) = msg.downcast_ref::<TaskResult>() {
-            self.handle(result.clone(), ctx);
+        if let Some(task) = msg.downcast::<Task>() {
+            let task_clone = task.clone();
+            self.handle(task_clone, ctx);
+        } else if let Some(reg_msg) = msg.downcast::<RegisterWorker>() {
+            let reg_msg_clone = reg_msg.clone();
+            self.handle(reg_msg_clone, ctx);
+        } else if let Some(hb_msg) = msg.downcast::<Heartbeat>() {
+            let hb_msg_clone = hb_msg.clone();
+            self.handle(hb_msg_clone, ctx);
+        } else if let Some(result) = msg.downcast::<TaskResult>() {
+            let result_clone = result.clone();
+            self.handle(result_clone, ctx);
         } else {
             warn!("Received unknown message type");
         }
@@ -586,7 +591,7 @@ impl Handler<AnyMessage> for WorkerActor {
     type Result = ();
     
     fn handle(&mut self, msg: AnyMessage, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(task) = msg.downcast_ref::<Task>() {
+        if let Some(task) = msg.downcast::<Task>() {
             let task_clone = task.clone();
             let result = self.handle(task_clone, ctx);
             
@@ -609,7 +614,7 @@ async fn start_node(node_id: String, addr: SocketAddr, seed_nodes: Vec<String>,
     // Create cluster configuration
     let mut config = ClusterConfig::new()
         .architecture(Architecture::Decentralized)
-        .node_role(if is_coordinator { NodeRole::Server } else { NodeRole::Client })
+        .node_role(if is_coordinator { NodeRole::Peer } else { NodeRole::Peer })
         .bind_addr(addr)
         .cluster_name("task-processor-cluster".to_string())
         .serialization_format(SerializationFormat::Bincode);
@@ -741,7 +746,7 @@ async fn start_node(node_id: String, addr: SocketAddr, seed_nodes: Vec<String>,
             }
             
             // Set dispatcher reference
-            worker.do_send(SystemMessage::SetDispatcher(Box::new(dispatcher_ref)));
+            worker.do_send(SystemMessage::SetDispatcher(dispatcher_ref.clone()));
             
             // Register with the dispatcher
             let register_msg = RegisterWorker {
@@ -804,21 +809,24 @@ async fn run_multi_node_test(node_count: usize, base_port: u16, num_tasks: usize
     let local = tokio::task::LocalSet::new();
     
     // Set up the coordinator node
-    let coordinator_addr = format!("127.0.0.1:{}", base_port);
+    let coordinator_addr_str = format!("127.0.0.1:{}", base_port);
     
     // Run all node tasks in the LocalSet
     local.run_until(async move {
         // Start the coordinator node first
-        let coordinator_handle = tokio::task::spawn_local(async move {
-            match start_node(
-                "coordinator".to_string(),
-                coordinator_addr.parse().unwrap(),
-                Vec::new(),
-                true,
-                num_tasks
-            ).await {
-                Ok(_) => info!("Coordinator node completed"),
-                Err(e) => error!("Coordinator node failed: {:?}", e),
+        let coordinator_handle = tokio::task::spawn_local({
+            let addr_str = coordinator_addr_str.clone();
+            async move {
+                match start_node(
+                    "coordinator".to_string(),
+                    addr_str.parse().unwrap(),
+                    Vec::new(),
+                    true,
+                    num_tasks
+                ).await {
+                    Ok(_) => info!("Coordinator node completed"),
+                    Err(e) => error!("Coordinator node failed: {:?}", e),
+                }
             }
         });
         
@@ -831,7 +839,7 @@ async fn run_multi_node_test(node_count: usize, base_port: u16, num_tasks: usize
             let port = base_port + i as u16;
             let node_id = format!("node{}", i);
             let addr = format!("127.0.0.1:{}", port);
-            let seed = coordinator_addr.clone();
+            let seed = coordinator_addr_str.clone();
             
             info!("Starting worker node {}, address: {}, seed: {}", node_id, addr, seed);
             

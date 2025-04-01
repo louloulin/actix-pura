@@ -1,0 +1,20 @@
+[package]
+name = "http_api"
+version = "0.1.0"
+edition = "2021"
+description = "HTTP API with Actix actor backend example"
+authors = ["Actix Team <https://github.com/actix>"]
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+actix = { path = "../../actix" }
+actix-cluster = { path = "../../actix-cluster" }
+actix-web = "4.4"
+log = "0.4"
+env_logger = "0.10"
+structopt = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+actix-rt = "2.9"
+futures = "0.3" 

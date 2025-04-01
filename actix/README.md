@@ -403,3 +403,44 @@ at your option.
 
 Contribution to the actix repo is organized under the terms of the Contributor Covenant. The Actix team promises to intervene to uphold that code of conduct.
 
+# Actix-Pura Examples
+
+This directory contains a collection of examples demonstrating different use cases for the Actix-Pura actor framework with distributed capabilities.
+
+## Examples
+
+1. **Chat System** (`chat_system/`) - A real-time distributed chat system with rooms and messaging.
+2. **Task Processor** (`task_processor/`) - A distributed job processing system with dynamic worker allocation.
+3. **HTTP API** (`http_api/`) - A RESTful API backed by distributed actors.
+4. **File Sync** (`file_sync/`) - A service that synchronizes files across multiple nodes.
+5. **Distributed Benchmark** (`distributed_benchmark/`) - A tool for benchmarking distributed actor performance.
+
+## Running the Examples
+
+Each example is a separate crate that can be run independently. Navigate to the example's directory and use Cargo to run it:
+
+```bash
+# Run the chat system example
+cd chat_system
+cargo run
+
+# Run the task processor example
+cd ../task_processor
+cargo run
+
+# For multi-node examples, use the --multi flag (where supported)
+cargo run -- --multi --nodes 3
+```
+
+See the individual example's documentation for specific command-line options and features.
+
+## Example Features
+
+| Example | Features |
+|---------|----------|
+| Chat System | User and room management, real-time messaging, actor discovery |
+| Task Processor | Coordinator-worker architecture, task scheduling, load balancing |
+| HTTP API | RESTful API, actor backend, distributed state, health monitoring |
+| File Sync | File system monitoring, peer-to-peer synchronization |
+| Distributed Benchmark | Performance testing, multi-node measurements |
+

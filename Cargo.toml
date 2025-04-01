@@ -5,6 +5,11 @@ members = [
     "actix-broker",
     "actix-derive",
     "actix-cluster",
+    "examples/chat_system",
+    "examples/task_processor",
+    "examples/http_api",
+    "examples/file_sync",
+    "examples/distributed_benchmark",
 ]
 
 [workspace.package]

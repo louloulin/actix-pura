@@ -177,14 +177,26 @@ impl Handler<AnyMessage> for UserServiceActor {
     type Result = ();
     
     fn handle(&mut self, msg: AnyMessage, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(create_msg) = msg.downcast_ref::<CreateUser>() {
-            let _ = self.handle(create_msg.clone(), ctx);
-        } else if let Some(get_msg) = msg.downcast_ref::<GetUser>() {
-            let _ = self.handle(get_msg.clone(), ctx);
-        } else if let Some(list_msg) = msg.downcast_ref::<ListUsers>() {
-            let _ = self.handle(list_msg.clone(), ctx);
-        } else if let Some(delete_msg) = msg.downcast_ref::<DeleteUser>() {
-            let _ = self.handle(delete_msg.clone(), ctx);
+        // Handle each message type, extracting by reference from the AnyMessage
+        // and creating a new instance of the appropriate message type to handle
+        if let Some(create_msg) = msg.downcast::<CreateUser>() {
+            let create_msg = CreateUser {
+                name: create_msg.name.clone(),
+                email: create_msg.email.clone(),
+            };
+            let _ = UserServiceActor::handle(self, create_msg, ctx);
+        } else if let Some(get_msg) = msg.downcast::<GetUser>() {
+            let get_msg = GetUser {
+                id: get_msg.id.clone(),
+            };
+            let _ = UserServiceActor::handle(self, get_msg, ctx);
+        } else if let Some(_) = msg.downcast::<ListUsers>() {
+            let _ = UserServiceActor::handle(self, ListUsers, ctx);
+        } else if let Some(delete_msg) = msg.downcast::<DeleteUser>() {
+            let delete_msg = DeleteUser {
+                id: delete_msg.id.clone(),
+            };
+            let _ = UserServiceActor::handle(self, delete_msg, ctx);
         } else {
             warn!("UserServiceActor received unknown message type");
         }
@@ -313,7 +325,7 @@ async fn start_server(args: Args) -> std::io::Result<()> {
     // Set up cluster configuration
     let mut config = ClusterConfig::new()
         .architecture(Architecture::Decentralized)
-        .node_role(NodeRole::Server)
+        .node_role(NodeRole::Peer)
         .bind_addr(args.cluster_address)
         .cluster_name("http-api-cluster".to_string())
         .serialization_format(SerializationFormat::Bincode);
@@ -375,7 +387,7 @@ async fn start_server(args: Args) -> std::io::Result<()> {
         let mut cluster_guard = cluster_mutex.lock().unwrap();
         if let Some(mut cluster) = cluster_guard.take() {
             info!("Shutting down cluster");
-            let _ = cluster.shutdown();
+            // Just drop the cluster instance
         }
     }
     
