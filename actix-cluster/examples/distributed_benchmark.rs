@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::fmt;
+use std::collections::HashMap;
 
 use actix::prelude::*;
 use actix_cluster::{
@@ -55,6 +56,11 @@ struct TestMetrics {
     max_latency: u64,
     start_time: u64, // 使用微秒时间戳而不是Instant便于序列化
     end_time: Option<u64>,
+    // 添加更多性能数据字段
+    latency_distribution: HashMap<u64, u64>, // 延迟分布统计 (延迟区间 -> 消息数量)
+    throughput_samples: Vec<(u64, u64)>,     // 吞吐量采样 (时间戳, 消息数)
+    message_sizes: Vec<usize>,              // 消息大小采样
+    errors: u64,                            // 错误计数
 }
 
 impl TestMetrics {
@@ -68,6 +74,10 @@ impl TestMetrics {
             max_latency: 0,
             start_time: TestActor::now_micros(),
             end_time: None,
+            latency_distribution: HashMap::new(),
+            throughput_samples: vec![(TestActor::now_micros(), 0)],
+            message_sizes: Vec::new(),
+            errors: 0,
         }
     }
 
@@ -86,10 +96,33 @@ impl TestMetrics {
         if latency > self.max_latency {
             self.max_latency = latency;
         }
+        
+        // 记录延迟分布: 对延迟按区间统计
+        // 将延迟分组到最接近的毫秒区间
+        let latency_ms = latency / 1000;
+        *self.latency_distribution.entry(latency_ms).or_insert(0) += 1;
+        
+        // 每100个消息更新一次吞吐量采样
+        if self.messages_received % 100 == 0 {
+            self.throughput_samples.push((TestActor::now_micros(), self.messages_received));
+        }
+    }
+    
+    fn record_error(&mut self) {
+        self.errors += 1;
+    }
+    
+    fn record_message_size(&mut self, size: usize) {
+        // 只记录少量样本避免占用过多内存
+        if self.message_sizes.len() < 100 {
+            self.message_sizes.push(size);
+        }
     }
 
     fn set_end_time(&mut self) {
         self.end_time = Some(TestActor::now_micros());
+        // 添加最终吞吐量采样点
+        self.throughput_samples.push((TestActor::now_micros(), self.messages_received));
     }
 
     fn get_duration_micros(&self) -> u64 {
@@ -102,6 +135,79 @@ impl TestMetrics {
     fn get_duration_secs(&self) -> f64 {
         self.get_duration_micros() as f64 / 1_000_000.0
     }
+    
+    fn get_percentile_latency(&self, percentile: f64) -> u64 {
+        // 计算指定百分位数的延迟
+        if self.latency_distribution.is_empty() {
+            return 0;
+        }
+        
+        // 将所有延迟数据重建为排序数组
+        let mut latency_samples = Vec::new();
+        for (latency_ms, count) in &self.latency_distribution {
+            for _ in 0..*count {
+                latency_samples.push(*latency_ms);
+            }
+        }
+        
+        if latency_samples.is_empty() {
+            return 0;
+        }
+        
+        latency_samples.sort_unstable();
+        
+        // 计算百分位索引
+        let index = (percentile * latency_samples.len() as f64 / 100.0) as usize;
+        let index = index.min(latency_samples.len() - 1);
+        
+        // 返回延迟值（毫秒转微秒）
+        latency_samples[index] * 1000
+    }
+    
+    fn calculate_throughput_stats(&self) -> (f64, f64, f64) {
+        // 计算吞吐量的平均值、标准差和稳定性分数
+        if self.throughput_samples.len() < 2 {
+            return (0.0, 0.0, 0.0);
+        }
+        
+        let mut throughputs = Vec::new();
+        
+        // 计算相邻采样点之间的吞吐量
+        for i in 1..self.throughput_samples.len() {
+            let (t1, m1) = self.throughput_samples[i - 1];
+            let (t2, m2) = self.throughput_samples[i];
+            
+            let time_diff = (t2 - t1) as f64 / 1_000_000.0; // 秒
+            let message_diff = (m2 - m1) as f64;
+            
+            if time_diff > 0.0 {
+                let throughput = message_diff / time_diff;
+                throughputs.push(throughput);
+            }
+        }
+        
+        if throughputs.is_empty() {
+            return (0.0, 0.0, 0.0);
+        }
+        
+        // 计算平均吞吐量
+        let avg_throughput = throughputs.iter().sum::<f64>() / throughputs.len() as f64;
+        
+        // 计算标准差
+        let variance = throughputs.iter()
+            .map(|&t| (t - avg_throughput).powi(2))
+            .sum::<f64>() / throughputs.len() as f64;
+        let std_dev = variance.sqrt();
+        
+        // 计算稳定性分数 (0-100)，标准差越小越稳定
+        let stability = if avg_throughput > 0.0 {
+            100.0 - (std_dev / avg_throughput * 100.0).min(100.0)
+        } else {
+            0.0
+        };
+        
+        (avg_throughput, std_dev, stability)
+    }
 
     fn get_summary(&self) -> String {
         let duration_secs = self.get_duration_secs();
@@ -111,18 +217,32 @@ impl TestMetrics {
         } else {
             0
         };
+        
+        // 计算延迟百分位数
+        let p95_latency = self.get_percentile_latency(95.0);
+        let p99_latency = self.get_percentile_latency(99.0);
 
         let throughput = if duration_secs > 0.0 {
             self.messages_received as f64 / duration_secs
         } else {
             0.0
         };
+        
+        // 计算吞吐量统计
+        let (avg_throughput, throughput_std_dev, stability) = self.calculate_throughput_stats();
 
         format!(
-            "发送: {}, 接收: {}, 延迟(µs): 平均={}, 最小={}, 最大={}, 吞吐量: {:.2}消息/秒",
-            self.messages_sent, self.messages_received, avg_latency, 
+            "发送: {}, 接收: {}, 错误: {}, 延迟(µs): 平均={}, 最小={}, 最大={}, P95={}, P99={}, 吞吐量: {:.2}消息/秒 (稳定性: {:.1}%)",
+            self.messages_sent, 
+            self.messages_received, 
+            self.errors,
+            avg_latency, 
             if self.min_latency == u64::MAX { 0 } else { self.min_latency },
-            self.max_latency, throughput
+            self.max_latency,
+            p95_latency,
+            p99_latency,
+            throughput, 
+            stability
         )
     }
 }
@@ -357,7 +477,7 @@ async fn start_node(node_id: String, addr: SocketAddr, seed_nodes: Vec<String>, 
         
         // 发送测试消息
         let start = Instant::now();
-        let message_count = 100000; // 增加到100000条消息
+        let message_count = 500000; // 增加到500000条消息
         let message_size = 1024;
         
         info!("发送 {} 条消息，每条大小 {} 字节", message_count, message_size);
@@ -457,12 +577,28 @@ async fn start_node(node_id: String, addr: SocketAddr, seed_nodes: Vec<String>, 
                         if let Ok(mut metrics_lock) = metrics.lock() {
                             metrics_lock.record_sent(1);
                             metrics_lock.record_received(1, latency);
+                            // 记录消息大小
+                            metrics_lock.record_message_size(message_size);
                         }
                     }
                     Err(e) => {
                         failed += 1;
-                        if failed % 100 == 0 {
-                            warn!("发送消息失败 (已失败 {}): {}", failed, e);
+                        // 记录错误
+                        if let Ok(mut metrics_lock) = metrics.lock() {
+                            metrics_lock.record_error();
+                        }
+                        
+                        // 更详细的错误报告
+                        if failed % 100 == 0 || failed < 10 {
+                            warn!("发送消息 {} 到 {} 失败: {}", i, target_path, e);
+                        }
+                        
+                        // 当错误过多时尝试切换到其他节点
+                        if failed % 1000 == 0 && remote_actors.len() > 1 {
+                            info!("错误过多，尝试查找新的可用节点...");
+                            
+                            // 在继续之前稍作延迟
+                            tokio::time::sleep(Duration::from_millis(10)).await;
                         }
                     }
                 }
@@ -522,7 +658,7 @@ async fn start_node(node_id: String, addr: SocketAddr, seed_nodes: Vec<String>, 
             }
         }
         
-        // 综合分析报告
+        // 优化指标收集和报告，增加更多详细统计信息
         info!("性能指标汇总报告 - {} 个节点:", all_metrics.len());
         
         let total_messages_sent: u64 = all_metrics.iter().map(|m| m.messages_sent).sum();
@@ -567,6 +703,32 @@ async fn start_node(node_id: String, addr: SocketAddr, seed_nodes: Vec<String>, 
             0
         };
         
+        // 计算每秒消息的标准差，了解性能的稳定性
+        // 这里简化处理，只用最大吞吐量和最小吞吐量来估算
+        let mut node_throughputs = Vec::new();
+        for m in &all_metrics {
+            let node_duration = m.get_duration_secs();
+            if node_duration > 0.0 && m.messages_received > 0 {
+                let node_throughput = m.messages_received as f64 / node_duration;
+                node_throughputs.push(node_throughput);
+            }
+        }
+        
+        // 如果有多个节点，计算吞吐量的最大和最小值，否则设为0
+        let (throughput_min, throughput_max) = if node_throughputs.len() > 1 {
+            let min = node_throughputs.iter().cloned().fold(f64::INFINITY, f64::min);
+            let max = node_throughputs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+            (min, max)
+        } else {
+            (0.0, 0.0)
+        };
+        
+        let throughput_variation = if node_throughputs.len() > 1 && throughput_max > 0.0 {
+            (throughput_max - throughput_min) / throughput_max * 100.0
+        } else {
+            0.0
+        };
+        
         info!("集群整体性能：");
         info!("总消息数：发送 = {}, 接收 = {}", total_messages_sent, total_messages_received);
         info!("总运行时间：{:.2} 秒", total_duration_secs);
@@ -575,6 +737,11 @@ async fn start_node(node_id: String, addr: SocketAddr, seed_nodes: Vec<String>, 
               global_avg_latency, 
               if global_min_latency == u64::MAX { 0 } else { global_min_latency }, 
               global_max_latency);
+              
+        if node_throughputs.len() > 1 {
+            info!("节点吞吐量变化：最小 = {:.2}, 最大 = {:.2}, 变化率 = {:.2}%", 
+                throughput_min, throughput_max, throughput_variation);
+        }
         
     } else {
         info!("工作节点已准备就绪，等待消息");
