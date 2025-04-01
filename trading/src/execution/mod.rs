@@ -1,7 +1,7 @@
-pub mod order_book;
-pub mod matcher;
-pub mod engine;
+mod engine;
+mod order_book;
+mod matcher;
 
+pub use engine::{ExecutionEngine, ExecuteOrderMessage};
 pub use order_book::OrderBook;
-pub use matcher::{OrderMatcher, MatchResult};
-pub use engine::ExecutionEngine; 
+pub use matcher::{OrderMatcher, MatchResult}; 

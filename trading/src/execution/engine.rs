@@ -1,15 +1,17 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use log::{debug, info, warn, error};
-use uuid::Uuid;
 use chrono::Utc;
+use uuid::Uuid;
+use actix::prelude::*;
+use actix_cluster::raft::{RaftActor, AppendLogRequest, LogEntry};
 
 use crate::models::order::{Order, OrderSide, OrderType, OrderStatus};
 use crate::models::execution::ExecutionRecord;
 use crate::models::trade::Trade;
-use crate::models::message::{Message, MessageType, ExecutionNotificationMessage, TradeNotificationMessage};
+use crate::models::message::{Message, MessageType, ExecutionNotificationMessage, TradeNotificationMessage, LogEntry};
 use crate::actor::{Actor, ActorRef, ActorContext, MessageHandler};
-use crate::consensus::raft::{RaftClient, AppendLogRequest};
+use crate::consensus::raft::{RaftClient, AppendLogRequest, LogEntry};
 use super::order_book::OrderBook;
 use super::matcher::{OrderMatcher, MatchResult};
 
@@ -96,18 +98,18 @@ impl ExecutionEngine {
         // 添加日志到Raft
         if let Some(raft) = &self.raft_client {
             for execution in &result.executions {
+                // 记录执行结果到Raft日志
                 let req = AppendLogRequest {
-                    log_type: "execution".to_string(),
-                    data: serde_json::to_string(execution).unwrap(),
+                    entry: LogEntry::Execution(execution.clone())
                 };
                 
                 let _result = ctx.ask(raft.clone(), req).await;
             }
             
             for trade in &trades {
+                // 记录成交到Raft日志
                 let req = AppendLogRequest {
-                    log_type: "trade".to_string(),
-                    data: serde_json::to_string(trade).unwrap(),
+                    entry: LogEntry::Trade(trade.clone())
                 };
                 
                 let _result = ctx.ask(raft.clone(), req).await;

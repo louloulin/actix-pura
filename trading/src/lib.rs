@@ -2,7 +2,6 @@ pub mod models;
 pub mod actor;
 pub mod execution;
 pub mod risk;
-pub mod consensus;
 
 // 重新导出常用类型
 pub use models::order::{
@@ -14,7 +13,7 @@ pub use models::account::{
     AccountQuery, AccountResult
 };
 pub use models::execution::{
-    ExecutionRecord, Trade
+    Execution, Trade
 };
 pub use models::message::{
     Message, MessageType,
@@ -22,8 +21,10 @@ pub use models::message::{
 };
 pub use execution::{
     OrderBook, OrderMatcher, MatchResult, 
-    ExecutionEngine
+    ExecutionEngine, ExecuteOrderMessage
 };
 pub use actor::OrderActor;
 pub use risk::RiskManager;
-pub use consensus::RaftService; 
+
+// 重新导出actix-cluster的Raft实现
+pub use actix_cluster::raft::{RaftActor, AppendLogRequest, LogEntry}; 

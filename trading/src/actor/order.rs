@@ -3,6 +3,8 @@ use std::sync::{Arc, RwLock};
 use log::{debug, info, warn, error};
 use chrono::Utc;
 use uuid::Uuid;
+use actix::prelude::*;
+use actix_cluster::raft::{RaftActor, AppendLogRequest, LogEntry};
 
 use crate::models::order::{
     Order, OrderSide, OrderType, OrderStatus, 
@@ -10,7 +12,6 @@ use crate::models::order::{
 };
 use crate::models::message::{Message, MessageType};
 use crate::actor::{Actor, ActorRef, ActorContext, MessageHandler};
-use crate::consensus::raft::AppendLogRequest;
 use crate::execution::ExecutionEngine;
 
 /// 创建订单消息
@@ -188,9 +189,9 @@ impl OrderActor {
         
         // 记录到Raft日志
         if let Some(raft) = &self.raft_client {
+            // 创建日志请求
             let req = AppendLogRequest {
-                log_type: "order".to_string(),
-                data: serde_json::to_string(&order).unwrap(),
+                entry: LogEntry::OrderRequest(request.clone())
             };
             
             let _result = ctx.ask(raft.clone(), req).await;
@@ -250,9 +251,9 @@ impl MessageHandler<CancelOrderMessage> for OrderActor {
         
         // 记录到Raft日志
         if let Some(raft) = &self.raft_client {
+            // 创建日志请求
             let req = AppendLogRequest {
-                log_type: "cancel_order".to_string(),
-                data: serde_json::to_string(&request).unwrap(),
+                entry: LogEntry::CancelOrder(request.clone())
             };
             
             let _result = ctx.ask(raft.clone(), req).await;

@@ -90,7 +90,7 @@ impl ActorSystem {
     }
     
     /// 向Actor发送消息并等待响应
-    pub async fn ask<M, R>(&self, target: &Box<dyn ActorRef>, msg: M) -> Option<R>
+    pub async fn ask<M, R>(&self, target: Box<dyn ActorRef>, msg: M) -> Option<R>
     where
         M: Send + 'static,
         R: 'static,
@@ -101,13 +101,19 @@ impl ActorSystem {
     }
     
     /// 向Actor发送消息但不等待响应
-    pub fn tell<M>(&self, target: &Box<dyn ActorRef>, msg: M) -> bool
+    pub fn tell<M>(&self, target: Box<dyn ActorRef>, msg: M) -> bool
     where
         M: Send + 'static,
     {
         // 在实际实现中，这里会将消息发送到目标Actor
         // 这里为了演示，直接返回true表示成功
         true
+    }
+}
+
+impl ActorRef for Box<dyn ActorRef> {
+    fn path(&self) -> String {
+        (**self).path()
     }
 }
 
