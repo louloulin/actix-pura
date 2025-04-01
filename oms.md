@@ -1,5 +1,4 @@
-
-# 基于actix-cluster和Raft构建股票交易OMS系统设计
+# 基于actix-cluster和Raft构建股票交易OMS系统设计 - 更新进度
 
 基于我们对actix-cluster的修复和观察，我设计一个分布式高可用的股票交易订单管理系统(OMS)架构：
 
@@ -44,279 +43,101 @@
 └────────────────────────────────────────────────────┘
 ```
 
-## 核心组件实现
+## 核心组件实现进度
 
-### 1. 订单Actor (OrderActor)
+### ✅ 1. 基础模型层 (Models)
 
-```rust
-#[derive(Message, Clone, Debug, Serialize, Deserialize)]
-#[rtype(result = "OrderResult")]
-struct OrderRequest {
-    order_id: String,
-    symbol: String,
-    side: OrderSide,
-    price: Option<f64>,  // None表示市价单
-    quantity: u64,
-    client_id: String,
-    order_type: OrderType,
-}
+- ✅ 订单模型 (Order)：支持不同订单类型、状态和操作
+- ✅ 账户模型 (Account)：支持资金和持仓管理
+- ✅ 执行记录 (Execution)：交易执行详情
+- ✅ 成交记录 (Trade)：交易成交记录
+- ✅ 消息定义 (Message)：系统内部消息通信格式
 
-struct OrderActor {
-    node_id: String,
-    order_store: Arc<RwLock<HashMap<String, Order>>>,
-    raft_client: Arc<RaftClient>,
-    execution_engine: Addr<ExecutionActor>,
-    risk_manager: Addr<RiskActor>,
-}
+### ✅ 2. 执行引擎层 (Execution)
 
-impl Handler<OrderRequest> for OrderActor {
-    type Result = OrderResult;
-    
-    fn handle(&mut self, msg: OrderRequest, ctx: &mut Self::Context) -> Self::Result {
-        // 1. 记录订单到Raft日志确保一致性
-        let log_entry = LogEntry::OrderRequest(msg.clone());
-        if let Err(e) = self.raft_client.append_log(log_entry) {
-            return OrderResult::Error(format!("Failed to append to Raft log: {}", e));
-        }
-        
-        // 2. 风控检查
-        if let Err(e) = self.risk_manager.send(RiskCheck::new(msg.clone())).await {
-            return OrderResult::Rejected(format!("Risk check failed: {}", e));
-        }
-        
-        // 3. 创建订单对象并存储
-        let order = Order::from_request(msg.clone());
-        {
-            let mut orders = self.order_store.write().unwrap();
-            orders.insert(order.order_id.clone(), order.clone());
-        }
-        
-        // 4. 发送到执行引擎
-        match self.execution_engine.send(ExecuteOrder::new(order)).await {
-            Ok(result) => result,
-            Err(e) => OrderResult::Error(format!("Execution error: {}", e))
-        }
-    }
-}
+- ✅ 订单簿 (OrderBook)：管理买卖单，支持价格优先、时间优先排序
+- ✅ 撮合引擎 (OrderMatcher)：实现订单撮合逻辑，支持市价单和限价单
+- ✅ 执行引擎 (ExecutionEngine)：协调订单簿和撮合引擎，生成成交记录
 
-impl Handler<AnyMessage> for OrderActor {
-    type Result = ();
-    
-    fn handle(&mut self, msg: AnyMessage, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(order_req) = msg.downcast::<OrderRequest>() {
-            let order_req_clone = order_req.clone();
-            let _ = self.handle(order_req_clone, ctx);
-        } else if let Some(query) = msg.downcast::<OrderQuery>() {
-            let query_clone = query.clone();
-            let _ = self.handle(query_clone, ctx);
-        } else {
-            warn!("OrderActor received unknown message type");
-        }
-    }
-}
-```
+### ✅ 3. 风控管理器 (Risk Management)
 
-### 2. Raft集成层 (RaftService)
+- ✅ 风险检查：订单风险验证
+- ✅ 持仓限制：单一证券持仓上限
+- ✅ 订单价值：单笔订单价值上限
+- ✅ 配置管理：动态调整风控规则
 
-```rust
-struct RaftService {
-    node_id: NodeId,
-    state: Arc<RwLock<RaftState>>,
-    log: Arc<RwLock<Vec<LogEntry>>>,
-    cluster: Addr<ClusterSystemActor>,
-    apply_ch: mpsc::Sender<LogEntry>,
-}
+### ✅ 4. 订单管理器 (Order Management)
 
-impl RaftService {
-    async fn start(&self) -> Result<()> {
-        // 初始化Raft服务
-        info!("Starting Raft service on node {}", self.node_id);
-        
-        // 开始选举计时器
-        self.start_election_timer();
-        
-        // 订阅集群成员变更事件
-        self.cluster.do_send(SubscribeClusterEvents(self.addr.clone()));
-        
-        Ok(())
-    }
-    
-    async fn append_log(&mut self, entry: LogEntry) -> Result<()> {
-        // 如果是Leader，复制日志到其他节点
-        let is_leader = {
-            let state = self.state.read().unwrap();
-            state.current_role == RaftRole::Leader
-        };
-        
-        if is_leader {
-            // 添加到本地日志
-            {
-                let mut log = self.log.write().unwrap();
-                log.push(entry.clone());
-            }
-            
-            // 发送AppendEntries RPC到所有follower
-            self.replicate_logs().await?;
-            
-            // 应用到状态机
-            self.apply_ch.send(entry).await?;
-            
-            Ok(())
-        } else {
-            // 转发请求到Leader
-            let leader_id = {
-                let state = self.state.read().unwrap();
-                state.current_leader.clone()
-            };
-            
-            if let Some(leader) = leader_id {
-                // 通过cluster找到Leader Actor并转发
-                if let Some(leader_actor) = self.cluster.lookup(&format!("/user/raft/{}", leader)).await {
-                    leader_actor.send_any(Box::new(AppendRequest::new(entry)))?;
-                    Ok(())
-                } else {
-                    Err(anyhow!("Leader not found"))
-                }
-            } else {
-                Err(anyhow!("No leader elected yet"))
-            }
-        }
-    }
-}
-```
+- ✅ 订单处理：创建、取消、查询订单
+- ✅ 风控集成：订单风控检查
+- ✅ 执行集成：订单执行处理
+- ✅ 共识集成：订单操作一致性保证
 
-### 3. 执行引擎Actor (ExecutionActor)
+### 🔄 5. Actor系统基础设施 (Actor Infrastructure)
 
-```rust
-struct ExecutionActor {
-    node_id: String,
-    order_book: HashMap<String, OrderBook>,  // symbol -> order book
-    matcher: Arc<OrderMatcher>,
-    execution_store: Arc<RwLock<HashMap<String, Execution>>>,
-}
+- ✅ Actor特性：定义Actor基本行为
+- ✅ 消息处理：定义消息处理接口
+- ✅ Actor系统：管理Actor生命周期
+- 🔄 集群通信：Actor间远程通信（仍需完善）
 
-impl Handler<ExecuteOrder> for ExecutionActor {
-    type Result = OrderResult;
-    
-    fn handle(&mut self, msg: ExecuteOrder, _: &mut Self::Context) -> Self::Result {
-        let order = msg.order;
-        
-        // 获取或创建订单簿
-        let order_book = self.order_book
-            .entry(order.symbol.clone())
-            .or_insert_with(|| OrderBook::new(order.symbol.clone()));
-        
-        // 添加订单到订单簿
-        order_book.add_order(order.clone());
-        
-        // 尝试撮合
-        let executions = self.matcher.match_orders(order_book);
-        
-        // 处理执行结果
-        for exec in executions {
-            // 存储执行结果
-            {
-                let mut execs = self.execution_store.write().unwrap();
-                execs.insert(exec.execution_id.clone(), exec.clone());
-            }
-            
-            // 发送执行通知
-            self.send_execution_notifications(&exec);
-        }
-        
-        OrderResult::Accepted(order.order_id)
-    }
-}
-```
+### 🔄 6. Raft一致性层 (Consensus)
 
-### 4. 系统启动与配置
+- ✅ Raft服务：Raft协议实现
+- ✅ 日志复制：状态变更日志复制
+- 🔄 领导选举：Leader选举机制（仍需完善）
+- 🔄 状态机：应用状态机（仍需完善）
 
-```rust
-async fn start_oms_system() -> Result<()> {
-    // 解析配置
-    let config = Config::from_file("oms_config.yaml")?;
-    
-    // 初始化日志系统
-    init_logger(&config);
-    
-    // 创建并启动集群系统
-    let mut cluster_config = ClusterConfig::new()
-        .architecture(Architecture::Decentralized)
-        .node_role(NodeRole::Peer)  // 使用Peer角色
-        .bind_addr(config.bind_address)
-        .cluster_name("oms-cluster")
-        .serialization_format(SerializationFormat::Bincode);
-    
-    // 添加种子节点
-    if !config.seed_nodes.is_empty() {
-        cluster_config = cluster_config.seed_nodes(config.seed_nodes);
-    }
-    
-    let cluster_config = cluster_config.build()?;
-    let mut sys = ClusterSystem::new(&config.node_id, cluster_config);
-    let cluster_addr = sys.start().await?;
-    
-    // 初始化Raft服务
-    let (apply_tx, apply_rx) = mpsc::channel(100);
-    let raft_service = RaftService::new(
-        config.node_id.clone(),
-        cluster_addr.clone(),
-        apply_tx
-    );
-    let raft_addr = raft_service.start();
-    
-    // 启动状态机应用器
-    tokio::spawn(run_state_machine(apply_rx));
-    
-    // 初始化和注册各类Actor
-    let risk_actor = RiskActor::new(&config).start();
-    let exec_actor = ExecutionActor::new(&config).start();
-    let order_actor = OrderActor::new(
-        config.node_id.clone(),
-        raft_addr.clone(),
-        exec_actor.clone(),
-        risk_actor.clone()
-    ).start();
-    
-    // 注册Actor到集群
-    sys.register("/user/risk", risk_actor.clone()).await?;
-    sys.register("/user/execution", exec_actor.clone()).await?;
-    sys.register("/user/order", order_actor.clone()).await?;
-    sys.register("/user/raft", raft_addr.clone()).await?;
-    
-    // 启动API服务器
-    start_api_server(config.api_port, order_actor.clone())?;
-    
-    info!("OMS System started on node {}", config.node_id);
-    
-    // 等待终止信号
-    tokio::signal::ctrl_c().await?;
-    info!("Shutting down OMS System");
-    
-    Ok(())
-}
-```
+### ⏳ 7. 接入层 (Gateway)
 
-## 关键设计考量
+- ⏳ HTTP API：订单、账户等操作API
+- ⏳ 认证授权：API访问控制
+- ⏳ 请求验证：输入验证
+- ⏳ 限流：请求限流保护
 
-1. **Actor模型与Raft结合**：
-   - 使用actix-cluster的Actor模型处理并发请求和消息传递
-   - 关键状态变更通过Raft共识算法确保一致性
+### ⏳ 8. 持久化层 (Persistence)
 
-2. **容错与高可用**：
-   - 多节点部署，支持自动故障转移
-   - Raft提供的领导者选举确保单一写入点，避免脑裂
+- ⏳ 数据存储：订单、账户、交易等数据持久化
+- ⏳ 日志记录：系统日志
+- ⏳ 快照：系统状态快照
 
-3. **性能优化**：
-   - 读操作可直接访问本地状态，不需共识
-   - 批量写入Raft日志减少网络开销
+## 测试实现进度
 
-4. **扩展性设计**：
-   - 基于角色的Actor系统便于水平扩展
-   - 根据负载动态调整节点角色和职责
+### ✅ 单元测试
 
-5. **监控与可观察性**：
-   - 内置健康检查与指标收集
-   - 状态变更事件追踪与日志记录
+- ✅ 订单模型测试
+- ✅ 账户模型测试 
+- ✅ 订单簿测试
+- ✅ 撮合引擎测试
+- ✅ 执行引擎测试
+- ✅ 风控管理器测试
+- ✅ 订单管理器测试
 
-该架构适合处理高并发、要求强一致性的股票交易场景，并充分利用了actix-cluster的分布式Actor能力与Raft的一致性保证。
+### 🔄 集成测试
+
+- 🔄 执行流程测试：完整订单执行流程
+- ⏳ 集群测试：多节点协作
+- ⏳ 故障恢复测试：节点故障恢复
+
+### ⏳ 性能测试
+
+- ⏳ 吞吐量测试：系统处理能力
+- ⏳ 延迟测试：订单处理延迟
+- ⏳ 负载测试：高负载下系统表现
+
+## 总结
+
+已完成核心组件的实现，包括：
+1. 数据模型层的所有组件
+2. 执行引擎层的所有组件，支持高效的订单管理和撮合
+3. 风控管理器，提供全面的风险控制功能
+4. 订单管理器，处理订单生命周期
+5. Actor系统基础设施的基本功能
+
+下一步工作：
+1. 完善Raft一致性层，实现完整的共识功能
+2. 开发接入层，提供外部访问接口
+3. 实现持久化层，确保数据可靠性
+4. 增强集群通信功能，优化多节点协作
+5. 完善集成测试和性能测试
+
+该架构适合处理高并发、要求强一致性的股票交易场景，并充分利用了actix-cluster的分布式Actor能力与Raft的一致性保证。当前实现的组件已经能够支持核心交易功能，后续完善将进一步提高系统的可靠性、可用性和性能。

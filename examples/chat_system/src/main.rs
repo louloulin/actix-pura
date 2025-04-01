@@ -75,7 +75,7 @@ fn main() -> std::io::Result<()> {
     if args.multi {
         // Start multiple nodes in the same process for testing
         start_multi_node_test(args.nodes, args.base_port)
-    } else {
+        } else {
         // Start a single node
         let system = System::new();
         system.block_on(async {
@@ -100,7 +100,7 @@ async fn start_node(node_id: String, bind_addr: SocketAddr, seed_node: Option<St
     system.start().await.expect("Failed to start cluster");
     
     // Start the chat service actor
-    let chat_service = ChatServiceActor::new(node_id.clone()).start();
+        let chat_service = ChatServiceActor::new(node_id.clone()).start();
     
     // Shared collection for keeping track of simulated clients
     let clients = Arc::new(StdMutex::new(Vec::<SimulatedClient>::new()));

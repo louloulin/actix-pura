@@ -10,6 +10,7 @@ members = [
     "examples/http_api",
     "examples/file_sync",
     "examples/distributed_benchmark",
+    "trading",
 ]
 
 [workspace.package]
