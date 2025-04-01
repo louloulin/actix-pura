@@ -3,14 +3,14 @@ use uuid::Uuid;
 use chrono::Utc;
 
 use crate::models::order::{Order, OrderSide, OrderStatus, OrderType};
-use crate::models::execution::ExecutionRecord;
+use crate::models::execution::Execution;
 use super::order_book::OrderBook;
 
 /// 匹配结果 - 包含执行记录和已更新的订单
 #[derive(Debug, Clone)]
 pub struct MatchResult {
     /// 执行记录列表
-    pub executions: Vec<ExecutionRecord>,
+    pub executions: Vec<Execution>,
     /// 已更新的订单列表
     pub updated_orders: Vec<Order>,
 }
@@ -25,7 +25,7 @@ impl MatchResult {
     }
     
     /// 添加执行记录
-    pub fn add_execution(&mut self, execution: ExecutionRecord) {
+    pub fn add_execution(&mut self, execution: Execution) {
         self.executions.push(execution);
     }
     
@@ -94,7 +94,7 @@ impl OrderMatcher {
             } else {
                 // 市价单如果没有完全成交，按照交易所规则处理
                 // 例如可以取消剩余数量，或转为限价单
-                order.update_status(OrderStatus::Canceled);
+                order.update_status(OrderStatus::Cancelled);
                 result.add_updated_order(order.clone());
             }
         }
@@ -419,17 +419,18 @@ impl OrderMatcher {
     }
     
     /// 创建执行记录
-    fn create_execution_record(buy_order: &Order, sell_order: &Order, price: f64, quantity: f64) -> ExecutionRecord {
-        ExecutionRecord {
+    fn create_execution_record(buy_order: &Order, sell_order: &Order, price: f64, quantity: f64) -> Execution {
+        Execution {
             execution_id: Uuid::new_v4().to_string(),
             order_id: buy_order.order_id.clone(),
-            counter_order_id: sell_order.order_id.clone(),
+            counter_order_id: Some(sell_order.order_id.clone()),
             symbol: buy_order.symbol.clone(),
-            buyer_account_id: buy_order.account_id.clone(),
-            seller_account_id: sell_order.account_id.clone(),
             price,
             quantity,
-            timestamp: Utc::now(),
+            side: OrderSide::Buy,
+            buyer_account_id: Some(buy_order.account_id.clone()),
+            seller_account_id: Some(sell_order.account_id.clone()),
+            executed_at: Utc::now(),
         }
     }
 }
@@ -478,7 +479,7 @@ mod tests {
         // 验证执行记录
         let execution = &result.executions[0];
         assert_eq!(execution.order_id, "buy1");
-        assert_eq!(execution.counter_order_id, "sell1");
+        assert_eq!(execution.counter_order_id, Some("sell1".to_string()));
         assert_eq!(execution.price, 155.0); // 买单价格
         assert_eq!(execution.quantity, 5.0);
         
@@ -523,14 +524,14 @@ mod tests {
         // 验证第一个执行记录 (低价优先匹配)
         let execution1 = &result.executions[0];
         assert_eq!(execution1.order_id, "buy1");
-        assert_eq!(execution1.counter_order_id, "sell1");
+        assert_eq!(execution1.counter_order_id, Some("sell1".to_string()));
         assert_eq!(execution1.price, 150.0);
         assert_eq!(execution1.quantity, 5.0);
         
         // 验证第二个执行记录
         let execution2 = &result.executions[1];
         assert_eq!(execution2.order_id, "buy1");
-        assert_eq!(execution2.counter_order_id, "sell2");
+        assert_eq!(execution2.counter_order_id, Some("sell2".to_string()));
         assert_eq!(execution2.price, 155.0);
         assert_eq!(execution2.quantity, 3.0);
         
@@ -569,7 +570,7 @@ mod tests {
         // 验证执行记录
         let execution = &result.executions[0];
         assert_eq!(execution.order_id, "buy1");
-        assert_eq!(execution.counter_order_id, "sell1");
+        assert_eq!(execution.counter_order_id, Some("sell1".to_string()));
         assert_eq!(execution.price, 153.0); // 卖单价格
         assert_eq!(execution.quantity, 7.0); // 卖单数量
         

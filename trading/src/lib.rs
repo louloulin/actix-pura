@@ -3,6 +3,7 @@ pub mod actor;
 pub mod execution;
 pub mod risk;
 pub mod cluster;
+pub mod consensus;
 
 #[cfg(test)]
 mod tests;
@@ -31,3 +32,4 @@ pub use execution::{
 pub use actor::OrderActor;
 pub use risk::RiskManager;
 pub use cluster::TradingClusterManager; 
+pub use consensus::state_machine::{StateMachine, TradingStateMachine}; 

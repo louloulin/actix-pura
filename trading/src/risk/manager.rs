@@ -2,11 +2,13 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use log::{debug, info, warn, error};
 use chrono::{DateTime, Utc};
+use async_trait;
 
 use crate::models::order::{OrderRequest, OrderSide};
 use crate::models::account::{Account, Position};
 use crate::models::message::{Message, MessageType};
 use crate::actor::{Actor, ActorRef, ActorContext, MessageHandler};
+use crate::actor::ActorSystem;
 
 /// 风控检查请求
 #[derive(Clone)]
@@ -255,6 +257,7 @@ impl Actor for RiskManager {
     fn new_context(&self, ctx: &mut ActorContext) {}
 }
 
+#[async_trait::async_trait]
 impl MessageHandler<RiskCheckRequest> for RiskManager {
     async fn handle(&mut self, msg: RiskCheckRequest, ctx: &mut ActorContext) -> Option<Box<dyn std::any::Any>> {
         info!("Performing risk check for order: {} {} {}",
@@ -276,6 +279,7 @@ impl MessageHandler<RiskCheckRequest> for RiskManager {
     }
 }
 
+#[async_trait::async_trait]
 impl MessageHandler<UpdateRiskConfigMessage> for RiskManager {
     async fn handle(&mut self, msg: UpdateRiskConfigMessage, _ctx: &mut ActorContext) -> Option<Box<dyn std::any::Any>> {
         info!("Updating risk configuration");
@@ -287,6 +291,36 @@ impl MessageHandler<UpdateRiskConfigMessage> for RiskManager {
         
         None
     }
+}
+
+// 执行风控检查
+pub async fn check_risk(
+    actor_system: &ActorSystem,
+    risk_addr: Box<dyn ActorRef>,
+    request: OrderRequest
+) -> Option<RiskCheckResult> {
+    let client_id = request.client_id.clone();
+    let msg = RiskCheckRequest { 
+        order: request,
+        account_id: client_id 
+    };
+    let result = actor_system.ask::<RiskCheckRequest, RiskCheckResult>(risk_addr.clone(), msg).await;
+    
+    result
+}
+
+// 更新风控配置
+pub fn update_risk_config(
+    actor_system: &ActorSystem,
+    risk_addr: Box<dyn ActorRef>,
+    config: RiskConfig
+) -> bool {
+    let update_msg = UpdateRiskConfigMessage { 
+        max_order_value: Some(config.max_order_value),
+        max_position_value: Some(config.max_position_value),
+        allow_short_selling: Some(config.allow_short_selling)
+    };
+    actor_system.tell(risk_addr.clone(), update_msg)
 }
 
 #[cfg(test)]
@@ -326,7 +360,7 @@ mod tests {
             account_id: "client-1".to_string(),
         };
         
-        let result = actor_system.ask::<RiskCheckRequest, RiskCheckResult>(&risk_addr, msg).await;
+        let result = actor_system.ask::<RiskCheckRequest, RiskCheckResult>(risk_addr.clone(), msg).await;
         
         // 验证结果应该被拒绝
         if let Some(check_result) = result {
@@ -356,7 +390,7 @@ mod tests {
             account_id: "client-1".to_string(),
         };
         
-        let result = actor_system.ask::<RiskCheckRequest, RiskCheckResult>(&risk_addr, msg).await;
+        let result = actor_system.ask::<RiskCheckRequest, RiskCheckResult>(risk_addr.clone(), msg).await;
         
         // 验证结果应该被接受
         if let Some(check_result) = result {
@@ -386,7 +420,7 @@ mod tests {
             allow_short_selling: Some(true),
         };
         
-        actor_system.tell(&risk_addr, update_msg);
+        actor_system.tell(risk_addr.clone(), update_msg);
         
         // 在实际测试中，我们可以查询RiskManager状态验证更新是否生效
         // 由于我们的模拟Actor系统不支持状态查询，这里不做验证

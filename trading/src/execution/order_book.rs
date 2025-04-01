@@ -106,25 +106,34 @@ impl OrderBook {
     
     /// 更新订单状态
     pub fn update_order(&mut self, order_id: &str, status: OrderStatus, filled_quantity: Option<f64>) -> Option<Order> {
-        // 查找并更新订单
-        if let Some(order) = self.orders_by_id.get_mut(order_id) {
-            // 更新状态
-            order.update_status(status);
-            
-            // 更新成交数量
-            if let Some(qty) = filled_quantity {
-                order.update_filled_quantity(qty);
-            }
-            
-            // 如果订单不再活跃，从价格列表中移除
-            if !order.is_active() {
-                self.remove_order(order_id);
-            }
-            
-            Some(order.clone())
-        } else {
-            None
+        // First, check if the order exists
+        if !self.orders_by_id.contains_key(order_id) {
+            return None;
         }
+        
+        // Clone the order to avoid multiple mutable borrows
+        let mut order = self.orders_by_id.get(order_id).cloned().unwrap();
+        
+        // 更新状态
+        order.update_status(status);
+        
+        // 更新成交数量
+        if let Some(qty) = filled_quantity {
+            order.update_filled_quantity(qty);
+        }
+        
+        // If order is no longer active, remove it from price lists
+        let is_active = order.is_active();
+        
+        // Update the order in the orders_by_id map
+        self.orders_by_id.insert(order_id.to_string(), order.clone());
+        
+        // 如果订单不再活跃，从价格列表中移除
+        if !is_active {
+            self.remove_order(order_id);
+        }
+        
+        Some(order)
     }
     
     /// 获取最优价格买单
@@ -195,7 +204,7 @@ impl OrderBook {
         let mut result = Vec::new();
         
         // 收集所有价格大于等于目标价格的买单
-        for (price_key, orders) in self.buy_orders.range((target_price_key..)..) {
+        for (price_key, orders) in self.buy_orders.range(target_price_key..) {
             result.extend(orders.clone());
         }
         

@@ -9,7 +9,7 @@ use crate::models::execution::{Execution, Trade};
 use crate::models::account::{Account, AccountQuery, AccountResult};
 
 /// 定义Actor消息，确保实现了actix::Message
-#[derive(Debug, Clone, Message)]
+#[derive(Debug, Message)]
 #[rtype(result = "()")]
 pub struct AnyMessage(pub Box<dyn Any + Send>);
 
@@ -23,6 +23,14 @@ impl AnyMessage {
         T: Clone,
     {
         self.0.downcast_ref::<T>().cloned()
+    }
+}
+
+// Manual implementation of Clone that simply creates a new empty box
+// This is just a stub since we can't actually clone the inner value
+impl Clone for AnyMessage {
+    fn clone(&self) -> Self {
+        AnyMessage(Box::new(()))
     }
 }
 

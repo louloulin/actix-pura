@@ -4,6 +4,7 @@ use log::{debug, info, warn, error};
 use chrono::Utc;
 use uuid::Uuid;
 use actix::prelude::*;
+use async_trait::async_trait;
 
 use crate::models::order::{Order, OrderSide, OrderType, OrderStatus};
 use crate::models::execution::{Execution, Trade};
@@ -12,6 +13,7 @@ use crate::actor::{Actor, ActorRef, ActorContext, MessageHandler};
 use super::order_book::OrderBook;
 use super::matcher::{OrderMatcher, MatchResult};
 use crate::actor::order::AppendLogRequest;
+use crate::actor::ActorSystem;
 
 /// 执行消息 - 用于请求订单执行
 pub struct ExecuteOrderMessage {
@@ -75,45 +77,53 @@ impl ExecutionEngine {
         }
         
         // 存储执行记录
-        for execution in &result.executions {
+        let executions_clone = result.executions.clone();
+        for execution in &executions_clone {
             self.executions.insert(execution.execution_id.clone(), execution.clone());
         }
         
         // 创建成交记录（将多个执行合并为成交）
-        let trades = self.create_trade_from_executions(&result.executions);
+        let trades = self.create_trade_from_executions(&executions_clone);
         for trade in &trades {
             self.trades.insert(trade.trade_id.clone(), trade.clone());
         }
         
         // 发送执行通知
-        for execution in &result.executions {
+        for execution in &executions_clone {
             // 通知买方
-            let buy_notification = ExecutionNotificationMessage {
-                execution_id: execution.execution_id.clone(),
-                account_id: execution.buyer_account_id.clone(),
-                order_id: execution.order_id.clone(),
-                symbol: execution.symbol.clone(),
-                price: execution.price,
-                quantity: execution.quantity,
-                side: OrderSide::Buy,
-                timestamp: execution.timestamp,
-            };
+            if let Some(buyer_account_id) = &execution.buyer_account_id {
+                let buy_notification = ExecutionNotificationMessage {
+                    execution_id: execution.execution_id.clone(),
+                    account_id: buyer_account_id.clone(),
+                    order_id: execution.order_id.clone(),
+                    symbol: execution.symbol.clone(),
+                    price: execution.price,
+                    quantity: execution.quantity,
+                    side: OrderSide::Buy,
+                    timestamp: execution.executed_at,
+                };
+                
+                if let Some(account) = &self.account_actor {
+                    let _result = ctx.tell(account.clone(), buy_notification);
+                }
+            }
             
             // 通知卖方
-            let sell_notification = ExecutionNotificationMessage {
-                execution_id: execution.execution_id.clone(),
-                account_id: execution.seller_account_id.clone(),
-                order_id: execution.counter_order_id.clone(),
-                symbol: execution.symbol.clone(),
-                price: execution.price,
-                quantity: execution.quantity,
-                side: OrderSide::Sell,
-                timestamp: execution.timestamp,
-            };
-            
-            if let Some(account) = &self.account_actor {
-                let _result = ctx.tell(account.clone(), buy_notification);
-                let _result = ctx.tell(account.clone(), sell_notification);
+            if let Some(seller_account_id) = &execution.seller_account_id {
+                let sell_notification = ExecutionNotificationMessage {
+                    execution_id: execution.execution_id.clone(),
+                    account_id: seller_account_id.clone(),
+                    order_id: execution.order_id.clone(), // 使用主订单ID
+                    symbol: execution.symbol.clone(),
+                    price: execution.price,
+                    quantity: execution.quantity,
+                    side: OrderSide::Sell,
+                    timestamp: execution.executed_at,
+                };
+                
+                if let Some(account) = &self.account_actor {
+                    let _result = ctx.tell(account.clone(), sell_notification);
+                }
             }
         }
         
@@ -137,20 +147,23 @@ impl ExecutionEngine {
     
     /// 从执行记录创建成交记录
     fn create_trade_from_executions(&self, executions: &[Execution]) -> Vec<Trade> {
-        // 按证券和价格分组执行记录
-        let mut trade_groups: HashMap<(String, f64), Vec<&Execution>> = HashMap::new();
+        // 按证券和价格分组执行记录 - 将价格转为整数以解决f64的Eq和Hash问题
+        let mut trade_groups = HashMap::<(String, i64), Vec<Execution>>::new();
         
         for exec in executions {
-            let key = (exec.symbol.clone(), exec.price);
-            trade_groups.entry(key).or_default().push(exec);
+            // 将价格乘以10000并转为整数作为key
+            let price_key = (exec.price * 10000.0) as i64;
+            let key = (exec.symbol.clone(), price_key);
+            let entry = trade_groups.entry(key).or_insert_with(Vec::new);
+            entry.push(exec.clone());
         }
         
         // 为每个分组创建成交记录
         let mut trades = Vec::new();
         
-        for ((symbol, price), group) in trade_groups {
+        for ((symbol, price_key), group) in trade_groups {
             let total_quantity: f64 = group.iter().map(|e| e.quantity).sum();
-            let timestamp = Utc::now();
+            let actual_price = (price_key as f64) / 10000.0; // 还原为实际价格
             
             // 找出买方和卖方订单
             let mut buy_order_id = String::new();
@@ -178,7 +191,7 @@ impl ExecutionEngine {
             
             let trade = Trade::new(
                 symbol,
-                price,
+                actual_price,
                 total_quantity,
                 buy_order_id,
                 sell_order_id,
@@ -197,25 +210,39 @@ impl ExecutionEngine {
     /// 执行订单
     pub async fn execute_order(&mut self, order: &mut Order, ctx: &mut ActorContext) -> MatchResult {
         let symbol = order.symbol.clone();
-        let order_book = self.get_or_create_order_book(&symbol);
         
-        let result = OrderMatcher::match_order(order_book, order);
-        
-        // 处理匹配结果
-        let _ = self.process_match_result(result.clone(), ctx).await;
-        
-        // 执行连续撮合（检查订单簿中是否还有可以撮合的订单）
-        let continuous_result = OrderMatcher::continuous_match(order_book);
-        if continuous_result.has_matches() {
-            let _ = self.process_match_result(continuous_result.clone(), ctx).await;
+        // 进行撮合和处理结果
+        let mut result = {
+            let order_book = self.get_or_create_order_book(&symbol);
+            let match_result = OrderMatcher::match_order(order_book, order);
             
-            // 合并结果
-            let mut combined = result;
-            combined.merge(continuous_result);
-            return combined;
+            // 处理匹配结果
+            let _ = self.process_match_result(match_result.clone(), ctx).await;
+            match_result
+        };
+        
+        // 执行连续撮合
+        {
+            let order_book = self.get_or_create_order_book(&symbol);
+            let continuous_result = OrderMatcher::continuous_match(order_book);
+            if continuous_result.has_matches() {
+                // 处理匹配结果
+                let _ = self.process_match_result(continuous_result.clone(), ctx).await;
+                
+                // 合并结果
+                result.merge(continuous_result);
+            }
         }
         
         result
+    }
+
+    /// 执行市价单 - 未实现
+    #[allow(dead_code)] // 临时禁用未实现方法的警告
+    async fn execute_market_order(&mut self, _order: &Order, _ctx: &mut ActorContext) -> MatchResult {
+        // 市价单撮合暂未实现
+        warn!("市价单撮合功能尚未实现");
+        MatchResult::new()
     }
 }
 
@@ -223,6 +250,7 @@ impl Actor for ExecutionEngine {
     fn new_context(&self, ctx: &mut ActorContext) {}
 }
 
+#[async_trait]
 impl MessageHandler<ExecuteOrderMessage> for ExecutionEngine {
     async fn handle(&mut self, msg: ExecuteOrderMessage, ctx: &mut ActorContext) -> Option<Box<dyn std::any::Any>> {
         let mut order = msg.order;
@@ -239,6 +267,7 @@ impl MessageHandler<ExecuteOrderMessage> for ExecutionEngine {
     }
 }
 
+#[async_trait]
 impl MessageHandler<ExecutionNotificationMessage> for ExecutionEngine {
     async fn handle(&mut self, msg: ExecutionNotificationMessage, _ctx: &mut ActorContext) -> Option<Box<dyn std::any::Any>> {
         info!("Execution notification: {} {} @ {} for account {}", 
@@ -247,6 +276,7 @@ impl MessageHandler<ExecutionNotificationMessage> for ExecutionEngine {
     }
 }
 
+#[async_trait]
 impl MessageHandler<TradeNotificationMessage> for ExecutionEngine {
     async fn handle(&mut self, msg: TradeNotificationMessage, _ctx: &mut ActorContext) -> Option<Box<dyn std::any::Any>> {
         info!("Trade notification: {} {} @ {}", 
@@ -286,7 +316,7 @@ mod tests {
         
         // 发送订单到执行引擎
         let msg = ExecuteOrderMessage { order: buy_order };
-        let _ = actor_system.ask(&engine_addr, msg).await;
+        let _: Option<MatchResult> = actor_system.ask(engine_addr.clone(), msg).await;
         
         // 创建匹配的卖单
         let mut sell_order = Order {
@@ -306,7 +336,7 @@ mod tests {
         
         // 发送卖单到执行引擎
         let msg = ExecuteOrderMessage { order: sell_order };
-        let result = actor_system.ask::<ExecuteOrderMessage, MatchResult>(&engine_addr, msg).await;
+        let result = actor_system.ask::<ExecuteOrderMessage, MatchResult>(engine_addr.clone(), msg).await;
         
         // 验证结果
         if let Some(match_result) = result {

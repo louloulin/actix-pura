@@ -2,6 +2,7 @@ use serde::{Serialize, Deserialize};
 use actix::prelude::*;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
+use std::fmt;
 
 /// 订单方向
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -10,6 +11,15 @@ pub enum OrderSide {
     Buy,
     /// 卖出
     Sell,
+}
+
+impl fmt::Display for OrderSide {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            OrderSide::Buy => write!(f, "Buy"),
+            OrderSide::Sell => write!(f, "Sell"),
+        }
+    }
 }
 
 /// 订单类型

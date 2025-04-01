@@ -224,16 +224,19 @@ impl RaftNodeActor {
     }
     
     /// 添加集群节点
-    pub fn add_cluster_node(&mut self, node_id: String) {
-        if !self.cluster_nodes.contains(&node_id) && node_id != self.node_id {
-            self.cluster_nodes.push(node_id);
+    pub fn add_cluster_node(&mut self, node_id: String) -> Result<(), String> {
+        let node_id_clone = node_id.clone();
+        if !self.cluster_nodes.contains(&node_id_clone) && node_id_clone != self.node_id {
+            self.cluster_nodes.push(node_id_clone.clone());
             
-            // 如果是领导者，为新节点初始化复制状态
-            if self.state == RaftNodeState::Leader {
-                let next_log_index = self.log.last().map(|entry| entry.index + 1).unwrap_or(1);
-                self.next_index.insert(node_id.clone(), next_log_index);
-                self.match_index.insert(node_id, 0);
-            }
+            // 初始化节点的log索引
+            self.next_index.insert(node_id.clone(), 1);
+            self.match_index.insert(node_id.clone(), 0);
+            
+            info!("节点 {} 添加到集群", node_id_clone);
+            Ok(())
+        } else {
+            Err(format!("节点 {} 已经在集群中或是当前节点", node_id))
         }
     }
     
@@ -598,8 +601,11 @@ impl RaftNodeActor {
         }
         
         // 向其他节点复制日志
-        for node_id in &self.cluster_nodes {
-            self.replicate_log_to_follower(node_id.clone(), ctx);
+        let nodes = self.cluster_nodes.clone(); // Clone nodes to avoid borrowing conflict
+        for node_id in &nodes {
+            // Avoid mutable borrow conflict by using a clone
+            let node_id_clone = node_id.clone();
+            self.replicate_log_to_follower(node_id_clone, ctx);
         }
         
         // 注意: 在实际实现中，我们应该等待大多数节点确认后再返回
@@ -666,13 +672,13 @@ impl RaftNodeActor {
             // 查找对应索引的日志条目
             if let Some(entry) = self.log.iter().find(|e| e.index == self.last_applied) {
                 // 应用命令到状态机
-                let response = self.state_machine.apply(entry.command.clone());
+                let response = self.state_machine.apply(&entry.command);
                 
                 info!("应用日志条目 {}, 任期 {}, 结果: {:?}", 
                       entry.index, entry.term, response);
                 
                 // 更新状态机的应用进度
-                if let Some(state_machine) = self.state_machine.as_any().downcast_mut::<TradingStateMachine>() {
+                if let Some(state_machine) = self.state_machine.as_any_mut().downcast_mut::<TradingStateMachine>() {
                     state_machine.update_applied(entry.index, entry.term);
                 }
             } else {
@@ -709,7 +715,8 @@ impl RaftNodeActor {
                     self.next_index.insert(follower_id.clone(), match_index + 1);
                     
                     // 检查是否可以提交新的日志条目
-                    for entry in &self.log {
+                    let log_entries = self.log.clone(); // Clone to avoid borrowing conflict
+                    for entry in &log_entries {
                         if entry.term == self.current_term && entry.index > self.commit_index {
                             // 计算有多少节点已经复制了这个日志条目
                             let replication_count = self.match_index.values()
@@ -826,33 +833,16 @@ impl Handler<ClusterMessage> for RaftNodeActor {
     }
 }
 
-/// Raft系统扩展，提供StateMachine访问
-pub trait RaftSystemExtension {
-    /// 获取状态机
-    fn state_machine<T: StateMachine + 'static>(&self) -> Option<&T>;
-    
-    /// 获取状态机可变引用
-    fn state_machine_mut<T: StateMachine + 'static>(&mut self) -> Option<&mut T>;
-}
-
-/// Raft相关扩展
-impl RaftSystemExtension for RaftNodeActor {
-    fn state_machine<T: StateMachine + 'static>(&self) -> Option<&T> {
-        self.state_machine.as_any().downcast_ref::<T>()
-    }
-    
-    fn state_machine_mut<T: StateMachine + 'static>(&mut self) -> Option<&mut T> {
-        self.state_machine.as_any().downcast_mut::<T>()
-    }
-}
-
-/// 为StateMachine添加Any扩展
-pub trait AsAny {
+/// 状态机转换相关扩展 - 为StateMachine提供Any转换方法
+pub trait StateMachineExt: StateMachine {
+    /// 将StateMachine转换为Any引用
     fn as_any(&self) -> &dyn std::any::Any;
+    
+    /// 将StateMachine转换为Any可变引用
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
-impl<T: StateMachine + 'static> AsAny for T {
+impl<T: StateMachine + 'static> StateMachineExt for T {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

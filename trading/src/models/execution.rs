@@ -11,6 +11,8 @@ pub struct Execution {
     pub execution_id: String,
     /// 关联的订单ID
     pub order_id: String,
+    /// 对手方订单ID
+    pub counter_order_id: Option<String>,
     /// 证券代码
     pub symbol: String,
     /// 执行价格
@@ -31,6 +33,7 @@ impl Execution {
     /// 创建新的执行记录
     pub fn new(
         order_id: String,
+        counter_order_id: Option<String>,
         symbol: String,
         price: f64,
         quantity: f64,
@@ -41,6 +44,7 @@ impl Execution {
         Self {
             execution_id: Uuid::new_v4().to_string(),
             order_id,
+            counter_order_id,
             symbol,
             price,
             quantity,
@@ -52,7 +56,7 @@ impl Execution {
     }
     
     /// 从订单创建执行记录
-    pub fn from_order(order: &Order, executed_quantity: f64, executed_price: f64) -> Self {
+    pub fn from_order(order: &Order, counter_order_id: Option<String>, executed_quantity: f64, executed_price: f64) -> Self {
         let (buyer_account_id, seller_account_id) = match order.side {
             OrderSide::Buy => (Some(order.account_id.clone()), None),
             OrderSide::Sell => (None, Some(order.account_id.clone())),
@@ -61,6 +65,7 @@ impl Execution {
         Self {
             execution_id: Uuid::new_v4().to_string(),
             order_id: order.order_id.clone(),
+            counter_order_id,
             symbol: order.symbol.clone(),
             price: executed_price,
             quantity: executed_quantity,
@@ -180,6 +185,7 @@ mod tests {
     fn test_execution_creation() {
         let exec = Execution::new(
             "order-1".to_string(),
+            Some("order-2".to_string()),
             "AAPL".to_string(),
             150.0,
             10.0,
@@ -215,7 +221,7 @@ mod tests {
             updated_at: Utc::now(),
         };
         
-        let exec = Execution::from_order(&order, 20.0, 250.0);
+        let exec = Execution::from_order(&order, Some("order-3".to_string()), 20.0, 250.0);
         
         assert_eq!(exec.order_id, "order-2");
         assert_eq!(exec.symbol, "MSFT");
@@ -257,6 +263,7 @@ mod tests {
     fn test_trade_from_executions() {
         let buy_exec = Execution::new(
             "buy-order-2".to_string(),
+            Some("sell-order-2".to_string()),
             "AMZN".to_string(),
             3000.0,
             2.0,
@@ -267,6 +274,7 @@ mod tests {
         
         let sell_exec = Execution::new(
             "sell-order-2".to_string(),
+            Some("buy-order-2".to_string()),
             "AMZN".to_string(),
             3000.0,
             2.0,
@@ -294,6 +302,7 @@ mod tests {
         // 不匹配的方向
         let exec1 = Execution::new(
             "order-3".to_string(),
+            Some("order-4".to_string()),
             "NVDA".to_string(),
             500.0,
             10.0,
@@ -304,6 +313,7 @@ mod tests {
         
         let exec2 = Execution::new(
             "order-4".to_string(),
+            Some("order-3".to_string()),
             "NVDA".to_string(),
             500.0,
             10.0,
@@ -317,6 +327,7 @@ mod tests {
         // 不匹配的证券代码
         let exec3 = Execution::new(
             "order-5".to_string(),
+            Some("order-6".to_string()),
             "TSLA".to_string(),
             700.0,
             5.0,
@@ -327,8 +338,9 @@ mod tests {
         
         let exec4 = Execution::new(
             "order-6".to_string(),
+            Some("order-5".to_string()),
             "FB".to_string(), // 不同的证券代码
-            700.0,
+           700.0,
             5.0,
             OrderSide::Sell,
             None,
@@ -340,6 +352,7 @@ mod tests {
         // 不匹配的价格
         let exec5 = Execution::new(
             "order-7".to_string(),
+            Some("order-8".to_string()),
             "AMD".to_string(),
             100.0,
             20.0,
@@ -350,6 +363,7 @@ mod tests {
         
         let exec6 = Execution::new(
             "order-8".to_string(),
+            Some("order-7".to_string()),
             "AMD".to_string(),
             105.0, // 不同的价格
             20.0,

@@ -4,6 +4,7 @@ use log::{debug, info, warn, error};
 use chrono::Utc;
 use uuid::Uuid;
 use actix::prelude::*;
+use async_trait;
 
 use crate::models::order::{
     Order, OrderSide, OrderType, OrderStatus, 
@@ -202,6 +203,7 @@ impl Actor for OrderActor {
     fn new_context(&self, ctx: &mut ActorContext) {}
 }
 
+#[async_trait::async_trait]
 impl MessageHandler<CreateOrderMessage> for OrderActor {
     async fn handle(&mut self, msg: CreateOrderMessage, ctx: &mut ActorContext) -> Option<Box<dyn std::any::Any>> {
         let request = msg.request;
@@ -231,6 +233,7 @@ impl MessageHandler<CreateOrderMessage> for OrderActor {
     }
 }
 
+#[async_trait::async_trait]
 impl MessageHandler<CancelOrderMessage> for OrderActor {
     async fn handle(&mut self, msg: CancelOrderMessage, ctx: &mut ActorContext) -> Option<Box<dyn std::any::Any>> {
         let request = msg.request;
@@ -254,6 +257,7 @@ impl MessageHandler<CancelOrderMessage> for OrderActor {
     }
 }
 
+#[async_trait::async_trait]
 impl MessageHandler<QueryOrderMessage> for OrderActor {
     async fn handle(&mut self, msg: QueryOrderMessage, _ctx: &mut ActorContext) -> Option<Box<dyn std::any::Any>> {
         let query = msg.query;
@@ -291,7 +295,7 @@ mod tests {
         
         // 发送创建订单消息
         let msg = CreateOrderMessage { request };
-        let result = actor_system.ask::<CreateOrderMessage, OrderResult>(&order_addr, msg).await;
+        let result = actor_system.ask::<CreateOrderMessage, OrderResult>(order_addr.clone(), msg).await;
         
         // 验证结果
         if let Some(order_result) = result {
@@ -308,7 +312,7 @@ mod tests {
         // 查询订单
         let query = OrderQuery::ById("test-order-1".to_string());
         let msg = QueryOrderMessage { query };
-        let result = actor_system.ask::<QueryOrderMessage, Vec<Order>>(&order_addr, msg).await;
+        let result = actor_system.ask::<QueryOrderMessage, Vec<Order>>(order_addr.clone(), msg).await;
         
         // 验证查询结果
         if let Some(orders) = result {
@@ -342,7 +346,7 @@ mod tests {
         
         // 发送创建订单消息
         let msg = CreateOrderMessage { request };
-        let _ = actor_system.ask::<CreateOrderMessage, OrderResult>(&order_addr, msg).await;
+        let _ = actor_system.ask::<CreateOrderMessage, OrderResult>(order_addr.clone(), msg).await;
         
         // 发送取消订单消息
         let cancel_request = CancelOrderRequest {
@@ -351,7 +355,7 @@ mod tests {
         };
         
         let msg = CancelOrderMessage { request: cancel_request };
-        let result = actor_system.ask::<CancelOrderMessage, OrderResult>(&order_addr, msg).await;
+        let result = actor_system.ask::<CancelOrderMessage, OrderResult>(order_addr.clone(), msg).await;
         
         // 验证结果
         if let Some(order_result) = result {
@@ -368,7 +372,7 @@ mod tests {
         // 查询订单验证状态
         let query = OrderQuery::ById("test-order-2".to_string());
         let msg = QueryOrderMessage { query };
-        let result = actor_system.ask::<QueryOrderMessage, Vec<Order>>(&order_addr, msg).await;
+        let result = actor_system.ask::<QueryOrderMessage, Vec<Order>>(order_addr.clone(), msg).await;
         
         // 验证查询结果
         if let Some(orders) = result {
@@ -421,13 +425,13 @@ mod tests {
         // 创建订单
         for request in orders {
             let msg = CreateOrderMessage { request };
-            let _ = actor_system.ask::<CreateOrderMessage, OrderResult>(&order_addr, msg).await;
+            let _ = actor_system.ask::<CreateOrderMessage, OrderResult>(order_addr.clone(), msg).await;
         }
         
         // 测试按证券查询
         let query = OrderQuery::BySymbol("AAPL".to_string());
         let msg = QueryOrderMessage { query };
-        let result = actor_system.ask::<QueryOrderMessage, Vec<Order>>(&order_addr, msg).await;
+        let result = actor_system.ask::<QueryOrderMessage, Vec<Order>>(order_addr.clone(), msg).await;
         
         if let Some(orders) = result {
             assert_eq!(orders.len(), 2);
@@ -439,7 +443,7 @@ mod tests {
         // 测试按账户查询
         let query = OrderQuery::ByAccount("client-1".to_string());
         let msg = QueryOrderMessage { query };
-        let result = actor_system.ask::<QueryOrderMessage, Vec<Order>>(&order_addr, msg).await;
+        let result = actor_system.ask::<QueryOrderMessage, Vec<Order>>(order_addr.clone(), msg).await;
         
         if let Some(orders) = result {
             assert_eq!(orders.len(), 2);
@@ -451,7 +455,7 @@ mod tests {
         // 测试全部查询
         let query = OrderQuery::All;
         let msg = QueryOrderMessage { query };
-        let result = actor_system.ask::<QueryOrderMessage, Vec<Order>>(&order_addr, msg).await;
+        let result = actor_system.ask::<QueryOrderMessage, Vec<Order>>(order_addr.clone(), msg).await;
         
         if let Some(orders) = result {
             assert_eq!(orders.len(), 3);
