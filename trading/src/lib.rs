@@ -4,6 +4,8 @@ pub mod execution;
 pub mod risk;
 pub mod cluster;
 pub mod consensus;
+pub mod persistence;
+pub mod api;
 
 #[cfg(test)]
 mod tests;
@@ -33,3 +35,9 @@ pub use actor::OrderActor;
 pub use risk::RiskManager;
 pub use cluster::TradingClusterManager; 
 pub use consensus::state_machine::{StateMachine, TradingStateMachine}; 
+pub use persistence::{
+    storage::{StorageProvider, FileSystemStorage, InMemoryStorage, StorageType},
+    log::{LogProvider, FileSystemLog, InMemoryLog, LogEntry as PersistenceLogEntry},
+    snapshot::{SnapshotProvider, FileSystemSnapshot, InMemorySnapshot, SystemSnapshot}
+};
+pub use api::gateway::ApiGatewayActor; 
