@@ -4,15 +4,19 @@ use log::{debug, info, warn, error};
 use chrono::Utc;
 use uuid::Uuid;
 use actix::prelude::*;
-use actix_cluster::raft::{RaftActor, AppendLogRequest, LogEntry};
 
 use crate::models::order::{
     Order, OrderSide, OrderType, OrderStatus, 
     OrderRequest, OrderResult, OrderQuery, CancelOrderRequest
 };
-use crate::models::message::{Message, MessageType};
+use crate::models::message::{Message, MessageType, LogEntry};
 use crate::actor::{Actor, ActorRef, ActorContext, MessageHandler};
 use crate::execution::ExecutionEngine;
+
+// Raft相关类型定义
+pub struct AppendLogRequest {
+    pub entry: LogEntry,
+}
 
 /// 创建订单消息
 #[derive(Clone)]
@@ -56,8 +60,6 @@ pub struct OrderActor {
     pub node_id: String,
     /// 订单存储
     pub orders: Arc<RwLock<HashMap<String, Order>>>,
-    /// Raft客户端
-    pub raft_client: Option<Box<dyn ActorRef>>,
     /// 执行引擎
     pub execution_engine: Option<Box<dyn ActorRef>>,
     /// 风控管理器
@@ -70,15 +72,9 @@ impl OrderActor {
         Self {
             node_id,
             orders: Arc::new(RwLock::new(HashMap::new())),
-            raft_client: None,
             execution_engine: None,
             risk_manager: None,
         }
-    }
-    
-    /// 设置Raft客户端
-    pub fn set_raft_client(&mut self, raft_client: Box<dyn ActorRef>) {
-        self.raft_client = Some(raft_client);
     }
     
     /// 设置执行引擎
@@ -187,16 +183,6 @@ impl OrderActor {
         
         let mut order = Order::from_request(request.clone());
         
-        // 记录到Raft日志
-        if let Some(raft) = &self.raft_client {
-            // 创建日志请求
-            let req = AppendLogRequest {
-                entry: LogEntry::OrderRequest(request.clone())
-            };
-            
-            let _result = ctx.ask(raft.clone(), req).await;
-        }
-        
         // 存储订单
         self.store_order(order.clone());
         
@@ -248,16 +234,6 @@ impl MessageHandler<CreateOrderMessage> for OrderActor {
 impl MessageHandler<CancelOrderMessage> for OrderActor {
     async fn handle(&mut self, msg: CancelOrderMessage, ctx: &mut ActorContext) -> Option<Box<dyn std::any::Any>> {
         let request = msg.request;
-        
-        // 记录到Raft日志
-        if let Some(raft) = &self.raft_client {
-            // 创建日志请求
-            let req = AppendLogRequest {
-                entry: LogEntry::CancelOrder(request.clone())
-            };
-            
-            let _result = ctx.ask(raft.clone(), req).await;
-        }
         
         // 执行取消
         let result = self.cancel_order(&request.order_id, &request.client_id);

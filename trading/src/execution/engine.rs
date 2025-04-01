@@ -4,16 +4,14 @@ use log::{debug, info, warn, error};
 use chrono::Utc;
 use uuid::Uuid;
 use actix::prelude::*;
-use actix_cluster::raft::{RaftActor, AppendLogRequest, LogEntry};
 
 use crate::models::order::{Order, OrderSide, OrderType, OrderStatus};
-use crate::models::execution::ExecutionRecord;
-use crate::models::trade::Trade;
+use crate::models::execution::{Execution, Trade};
 use crate::models::message::{Message, MessageType, ExecutionNotificationMessage, TradeNotificationMessage, LogEntry};
 use crate::actor::{Actor, ActorRef, ActorContext, MessageHandler};
-use crate::consensus::raft::{RaftClient, AppendLogRequest, LogEntry};
 use super::order_book::OrderBook;
 use super::matcher::{OrderMatcher, MatchResult};
+use crate::actor::order::AppendLogRequest;
 
 /// 执行消息 - 用于请求订单执行
 pub struct ExecuteOrderMessage {
@@ -35,11 +33,9 @@ pub struct ExecutionEngine {
     /// 撮合器
     pub matcher: OrderMatcher,
     /// 执行记录 - 按ID索引
-    pub executions: HashMap<String, ExecutionRecord>,
+    pub executions: HashMap<String, Execution>,
     /// 成交记录 - 按ID索引
     pub trades: HashMap<String, Trade>,
-    /// Raft客户端
-    pub raft_client: Option<Box<dyn ActorRef>>,
     /// 账户Actor
     pub account_actor: Option<Box<dyn ActorRef>>,
 }
@@ -53,14 +49,8 @@ impl ExecutionEngine {
             matcher: OrderMatcher,
             executions: HashMap::new(),
             trades: HashMap::new(),
-            raft_client: None,
             account_actor: None,
         }
-    }
-    
-    /// 设置Raft客户端
-    pub fn set_raft_client(&mut self, raft_client: Box<dyn ActorRef>) {
-        self.raft_client = Some(raft_client);
     }
     
     /// 设置账户Actor
@@ -93,27 +83,6 @@ impl ExecutionEngine {
         let trades = self.create_trade_from_executions(&result.executions);
         for trade in &trades {
             self.trades.insert(trade.trade_id.clone(), trade.clone());
-        }
-        
-        // 添加日志到Raft
-        if let Some(raft) = &self.raft_client {
-            for execution in &result.executions {
-                // 记录执行结果到Raft日志
-                let req = AppendLogRequest {
-                    entry: LogEntry::Execution(execution.clone())
-                };
-                
-                let _result = ctx.ask(raft.clone(), req).await;
-            }
-            
-            for trade in &trades {
-                // 记录成交到Raft日志
-                let req = AppendLogRequest {
-                    entry: LogEntry::Trade(trade.clone())
-                };
-                
-                let _result = ctx.ask(raft.clone(), req).await;
-            }
         }
         
         // 发送执行通知
@@ -155,7 +124,7 @@ impl ExecutionEngine {
                 symbol: trade.symbol.clone(),
                 price: trade.price,
                 quantity: trade.quantity,
-                timestamp: trade.timestamp,
+                timestamp: trade.traded_at,
             };
             
             if let Some(account) = &self.account_actor {
@@ -167,9 +136,9 @@ impl ExecutionEngine {
     }
     
     /// 从执行记录创建成交记录
-    fn create_trade_from_executions(&self, executions: &[ExecutionRecord]) -> Vec<Trade> {
+    fn create_trade_from_executions(&self, executions: &[Execution]) -> Vec<Trade> {
         // 按证券和价格分组执行记录
-        let mut trade_groups: HashMap<(String, f64), Vec<&ExecutionRecord>> = HashMap::new();
+        let mut trade_groups: HashMap<(String, f64), Vec<&Execution>> = HashMap::new();
         
         for exec in executions {
             let key = (exec.symbol.clone(), exec.price);
@@ -181,16 +150,43 @@ impl ExecutionEngine {
         
         for ((symbol, price), group) in trade_groups {
             let total_quantity: f64 = group.iter().map(|e| e.quantity).sum();
-            let timestamp = group.iter().map(|e| e.timestamp).max().unwrap_or_else(Utc::now);
+            let timestamp = Utc::now();
             
-            let trade = Trade {
-                trade_id: Uuid::new_v4().to_string(),
+            // 找出买方和卖方订单
+            let mut buy_order_id = String::new();
+            let mut sell_order_id = String::new();
+            let mut buyer_account_id = String::new();
+            let mut seller_account_id = String::new();
+            let mut buy_execution_id = String::new();
+            let mut sell_execution_id = String::new();
+            
+            for exec in &group {
+                if exec.side == OrderSide::Buy {
+                    buy_order_id = exec.order_id.clone();
+                    buy_execution_id = exec.execution_id.clone();
+                    if let Some(acc_id) = &exec.buyer_account_id {
+                        buyer_account_id = acc_id.clone();
+                    }
+                } else {
+                    sell_order_id = exec.order_id.clone();
+                    sell_execution_id = exec.execution_id.clone();
+                    if let Some(acc_id) = &exec.seller_account_id {
+                        seller_account_id = acc_id.clone();
+                    }
+                }
+            }
+            
+            let trade = Trade::new(
                 symbol,
                 price,
-                quantity: total_quantity,
-                timestamp,
-                execution_ids: group.iter().map(|e| e.execution_id.clone()).collect(),
-            };
+                total_quantity,
+                buy_order_id,
+                sell_order_id,
+                buyer_account_id,
+                seller_account_id,
+                buy_execution_id,
+                sell_execution_id
+            );
             
             trades.push(trade);
         }

@@ -117,4 +117,23 @@ impl ActorRef for Box<dyn ActorRef> {
     }
 }
 
+impl Clone for Box<dyn ActorRef> {
+    fn clone(&self) -> Self {
+        // 创建一个简单的ActorRef实现来克隆路径
+        struct SimpleActorRef {
+            path: String,
+        }
+        
+        impl ActorRef for SimpleActorRef {
+            fn path(&self) -> String {
+                self.path.clone()
+            }
+        }
+        
+        Box::new(SimpleActorRef {
+            path: self.path(),
+        })
+    }
+}
+
 pub use order::OrderActor; 

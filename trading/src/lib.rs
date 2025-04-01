@@ -2,6 +2,10 @@ pub mod models;
 pub mod actor;
 pub mod execution;
 pub mod risk;
+pub mod cluster;
+
+#[cfg(test)]
+mod tests;
 
 // 重新导出常用类型
 pub use models::order::{
@@ -17,7 +21,8 @@ pub use models::execution::{
 };
 pub use models::message::{
     Message, MessageType,
-    ExecutionNotificationMessage, TradeNotificationMessage
+    ExecutionNotificationMessage, TradeNotificationMessage,
+    LogEntry
 };
 pub use execution::{
     OrderBook, OrderMatcher, MatchResult, 
@@ -25,6 +30,4 @@ pub use execution::{
 };
 pub use actor::OrderActor;
 pub use risk::RiskManager;
-
-// 重新导出actix-cluster的Raft实现
-pub use actix_cluster::raft::{RaftActor, AppendLogRequest, LogEntry}; 
+pub use cluster::TradingClusterManager; 
