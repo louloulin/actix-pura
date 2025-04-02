@@ -5,6 +5,7 @@ use uuid::Uuid;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::fmt;
+use serde_json;
 
 /// 交易系统集群管理器
 /// 负责管理集群节点、节点间通信和消息传递
@@ -191,6 +192,46 @@ impl TradingClusterManager {
         // 在实际实现中，这里应该通过网络发送消息到目标节点
         // 目前仅记录日志作为模拟
         debug!("准备发送消息: {:?}", cluster_msg);
+        
+        Ok(())
+    }
+    
+    /// 发送泛型消息到指定路径
+    pub fn send_typed_message<T: serde::Serialize>(
+        &self,
+        target_path: &str,
+        msg_type: &str,
+        message: T
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        info!("发送类型化消息 {} 到 {}", msg_type, target_path);
+        
+        // 序列化消息内容
+        let payload = match serde_json::to_vec(&message) {
+            Ok(data) => data,
+            Err(e) => {
+                error!("消息序列化失败: {}", e);
+                return Err(Box::new(e));
+            }
+        };
+        
+        // 创建一个集群消息
+        let cluster_msg = ClusterMessage {
+            id: Uuid::new_v4().to_string(),
+            sender_node: self.node_id.clone(),
+            target_node: "unknown".to_string(), // 在实际实现中应该解析目标路径
+            sender_path: "/local/sender".to_string(),
+            target_path: target_path.to_string(),
+            message_type: msg_type.to_string(),
+            payload,
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        };
+        
+        // 在实际实现中，这里应该通过网络发送消息到目标节点
+        // 目前仅记录日志作为模拟
+        debug!("准备发送类型化消息: {:?}", cluster_msg);
         
         Ok(())
     }

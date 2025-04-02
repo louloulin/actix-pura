@@ -42,7 +42,7 @@ async fn create_order(
     cluster_manager: web::Data<Arc<TradingClusterManager>>
 ) -> impl Responder {
     // 将API请求转换为内部OrderRequest信息
-    let _side = match data.side.to_lowercase().as_str() {
+    let side = match data.side.to_lowercase().as_str() {
         "buy" => OrderSide::Buy,
         "sell" => OrderSide::Sell,
         _ => {
@@ -54,7 +54,7 @@ async fn create_order(
         }
     };
     
-    let _order_type = match data.order_type.to_lowercase().as_str() {
+    let order_type = match data.order_type.to_lowercase().as_str() {
         "limit" => OrderType::Limit,
         "market" => OrderType::Market,
         _ => {
@@ -69,8 +69,19 @@ async fn create_order(
     // 创建订单ID
     let order_id = Uuid::new_v4().to_string();
     
-    // 简化：假设发送到订单处理器
-    match cluster_manager.send_message("/user/order", "CREATE_ORDER") {
+    // 创建订单请求对象
+    let order_request = OrderRequest {
+        order_id: Some(order_id.clone()),
+        symbol: data.symbol.clone(),
+        side,
+        price: data.price,
+        quantity: data.quantity,
+        client_id: data.client_id.clone(),
+        order_type,
+    };
+    
+    // 发送到订单处理器
+    match cluster_manager.send_typed_message("/user/order", "CREATE_ORDER", order_request) {
         Ok(_) => {
             HttpResponse::Ok().json(ApiResponse::<String> {
                 success: true,
@@ -92,8 +103,14 @@ async fn cancel_order(
     data: web::Json<CancelOrderRequestDTO>,
     cluster_manager: web::Data<Arc<TradingClusterManager>>
 ) -> impl Responder {
-    // 简化：假设发送到订单处理器
-    match cluster_manager.send_message("/user/order", "CANCEL_ORDER") {
+    // 创建取消订单请求
+    let cancel_request = CancelOrderRequest {
+        order_id: data.order_id.clone(),
+        client_id: data.client_id.clone(),
+    };
+    
+    // 发送到订单处理器
+    match cluster_manager.send_typed_message("/user/order", "CANCEL_ORDER", cancel_request) {
         Ok(_) => {
             HttpResponse::Ok().json(ApiResponse::<String> {
                 success: true,
@@ -112,11 +129,11 @@ async fn cancel_order(
 }
 
 async fn query_orders(
-    _query: web::Query<OrderQuery>,
+    query: web::Query<OrderQuery>,
     cluster_manager: web::Data<Arc<TradingClusterManager>>
 ) -> impl Responder {
-    // 简化：假设发送到订单处理器
-    match cluster_manager.send_message("/user/order", "QUERY_ORDERS") {
+    // 发送到订单处理器
+    match cluster_manager.send_typed_message("/user/order", "QUERY_ORDERS", query.into_inner()) {
         Ok(_) => {
             HttpResponse::Ok().json(ApiResponse::<String> {
                 success: true,
