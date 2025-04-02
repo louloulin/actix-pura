@@ -1,4 +1,4 @@
-use log::{debug, info, warn};
+use log::warn;
 use uuid::Uuid;
 use chrono::Utc;
 

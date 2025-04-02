@@ -1,18 +1,18 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use log::{debug, info, warn, error};
-use chrono::Utc;
+use log::{info, warn, error};
 use uuid::Uuid;
 use actix::prelude::*;
 use async_trait;
 
 use crate::models::order::{
-    Order, OrderSide, OrderType, OrderStatus, 
-    OrderRequest, OrderResult, OrderQuery, CancelOrderRequest
+    Order, OrderStatus, 
+    OrderRequest, OrderResult, OrderQuery, CancelOrderRequest, OrderType, OrderSide
 };
 use crate::models::message::{Message, MessageType, LogEntry};
 use crate::actor::{Actor, ActorRef, ActorContext, MessageHandler};
-use crate::execution::ExecutionEngine;
+use crate::risk::RiskCheckRequest;
+use chrono::Utc;
 
 // Raft相关类型定义
 pub struct AppendLogRequest {
@@ -182,7 +182,7 @@ impl OrderActor {
         let order_id = request.order_id.clone()
             .unwrap_or_else(|| Uuid::new_v4().to_string());
         
-        let mut order = Order::from_request(request.clone());
+        let order = Order::from_request(request.clone());
         
         // 存储订单
         self.store_order(order.clone());

@@ -1,8 +1,7 @@
 use std::sync::Arc;
 use actix::prelude::*;
-use log::{debug, info, warn, error};
+use log::info;
 use crate::actor::account::AccountActor as CustomAccountActor;
-use crate::models::account::Account;
 use crate::actor::{ActorRef, ActorSystem};
 use super::messages::{
     AccountQueryMessage, AccountQueryResult,

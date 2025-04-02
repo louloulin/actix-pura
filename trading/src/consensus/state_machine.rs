@@ -1,8 +1,6 @@
-use std::sync::{Arc, Mutex, RwLock};
 use std::collections::HashMap;
-use log::{info, debug, warn, error};
+use log::{info, warn};
 use serde::{Serialize, Deserialize};
-use uuid::Uuid;
 use crate::models::order::{Order, OrderRequest, OrderStatus};
 use crate::models::account::Account;
 use crate::models::execution::Execution;
@@ -129,7 +127,7 @@ impl StateMachine for TradingStateMachine {
                 self.next_order_id += 1;
                 
                 // 创建订单对象
-                let mut order = Order {
+                let order = Order {
                     order_id: order_id.clone(),
                     account_id: request.client_id.clone(),
                     symbol: request.symbol.clone(),

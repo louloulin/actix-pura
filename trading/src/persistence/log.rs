@@ -1,10 +1,10 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write, Read, Seek, SeekFrom};
+use std::io::{self, Write, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use log::{info, warn, error, debug};
+use log::{error, debug};
 use serde::{Serialize, Deserialize};
 use tokio::sync::Mutex;
 use uuid::Uuid;

@@ -1,7 +1,7 @@
-use crate::models::order::{Order, OrderSide, OrderType, OrderStatus};
 use chrono::Utc;
-use crate::execution::matcher::OrderMatcher;
+use crate::models::order::{Order, OrderSide, OrderType, OrderStatus};
 use crate::execution::order_book::OrderBook;
+use crate::execution::matcher::OrderMatcher;
 
 #[test]
 fn test_remaining_quantity_calculation() {

@@ -1,10 +1,6 @@
 use actix::prelude::*;
 use crate::actor::account::AccountActor;
 use crate::api::adapter::messages::{AccountUpdateMessage, AccountQueryMessage, AccountUpdateResult, AccountQueryResult, FundTransferMessage, FundTransferResult};
-use crate::models::account::Account;
-use std::time::Duration;
-use chrono::Utc;
-use std::collections::HashMap;
 
 #[test]
 fn test_account_actor_create_account() {
@@ -157,8 +153,8 @@ fn test_account_actor_fund_transfer() {
 #[cfg(test)]
 mod order_tests {
     use actix::System;
-    use futures::executor::block_on;
-    use uuid::Uuid;
+    
+    
     use crate::actor::order::{OrderActor, CreateOrderMessage, QueryOrderMessage, CancelOrderMessage};
     use crate::models::order::{OrderRequest, OrderType, OrderSide, OrderQuery, CancelOrderRequest, OrderResult, Order};
     use crate::actor::{Actor, ActorContext, MessageHandler};

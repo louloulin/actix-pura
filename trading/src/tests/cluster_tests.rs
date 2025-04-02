@@ -1,5 +1,5 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use actix::prelude::*;
 use crate::cluster::{
     TradingClusterManager, ClusterMessage, ClusterMessageResult,

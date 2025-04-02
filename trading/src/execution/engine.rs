@@ -1,25 +1,27 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, RwLock};
-use log::{debug, info, warn, error};
+use std::collections::HashMap;
+use log::{info, warn};
 use chrono::Utc;
-use uuid::Uuid;
 use actix::prelude::*;
 use async_trait::async_trait;
 
-use crate::models::order::{Order, OrderSide, OrderType, OrderStatus};
+use crate::models::order::{Order, OrderType, OrderSide, OrderStatus};
 use crate::models::execution::{Execution, Trade};
-use crate::models::message::{Message, MessageType, ExecutionNotificationMessage, TradeNotificationMessage, LogEntry};
 use crate::actor::{Actor, ActorRef, ActorContext, MessageHandler};
+use crate::models::message::{Message, MessageType, ExecutionNotificationMessage, TradeNotificationMessage};
 use super::order_book::OrderBook;
 use super::matcher::{OrderMatcher, MatchResult};
-use crate::actor::order::AppendLogRequest;
-use crate::actor::ActorSystem;
 
 /// 执行消息 - 用于请求订单执行
 pub struct ExecuteOrderMessage {
     pub order: Order,
 }
 
+// 实现actix::Message trait
+impl actix::Message for ExecuteOrderMessage {
+    type Result = ();
+}
+
+// 实现自定义Message trait
 impl Message for ExecuteOrderMessage {
     fn message_type(&self) -> MessageType {
         MessageType::ExecuteOrder
@@ -299,7 +301,7 @@ mod tests {
         let engine_addr = actor_system.create_actor(Box::new(engine)).await;
         
         // 创建测试订单
-        let mut buy_order = Order {
+        let buy_order = Order {
             order_id: "buy1".to_string(),
             account_id: "account1".to_string(),
             symbol: "AAPL".to_string(),
@@ -319,7 +321,7 @@ mod tests {
         let _: Option<MatchResult> = actor_system.ask(engine_addr.clone(), msg).await;
         
         // 创建匹配的卖单
-        let mut sell_order = Order {
+        let sell_order = Order {
             order_id: "sell1".to_string(),
             account_id: "account2".to_string(),
             symbol: "AAPL".to_string(),

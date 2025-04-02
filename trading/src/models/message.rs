@@ -4,9 +4,9 @@ use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::models::order::{Order, OrderRequest, OrderResult, OrderQuery, CancelOrderRequest, OrderSide};
+use crate::models::order::{Order, OrderRequest, OrderResult, CancelOrderRequest, OrderSide};
 use crate::models::execution::{Execution, Trade};
-use crate::models::account::{Account, AccountQuery, AccountResult};
+use crate::models::account::Account;
 
 /// 定义Actor消息，确保实现了actix::Message
 #[derive(Debug, Message)]

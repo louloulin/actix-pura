@@ -1,9 +1,7 @@
-use std::sync::Arc;
-use actix::{Actor, Context, Handler, Addr};
-use log::{info, warn, error, debug};
+use actix::{Actor, Context, Addr};
+use log::{info, error};
 use actix_web::{web, HttpResponse, Error as ActixError};
 use serde::{Serialize, Deserialize};
-use serde_json::json;
 
 // 导入适配器类而不是原始actor
 use crate::api::{
@@ -13,7 +11,6 @@ use crate::api::{
     AccountQueryResult, OrderQueryResult, AccountUpdateResult, FundTransferResult,
     OrderCreateResult, OrderCancelResult
 };
-use crate::actor::ActorSystem;
 use crate::models::order::{Order, OrderSide, OrderType, OrderStatus};
 
 /// API请求处理结果

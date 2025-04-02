@@ -1,7 +1,6 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::time::Duration;
+use std::net::SocketAddr;
 use actix::prelude::*;
-use log::{info, warn, error, debug};
+use log::{info, error, debug};
 use uuid::Uuid;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

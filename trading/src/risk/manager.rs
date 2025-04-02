@@ -1,11 +1,10 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
-use log::{debug, info, warn, error};
+use log::{info, warn};
 use chrono::{DateTime, Utc};
 use async_trait;
 
 use crate::models::order::{OrderRequest, OrderSide};
-use crate::models::account::{Account, Position};
+use crate::models::account::Account;
 use crate::models::message::{Message, MessageType};
 use crate::actor::{Actor, ActorRef, ActorContext, MessageHandler};
 use crate::actor::ActorSystem;

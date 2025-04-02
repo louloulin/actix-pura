@@ -1,9 +1,8 @@
 use std::sync::Arc;
 use actix::prelude::*;
-use log::{debug, info, warn, error};
-use async_trait::async_trait;
+use log::info;
 use crate::actor::order::OrderActor as CustomOrderActor;
-use crate::actor::{ActorRef, ActorContext, ActorSystem};
+use crate::actor::{ActorRef, ActorSystem};
 use crate::models::order::{Order, OrderQuery, OrderResult, CancelOrderRequest, OrderRequest};
 use super::messages::{
     CreateOrderMessage, OrderCreateResult,

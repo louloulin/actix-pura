@@ -1,10 +1,7 @@
-use std::sync::Arc;
-use actix::prelude::*;
-use uuid::Uuid;
 
 use crate::cluster::{TradingClusterManager, ActorType};
-use crate::models::order::{OrderRequest, OrderStatus, OrderType, OrderSide};
-use crate::consensus::state_machine::{StateMachine, StateMachineCommand, StateMachineResponse, TradingStateMachine};
+use crate::models::order::{OrderRequest, OrderType, OrderSide};
+use crate::consensus::state_machine::{StateMachine, StateMachineCommand, TradingStateMachine};
 
 #[test]
 fn test_raft_consensus_basics() {

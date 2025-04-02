@@ -1,17 +1,15 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use actix::{Actor, Context, Handler, Addr};
-use log::{info, warn, error, debug};
+use actix::{Actor, Context, Handler};
+use log::info;
 use uuid::Uuid;
 
-use crate::models::account::{Account, Position};
+use crate::models::account::Account;
 use crate::api::adapter::messages::{
     AccountQueryMessage, AccountQueryResult, 
     AccountUpdateMessage, AccountUpdateResult,
     FundTransferMessage, FundTransferResult
 };
-use crate::models::order::OrderSide;
-use crate::models::execution::Execution;
 
 /// 账户管理Actor
 pub struct AccountActor {

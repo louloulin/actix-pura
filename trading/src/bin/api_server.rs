@@ -42,11 +42,11 @@ async fn create_order(
     cluster_manager: web::Data<Arc<TradingClusterManager>>
 ) -> impl Responder {
     // 将API请求转换为内部OrderRequest信息
-    let side = match data.side.to_lowercase().as_str() {
+    let _side = match data.side.to_lowercase().as_str() {
         "buy" => OrderSide::Buy,
         "sell" => OrderSide::Sell,
         _ => {
-            return HttpResponse::BadRequest().json(ApiResponse {
+            return HttpResponse::BadRequest().json(ApiResponse::<String> {
                 success: false,
                 data: None,
                 error: Some("Invalid order side, must be 'buy' or 'sell'".to_string()),
@@ -54,11 +54,11 @@ async fn create_order(
         }
     };
     
-    let order_type = match data.order_type.to_lowercase().as_str() {
+    let _order_type = match data.order_type.to_lowercase().as_str() {
         "limit" => OrderType::Limit,
         "market" => OrderType::Market,
         _ => {
-            return HttpResponse::BadRequest().json(ApiResponse {
+            return HttpResponse::BadRequest().json(ApiResponse::<String> {
                 success: false,
                 data: None,
                 error: Some("Invalid order type, must be 'limit' or 'market'".to_string()),
@@ -72,14 +72,14 @@ async fn create_order(
     // 简化：假设发送到订单处理器
     match cluster_manager.send_message("/user/order", "CREATE_ORDER") {
         Ok(_) => {
-            HttpResponse::Ok().json(ApiResponse {
+            HttpResponse::Ok().json(ApiResponse::<String> {
                 success: true,
                 data: Some(format!("Order {} submitted successfully", order_id)),
                 error: None,
             })
         },
         Err(e) => {
-            HttpResponse::InternalServerError().json(ApiResponse {
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
                 success: false,
                 data: None,
                 error: Some(format!("Failed to submit order: {}", e)),
@@ -95,14 +95,14 @@ async fn cancel_order(
     // 简化：假设发送到订单处理器
     match cluster_manager.send_message("/user/order", "CANCEL_ORDER") {
         Ok(_) => {
-            HttpResponse::Ok().json(ApiResponse {
+            HttpResponse::Ok().json(ApiResponse::<String> {
                 success: true,
                 data: Some(format!("Cancel request for order {} submitted successfully", data.order_id)),
                 error: None,
             })
         },
         Err(e) => {
-            HttpResponse::InternalServerError().json(ApiResponse {
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
                 success: false,
                 data: None,
                 error: Some(format!("Failed to submit cancel request: {}", e)),
@@ -112,20 +112,20 @@ async fn cancel_order(
 }
 
 async fn query_orders(
-    query: web::Query<OrderQuery>,
+    _query: web::Query<OrderQuery>,
     cluster_manager: web::Data<Arc<TradingClusterManager>>
 ) -> impl Responder {
     // 简化：假设发送到订单处理器
     match cluster_manager.send_message("/user/order", "QUERY_ORDERS") {
         Ok(_) => {
-            HttpResponse::Ok().json(ApiResponse {
+            HttpResponse::Ok().json(ApiResponse::<String> {
                 success: true,
-                data: Some("Query submitted successfully"),
+                data: Some("Query submitted successfully".to_string()),
                 error: None,
             })
         },
         Err(e) => {
-            HttpResponse::InternalServerError().json(ApiResponse {
+            HttpResponse::InternalServerError().json(ApiResponse::<String> {
                 success: false,
                 data: None,
                 error: Some(format!("Failed to submit query: {}", e)),

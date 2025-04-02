@@ -1,14 +1,13 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use actix::prelude::*;
 use log::{info, debug, warn, error};
-use uuid::Uuid;
 use rand::Rng;
 use serde::{Serialize, Deserialize};
 
 use crate::cluster::{ClusterMessage, ClusterMessageResult, TradingClusterManager, ActorType};
-use crate::consensus::state_machine::{StateMachine, StateMachineCommand, StateMachineResponse, TradingStateMachine};
+use crate::consensus::state_machine::{StateMachine, StateMachineCommand, TradingStateMachine};
 
 /// Raft节点状态
 #[derive(Debug, Clone, PartialEq)]
@@ -303,7 +302,7 @@ impl RaftNodeActor {
         self.reset_election_timeout(ctx);
         
         // 获得的票数(包括自己的一票)
-        let mut votes_received = 1;
+        let votes_received = 1;
         let votes_needed = (self.cluster_nodes.len() + 1) / 2 + 1;
         
         // 给集群中其他节点发送请求投票RPC

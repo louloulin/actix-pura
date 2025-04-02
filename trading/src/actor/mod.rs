@@ -3,8 +3,6 @@ pub mod account;
 
 use crate::models::order::{Order, OrderStatus, OrderSide, OrderType};
 use chrono::Utc;
-use crate::actor::order::{CreateOrderMessage, CancelOrderMessage, QueryOrderMessage};
-use crate::models::order::OrderQuery;
 
 /// Actor特性，所有Actor必须实现这个特性
 pub trait Actor {

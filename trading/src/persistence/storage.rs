@@ -1,18 +1,14 @@
 use std::path::{Path, PathBuf};
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write, Seek, SeekFrom};
-use std::sync::{Arc, Mutex};
+use std::io::{self, Read, Write};
+use std::sync::Arc;
 use std::collections::HashMap;
 
-use log::{info, warn, error, debug};
+use log::{warn, error, debug};
 use serde::{Serialize, Deserialize};
 use bincode;
 use tokio::sync::RwLock;
-use uuid::Uuid;
 
-use crate::models::order::Order;
-use crate::models::account::Account;
-use crate::models::execution::Trade;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {

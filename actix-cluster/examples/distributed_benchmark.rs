@@ -12,37 +12,52 @@ use actix_cluster::{
 };
 use log::{info, warn, error, debug};
 use serde::{Serialize, Deserialize};
-use structopt::StructOpt;
+use clap::{Command, Arg, ArgMatches};
 use actix_cluster::registry::ActorRef;
 use actix_cluster::cluster::SimpleActorRef;
 
 // 命令行参数
-#[derive(StructOpt, Debug)]
-#[structopt(name = "分布式基准测试", about = "ActixCluster分布式系统基准测试工具")]
 struct Args {
     /// 节点ID
-    #[structopt(short, long, default_value = "node1")]
     id: String,
 
     /// 绑定地址
-    #[structopt(short, long, default_value = "127.0.0.1:8080")]
     address: SocketAddr,
 
     /// 种子节点地址
-    #[structopt(short, long)]
     seed: Option<String>,
     
     /// 启动多节点测试模式
-    #[structopt(long)]
     multi: bool,
     
     /// 节点数量
-    #[structopt(long, default_value = "10")]
     nodes: usize,
     
     /// 基础端口
-    #[structopt(long, default_value = "9000")]
     base_port: u16,
+}
+
+impl Args {
+    fn from_arg_matches(matches: &ArgMatches) -> Self {
+        let id = matches.get_one::<String>("id").unwrap_or(&"node1".to_string()).clone();
+        let address = matches.get_one::<String>("address").unwrap_or(&"127.0.0.1:8080".to_string())
+            .parse::<SocketAddr>().expect("无效的地址格式");
+        let seed = matches.get_one::<String>("seed").cloned();
+        let multi = matches.get_flag("multi");
+        let nodes = matches.get_one::<String>("nodes").unwrap_or(&"10".to_string())
+            .parse::<usize>().expect("节点数量必须是整数");
+        let base_port = matches.get_one::<String>("base_port").unwrap_or(&"9000".to_string())
+            .parse::<u16>().expect("端口号必须是整数");
+        
+        Self {
+            id,
+            address,
+            seed,
+            multi,
+            nodes,
+            base_port,
+        }
+    }
 }
 
 // 修改性能指标结构体，增加更多分析数据
@@ -842,14 +857,50 @@ async fn run_multi_node_test(node_count: usize, base_port: u16) -> std::io::Resu
     Ok(())
 }
 
-// 修改主函数，更新默认的节点数量
+// 修改主函数，使用clap解析命令行参数
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
     // 初始化日志
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
     
+    // 使用clap解析命令行参数
+    let matches = Command::new("分布式基准测试")
+        .about("ActixCluster分布式系统基准测试工具")
+        .arg(Arg::new("id")
+            .short('i')
+            .long("id")
+            .value_name("ID")
+            .help("节点ID")
+            .default_value("node1"))
+        .arg(Arg::new("address")
+            .short('a')
+            .long("address")
+            .value_name("ADDR")
+            .help("绑定地址")
+            .default_value("127.0.0.1:8080"))
+        .arg(Arg::new("seed")
+            .short('s')
+            .long("seed")
+            .value_name("SEED")
+            .help("种子节点地址"))
+        .arg(Arg::new("multi")
+            .long("multi")
+            .action(clap::ArgAction::SetTrue)
+            .help("启动多节点测试模式"))
+        .arg(Arg::new("nodes")
+            .long("nodes")
+            .value_name("COUNT")
+            .help("节点数量")
+            .default_value("10"))
+        .arg(Arg::new("base_port")
+            .long("base-port")
+            .value_name("PORT")
+            .help("基础端口")
+            .default_value("9000"))
+        .get_matches();
+    
     // 解析命令行参数
-    let args = Args::from_args();
+    let args = Args::from_arg_matches(&matches);
     
     if args.multi {
         // 多节点模式 - 自动启动多个节点

@@ -1,13 +1,13 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
-use std::env;
 use clap::{App, Arg};
 use log::{info, error};
 use actix::prelude::*;
 
 use trading::{
-    OrderActor, ExecutionEngine, RiskManager, TradingClusterManager
+    TradingClusterManager
 };
+use trading::cluster::OrderActor;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 配置命令行参数
@@ -75,17 +75,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("Trading节点已启动: {}", node_id);
             
             // 注册各服务路径
-            cluster_manager.register_actor("/user/order")?;
-            cluster_manager.register_actor("/user/execution")?;
-            cluster_manager.register_actor("/user/risk")?;
+            cluster_manager.register_actor_path("/user/order", trading::cluster::ActorType::Order)?;
+            cluster_manager.register_actor_path("/user/execution", trading::cluster::ActorType::ExecutionEngine)?;
+            cluster_manager.register_actor_path("/user/risk", trading::cluster::ActorType::RiskManager)?;
             
             info!("Actor路径已注册");
             
             // 创建Actix系统
             let system = System::new();
             system.block_on(async {
-                // 启动Actix Actor
-                let order_actor = OrderActor::new(node_id.clone()).start();
+                // 创建订单 Actor（此 OrderActor 已经实现了 Actor trait）
+                let order_actor = OrderActor::new(node_id.clone());
+                let addr = order_actor.start(); // 在 actix 上下文中启动 Actor
                 
                 // 处理订单测试
                 info!("发送测试订单");
@@ -96,7 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     quantity: 1,
                 };
                 
-                match order_actor.send(order_msg).await {
+                match addr.send(order_msg).await {
                     Ok(result) => {
                         match result {
                             Ok(msg) => info!("订单结果: {}", msg),

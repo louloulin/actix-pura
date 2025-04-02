@@ -1,9 +1,9 @@
 use std::sync::Arc;
 use actix::prelude::*;
-use log::{debug, info, warn, error};
+use log::info;
 use crate::risk::manager::RiskManager;
 use crate::risk::manager::{RiskCheckRequest, RiskCheckResult as CustomRiskCheckResult};
-use crate::actor::{ActorRef, ActorContext, ActorSystem};
+use crate::actor::{ActorRef, ActorSystem};
 use crate::models::order::{OrderRequest};
 use super::messages::{RiskCheckMessage, RiskCheckResult};
 use uuid;
