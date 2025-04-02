@@ -1,4 +1,5 @@
 pub mod order;
+pub mod account;
 
 use crate::models::order::{Order, OrderStatus, OrderSide, OrderType};
 use chrono::Utc;

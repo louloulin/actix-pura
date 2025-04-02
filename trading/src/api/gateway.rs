@@ -5,14 +5,15 @@ use actix_web::{web, HttpResponse, Error as ActixError};
 use serde::{Serialize, Deserialize};
 use serde_json::json;
 
-use crate::actor::order::OrderActor;
-use crate::actor::account::AccountActor;
-use crate::risk::manager::RiskActor;
-use crate::models::message::{
+// 导入适配器类而不是原始actor
+use crate::api::{
+    ActixOrderActor, ActixAccountActor, ActixRiskActor,
     AccountQueryMessage, AccountUpdateMessage, FundTransferMessage, 
     CreateOrderMessage, CancelOrderMessage, OrderQueryMessage,
-    SystemConfig, AccountQueryResult, OrderQueryResult
+    AccountQueryResult, OrderQueryResult, AccountUpdateResult, FundTransferResult,
+    OrderCreateResult, OrderCancelResult
 };
+use crate::actor::ActorSystem;
 use crate::models::order::{Order, OrderSide, OrderType, OrderStatus};
 
 /// API请求处理结果
@@ -38,18 +39,20 @@ pub struct CreateOrderRequest {
 /// API网关Actor，处理HTTP请求
 pub struct ApiGatewayActor {
     node_id: String,
-    order_actor: Addr<OrderActor>,
-    account_actor: Addr<AccountActor>,
-    risk_actor: Addr<RiskActor>,
+    // 使用适配器类型而不是原始actor类型
+    order_actor: Addr<ActixOrderActor>,
+    account_actor: Addr<ActixAccountActor>,
+    risk_actor: Addr<ActixRiskActor>,
 }
 
 impl ApiGatewayActor {
     /// 创建新的API网关Actor
     pub fn new(
         node_id: String,
-        order_actor: Addr<OrderActor>,
-        account_actor: Addr<AccountActor>,
-        risk_actor: Addr<RiskActor>,
+        // 更新参数类型为适配器类型
+        order_actor: Addr<ActixOrderActor>,
+        account_actor: Addr<ActixAccountActor>,
+        risk_actor: Addr<ActixRiskActor>,
     ) -> Self {
         Self {
             node_id,
@@ -136,7 +139,8 @@ impl ApiGatewayActor {
         name: String, 
         initial_balance: Option<f64>
     ) -> HttpResponse {
-        let msg = AccountUpdateMessage::CreateAccount {
+        // 创建请求消息，使用正确的结构体形式，而不是枚举变体
+        let msg = AccountUpdateMessage {
             account_id: None,
             name,
             initial_balance: initial_balance.unwrap_or(0.0),
@@ -144,14 +148,14 @@ impl ApiGatewayActor {
         
         match self.account_actor.send(msg).await {
             Ok(result) => match result {
-                crate::models::message::AccountUpdateResult::Success(account) => {
+                AccountUpdateResult::Success(account) => {
                     HttpResponse::Ok().json(ApiResponse {
                         success: true,
                         message: Some("Account created successfully".to_string()),
                         data: Some(account),
                     })
                 },
-                crate::models::message::AccountUpdateResult::Error(err) => {
+                AccountUpdateResult::Error(err) => {
                     HttpResponse::BadRequest().json(ApiResponse::<()> {
                         success: false,
                         message: Some(err),
@@ -187,14 +191,14 @@ impl ApiGatewayActor {
         
         match self.account_actor.send(msg).await {
             Ok(result) => match result {
-                crate::models::message::FundTransferResult::Success(account) => {
+                FundTransferResult::Success(account) => {
                     HttpResponse::Ok().json(ApiResponse {
                         success: true,
                         message: Some("Funds transferred successfully".to_string()),
                         data: Some(account),
                     })
                 },
-                crate::models::message::FundTransferResult::Error(err) => {
+                FundTransferResult::Error(err) => {
                     HttpResponse::BadRequest().json(ApiResponse::<()> {
                         success: false,
                         message: Some(err),
@@ -292,14 +296,14 @@ impl ApiGatewayActor {
         
         match self.order_actor.send(msg).await {
             Ok(result) => match result {
-                crate::models::message::OrderCreateResult::Success(order) => {
+                OrderCreateResult::Success(order) => {
                     HttpResponse::Ok().json(ApiResponse {
                         success: true,
                         message: Some("Order created successfully".to_string()),
                         data: Some(order),
                     })
                 },
-                crate::models::message::OrderCreateResult::Error(err) => {
+                OrderCreateResult::Error(err) => {
                     HttpResponse::BadRequest().json(ApiResponse::<()> {
                         success: false,
                         message: Some(err),
@@ -331,14 +335,14 @@ impl ApiGatewayActor {
         
         match self.order_actor.send(msg).await {
             Ok(result) => match result {
-                crate::models::message::OrderCancelResult::Success => {
+                OrderCancelResult::Success => {
                     HttpResponse::Ok().json(ApiResponse::<()> {
                         success: true,
                         message: Some("Order cancelled successfully".to_string()),
                         data: None,
                     })
                 },
-                crate::models::message::OrderCancelResult::Error(err) => {
+                OrderCancelResult::Error(err) => {
                     HttpResponse::BadRequest().json(ApiResponse::<()> {
                         success: false,
                         message: Some(err),
@@ -445,11 +449,8 @@ impl Actor for ApiGatewayActor {
 }
 
 /// 配置API路由
-pub fn configure_routes(
-    cfg: &mut web::ServiceConfig,
-    api_gateway: web::Data<ApiGatewayActor>,
-) {
-    cfg.app_data(api_gateway.clone())
+pub fn configure_routes(cfg: &mut web::ServiceConfig) {
+    cfg
         // 账户相关API
         .route("/api/accounts", web::get().to(get_accounts))
         .route("/api/accounts", web::post().to(create_account))
