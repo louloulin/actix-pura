@@ -34,7 +34,7 @@ Actix-Pura 是一个具有分布式能力的 Rust 基础 actor 框架，受到 A
 | 序列化 | gRPC 与 protobuf | 自定义序列化 | Proto.Actor 利用标准 |
 | 集群 | 标准提供者（Consul 等） | 自定义实现 | Proto.Actor 更集成 |
 | Actor 模型 | 虚拟 actors 作为一等公民 | 新兴的虚拟 actor 支持 | Actix-Pura 的差距 |
-| 本地亲和性 | 支持 | 未实现 | Actix-Pura 缺少的功能 |
+| 本地亲和性 | 支持 | 已实现 ✅ | 功能已添加 (2024-04-06) |
 | 编程 API | 清晰，对开发者友好 | 功能性但复杂 | 改进机会 |
 | 跨语言 | 有 Go 版本 | 仅 Rust | 不同的目标用例 |
 
@@ -45,7 +45,7 @@ Actix-Pura 是一个具有分布式能力的 Rust 基础 actor 框架，受到 A
 ### 1. 核心架构改进
 
 - [ ] **编程 API 优化**：简化 actor 创建和消息传递 API，使其更加开发者友好（受 Proto.Actor 方法启发）
-- [ ] **本地亲和性机制**：实现类似 Proto.Actor 的本地亲和性机制，优化本地与远程通信
+- [x] **本地亲和性机制**：实现类似 Proto.Actor 的本地亲和性机制，优化本地与远程通信
 - [ ] **增强监督**：使用更复杂的恢复策略改进监督层次结构
 
 ### 2. 序列化与通信
@@ -236,6 +236,39 @@ trait Tool: Send + Sync {
     fn parameter_schema(&self) -> serde_json::Value;
 }
 ```
+
+## 已实现功能详情
+
+### 本地亲和性机制 (2024年4月6日)
+
+本地亲和性机制允许相关的Actor优先部署在同一节点上，以优化通信效率。该实现包括：
+
+1. **PlacementStrategy扩展**：添加了LocalAffinity策略选项，支持指定亲和性分组和回退策略
+   ```rust
+   PlacementStrategy::LocalAffinity {
+       fallback: Box<PlacementStrategy>,
+       group: Option<String>,
+   }
+   ```
+
+2. **位置选择算法**：
+   - 优先选择本地节点
+   - 如果指定了分组，查找运行同一分组Actor的其他节点
+   - 如果前两种策略都不可用，使用回退策略
+
+3. **分组支持**：通过亲和性组ID将相关Actor分组，帮助它们保持在同一节点
+
+4. **全面的测试**：添加了单元测试验证不同场景下的行为：
+   - 本地节点可用时选择本地节点
+   - 有分组亲和性要求时选择同组节点
+   - 无匹配节点时使用回退策略
+
+5. **示例应用**：提供了LocalAffinity使用示例 (`local_affinity_example.rs`)，演示了如何:
+   - 创建使用LocalAffinity的Actor
+   - 配置亲和性分组
+   - 利用本地亲和性优化相关Actor的部署
+
+此功能的实现显著提高了集群中的Actor通信效率，特别是对于频繁交互的Actor组。通过将相关Actor放置在同一节点上，可以减少网络通信开销，提高系统整体性能。
 
 ## 结论
 

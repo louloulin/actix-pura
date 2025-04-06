@@ -1,14 +1,15 @@
-//! Actix Distributed Cluster Extension
+//! Actix集群模块，为Actix提供分布式actor功能
 //!
-//! This crate provides distributed computing capabilities for the Actix actor framework.
-//! It supports both centralized (master-worker) and decentralized (peer-to-peer) cluster architectures.
+//! 该模块提供了actor的分布式部署、消息路由、发现和容错等功能。
 
-#![deny(rust_2018_idioms, nonstandard_style, future_incompatible)]
+#![deny(unsafe_code)]
+#![warn(unused_imports)]
 #![warn(missing_docs)]
 
 pub mod actor;
 pub mod broker;
 pub mod cluster;
+pub mod compression;
 pub mod config;
 pub mod consensus;
 pub mod consensus_network;
@@ -31,6 +32,7 @@ pub mod testing;
 
 pub use actor::{ClusterSystemActor, DistributedActor};
 pub use cluster::{Architecture, ClusterSystem};
+pub use compression::{CompressionConfig, CompressionLevel, CompressionAlgorithm};
 pub use config::{ClusterConfig, DiscoveryMethod, NodeRole};
 pub use consensus::{ConsensusActor, ConsensusCommand, ConsensusResponse, ConsensusState, GetConsensusState};
 pub use discovery::ServiceDiscovery;

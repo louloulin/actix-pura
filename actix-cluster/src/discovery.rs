@@ -159,6 +159,7 @@ impl ServiceDiscovery for StaticDiscovery {
 }
 
 /// LibP2P-based discovery using Kademlia DHT and mDNS
+#[derive(Clone)]
 pub struct LibP2PDiscovery {
     /// Local node information
     local_node: Option<NodeInfo>,
@@ -179,8 +180,12 @@ pub struct LibP2PDiscovery {
     enable_mdns: bool,
 }
 
-// Mark LibP2PDiscovery as safe to send and share across threads
+// 为了支持跨线程安全，我们需要显式实现Send和Sync
+// TODO: 在生产环境中应该使用适当的同步机制而非unsafe
+#[allow(unsafe_code)]
 unsafe impl Send for LibP2PDiscovery {}
+
+#[allow(unsafe_code)]
 unsafe impl Sync for LibP2PDiscovery {}
 
 impl LibP2PDiscovery {

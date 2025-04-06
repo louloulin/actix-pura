@@ -58,47 +58,47 @@ pub struct ClusterSystem {
 }
 
 impl ClusterSystem {
-    /// Create a new cluster system with the given name and configuration
-    pub fn new(name: &str, config: ClusterConfig) -> Self {
-        // Generate node info based on configuration
+    /// Create a new cluster system with the provided configuration
+    pub fn new(config: ClusterConfig) -> Self {
+        info!("Creating new cluster system with name: {}", config.cluster_name);
+        
+        // Create a new local node with provided configuration
         let node_id = NodeId::new();
-        let node_name = format!("{}-{}", name, node_id);
+        println!("Generated node ID: {}", node_id);
+        
+        let bind_addr = config.bind_addr.clone();
+        let public_addr = config.public_addr.clone().unwrap_or_else(|| bind_addr.clone());
+        
+        info!("Cluster node binding to: {}, public address: {}", bind_addr, public_addr);
         
         let local_node = NodeInfo::new(
-            node_id,
-            node_name,
+            node_id.clone(),
+            config.cluster_name.clone(),
             config.node_role.clone(),
-            config.bind_addr,
+            public_addr
         );
         
+        info!("Local node info created: {:?}", local_node);
+
         // Create discovery service based on configuration
         let discovery = crate::discovery::create_discovery_service(config.discovery.clone());
         
-        // 创建注册表并配置缓存
-        let mut registry = ActorRegistry::new(local_node.id.clone());
-        
-        // Configure the registry cache if needed
-        let cache_config = config.get_cache_config();
-        if cache_config.is_enabled() {
-            registry.set_cache_ttl(cache_config.get_ttl());
-            registry.set_max_cache_size(cache_config.get_max_size());
-        } else {
-            registry.disable_cache();
-        }
-        
-        // 将注册表包装在Arc中
-        let registry = Arc::new(registry);
-        
-        ClusterSystem {
-            config,
-            local_node,
+        // Create the cluster system
+        let system = ClusterSystem {
+            config: config.clone(),
+            local_node: local_node.clone(),
             nodes: Arc::new(RwLock::new(HashMap::new())),
             discovery: Arc::new(Mutex::new(discovery)),
             system_actor: None,
             transport: None,
-            registry,
+            registry: Arc::new(ActorRegistry::new(local_node.id.clone())),
             registry_actor: None,
-        }
+        };
+        
+        info!("Cluster system created");
+        
+        // Return the created system
+        system
     }
     
     /// Start the cluster system
@@ -114,10 +114,17 @@ impl ClusterSystem {
                 // 对于去中心化架构，使用P2P传输
                 info!("Creating P2P transport for decentralized architecture");
                 println!("Creating P2P transport for decentralized architecture");
-                let transport = P2PTransport::new(
+                let mut transport = P2PTransport::new(
                     self.local_node.clone(),
-                    self.config.serialization_format,
+                    self.config.serialization_format.clone(),
                 )?;
+                
+                // Set compression configuration if available
+                if let Some(compression_config) = self.config.get_compression_config() {
+                    info!("Setting compression configuration on P2P transport");
+                    transport.set_compression_config(compression_config.clone());
+                }
+                
                 Some(Arc::new(Mutex::new(transport)))
             },
             Architecture::Centralized => {
@@ -125,10 +132,17 @@ impl ClusterSystem {
                     // 对于中心化架构中的对等节点，也使用P2P传输
                     info!("Creating P2P transport for centralized architecture (peer node)");
                     println!("Creating P2P transport for centralized architecture (peer node)");
-                    let transport = P2PTransport::new(
+                    let mut transport = P2PTransport::new(
                         self.local_node.clone(),
-                        self.config.serialization_format,
+                        self.config.serialization_format.clone(),
                     )?;
+                    
+                    // Set compression configuration if available
+                    if let Some(compression_config) = self.config.get_compression_config() {
+                        info!("Setting compression configuration on P2P transport");
+                        transport.set_compression_config(compression_config.clone());
+                    }
+                    
                     Some(Arc::new(Mutex::new(transport)))
                 } else {
                     // 对于中心化架构中的主节点，目前不需要传输层
@@ -146,54 +160,6 @@ impl ClusterSystem {
         self.registry_actor = Some(registry_actor);
         
         println!("Registry actor started");
-        
-        // Create a new instance of the registry with the correct node ID
-        let mut new_registry = ActorRegistry::new(self.local_node.id.clone());
-        
-        // Configure the registry cache from config
-        let cache_config = self.config.get_cache_config();
-        if cache_config.is_enabled() {
-            new_registry.set_cache_ttl(cache_config.get_ttl());
-            new_registry.set_max_cache_size(cache_config.get_max_size());
-        } else {
-            new_registry.disable_cache();
-        }
-        
-        // If we have a transport, set it on the registry first
-        if let Some(transport) = &transport {
-            println!("Setting transport for registry");
-            new_registry.set_transport(transport.clone());
-        }
-        
-        // Replace the old registry with the new one that has transport set
-        self.registry = Arc::new(new_registry);
-        
-        // Now that we have a registry with transport, update the registry_actor
-        if let Some(registry_actor) = &self.registry_actor {
-            // Update the registry actor with our new registry
-            registry_actor.do_send(crate::registry::UpdateRegistry {
-                registry: self.registry.clone(),
-            });
-        }
-        
-        // If we have a transport, set the registry adapter
-        if let Some(transport) = &transport {
-            println!("Setting registry adapter for transport");
-            let mut transport_lock = transport.lock().await;
-            
-            // Set the registry adapter with our updated registry that has transport set
-            transport_lock.set_registry_adapter(self.registry.clone());
-            
-            // 启动传输层
-            if !transport_lock.is_started() {
-                debug!("Starting transport layer");
-                println!("Starting transport layer");
-                transport_lock.init().await?;
-                
-                // Let the transport layer know about itself
-                println!("Transport layer started successfully");
-            }
-        }
         
         // 创建系统Actor
         let system_actor = ClusterSystemActor::new(
@@ -844,8 +810,8 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::time::Duration;
     
-    #[tokio::test]
-    async fn test_cluster_system_creation() {
+    #[test]
+    fn test_cluster_system_creation() {
         let config = ClusterConfig::new()
             .architecture(Architecture::Decentralized)
             .node_role(NodeRole::Peer)
@@ -853,7 +819,7 @@ mod tests {
             .build()
             .unwrap();
         
-        let system = ClusterSystem::new("test", config);
+        let system = ClusterSystem::new(config);
         
         assert_eq!(system.config().architecture, Architecture::Decentralized);
         assert_eq!(system.config().node_role, NodeRole::Peer);

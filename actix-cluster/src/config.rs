@@ -4,6 +4,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 use serde::{Serialize, Deserialize};
 use crate::serialization::SerializationFormat;
+use crate::compression::CompressionConfig;
 use crate::cluster::Architecture;
 use crate::error::{ClusterError, ClusterResult};
 
@@ -172,6 +173,9 @@ pub struct ClusterConfig {
     
     /// Cache configuration
     cache_config: CacheConfig,
+    
+    /// Compression configuration
+    compression_config: Option<CompressionConfig>,
 }
 
 impl Default for ClusterConfig {
@@ -192,6 +196,7 @@ impl Default for ClusterConfig {
             tls_key_path: None,
             cluster_name: "actix-cluster".to_string(),
             cache_config: CacheConfig::default(),
+            compression_config: None,
         }
     }
 }
@@ -297,6 +302,28 @@ impl ClusterConfig {
     /// Get the cache configuration
     pub fn get_cache_config(&self) -> &CacheConfig {
         &self.cache_config
+    }
+    
+    /// Configure compression settings
+    pub fn with_compression_config(mut self, config: CompressionConfig) -> Self {
+        self.compression_config = Some(config);
+        self
+    }
+    
+    /// Get compression configuration
+    pub fn get_compression_config(&self) -> Option<&CompressionConfig> {
+        self.compression_config.as_ref()
+    }
+    
+    /// Check if compression is enabled
+    pub fn is_compression_enabled(&self) -> bool {
+        self.compression_config.as_ref().map_or(false, |c| c.enabled)
+    }
+    
+    /// Helper method for setting node name - same as cluster name
+    pub fn with_node_name(mut self, name: String) -> Self {
+        self.cluster_name = name;
+        self
     }
     
     /// Validate and build the configuration

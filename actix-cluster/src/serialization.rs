@@ -6,6 +6,7 @@
 use std::io;
 use serde::{de::DeserializeOwned, Serialize};
 use crate::error::ClusterError;
+use crate::compression::{CompressionAlgorithm, CompressionLevel, compress, decompress};
 
 /// Serialization format
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -15,6 +16,32 @@ pub enum SerializationFormat {
     
     /// JSON text format (human readable)
     Json,
+    
+    /// Bincode with compression
+    CompressedBincode,
+    
+    /// JSON with compression
+    CompressedJson,
+}
+
+impl SerializationFormat {
+    /// Check if this format uses compression
+    pub fn is_compressed(&self) -> bool {
+        match self {
+            SerializationFormat::CompressedBincode | 
+            SerializationFormat::CompressedJson => true,
+            _ => false,
+        }
+    }
+    
+    /// Get the base format without compression
+    pub fn base_format(&self) -> Self {
+        match self {
+            SerializationFormat::CompressedBincode => SerializationFormat::Bincode,
+            SerializationFormat::CompressedJson => SerializationFormat::Json,
+            _ => *self,
+        }
+    }
 }
 
 /// Serializer trait for different serialization formats
@@ -44,6 +71,12 @@ pub enum Serializer {
     
     /// JSON serializer
     Json(JsonSerializer),
+    
+    /// Compressed Bincode serializer
+    CompressedBincode(CompressedSerializer<BincodeSerializer>),
+    
+    /// Compressed JSON serializer
+    CompressedJson(CompressedSerializer<JsonSerializer>),
 }
 
 impl Serializer {
@@ -52,6 +85,20 @@ impl Serializer {
         match format {
             SerializationFormat::Bincode => Serializer::Bincode(BincodeSerializer::new()),
             SerializationFormat::Json => Serializer::Json(JsonSerializer::new()),
+            SerializationFormat::CompressedBincode => {
+                Serializer::CompressedBincode(CompressedSerializer::new(
+                    BincodeSerializer::new(),
+                    CompressionAlgorithm::Gzip,
+                    CompressionLevel::Default
+                ))
+            },
+            SerializationFormat::CompressedJson => {
+                Serializer::CompressedJson(CompressedSerializer::new(
+                    JsonSerializer::new(),
+                    CompressionAlgorithm::Gzip,
+                    CompressionLevel::Default
+                ))
+            }
         }
     }
     
@@ -60,6 +107,8 @@ impl Serializer {
         match self {
             Serializer::Bincode(s) => s.serialize(value),
             Serializer::Json(s) => s.serialize(value),
+            Serializer::CompressedBincode(s) => s.serialize(value),
+            Serializer::CompressedJson(s) => s.serialize(value),
         }
     }
     
@@ -68,6 +117,8 @@ impl Serializer {
         match self {
             Serializer::Bincode(s) => s.deserialize(bytes),
             Serializer::Json(s) => s.deserialize(bytes),
+            Serializer::CompressedBincode(s) => s.deserialize(bytes),
+            Serializer::CompressedJson(s) => s.deserialize(bytes),
         }
     }
 }
@@ -214,11 +265,113 @@ impl SerializerTrait for JsonSerializer {
     }
 }
 
+/// Compressed serializer that wraps another serializer
+#[derive(Clone)]
+pub struct CompressedSerializer<S> {
+    /// Inner serializer
+    inner: S,
+    /// Compression algorithm
+    algorithm: CompressionAlgorithm,
+    /// Compression level
+    level: CompressionLevel,
+}
+
+impl<S> CompressedSerializer<S> {
+    /// Create a new compressed serializer
+    pub fn new(inner: S, algorithm: CompressionAlgorithm, level: CompressionLevel) -> Self {
+        Self {
+            inner,
+            algorithm,
+            level,
+        }
+    }
+}
+
+impl<S: Clone> CompressedSerializer<S> 
+where 
+    S: SerializerTrait + 'static,
+    S: Clone,
+{
+    /// Clone the inner serializer
+    pub fn inner(&self) -> &S {
+        &self.inner
+    }
+}
+
+impl<S> SerializerTrait for CompressedSerializer<S> 
+where 
+    S: SerializerTrait + 'static,
+    S: Clone,
+{
+    fn serialize_any(&self, value: &dyn std::any::Any) -> Result<Vec<u8>, ClusterError> {
+        let bytes = self.inner.serialize_any(value)?;
+        compress(&bytes, self.algorithm, self.level)
+    }
+    
+    fn deserialize_any(&self, bytes: &[u8]) -> Result<Box<dyn std::any::Any>, ClusterError> {
+        let decompressed = decompress(bytes, self.algorithm)?;
+        self.inner.deserialize_any(&decompressed)
+    }
+    
+    fn clone_box(&self) -> Box<dyn SerializerTrait> {
+        let cloned = CompressedSerializer {
+            inner: self.inner.clone(),
+            algorithm: self.algorithm,
+            level: self.level,
+        };
+        Box::new(cloned)
+    }
+}
+
+/// Specialized implementation for BincodeSerializer
+impl CompressedSerializer<BincodeSerializer> {
+    /// Serialize with strong typing
+    pub fn serialize<T: Serialize>(&self, value: &T) -> Result<Vec<u8>, ClusterError> {
+        let serialized = self.inner.serialize(value)?;
+        compress(&serialized, self.algorithm, self.level)
+    }
+    
+    /// Deserialize with strong typing
+    pub fn deserialize<T: DeserializeOwned>(&self, bytes: &[u8]) -> Result<T, ClusterError> {
+        let decompressed = decompress(bytes, self.algorithm)?;
+        self.inner.deserialize(&decompressed)
+    }
+}
+
+/// Specialized implementation for JsonSerializer
+impl CompressedSerializer<JsonSerializer> {
+    /// Serialize with strong typing
+    pub fn serialize<T: Serialize>(&self, value: &T) -> Result<Vec<u8>, ClusterError> {
+        let serialized = self.inner.serialize(value)?;
+        compress(&serialized, self.algorithm, self.level)
+    }
+    
+    /// Deserialize with strong typing
+    pub fn deserialize<T: DeserializeOwned>(&self, bytes: &[u8]) -> Result<T, ClusterError> {
+        let decompressed = decompress(bytes, self.algorithm)?;
+        self.inner.deserialize(&decompressed)
+    }
+}
+
 /// Create a serializer trait object for the given format
 pub fn create_serializer_trait(format: SerializationFormat) -> Box<dyn SerializerTrait> {
     match format {
         SerializationFormat::Bincode => Box::new(BincodeSerializer::new()),
         SerializationFormat::Json => Box::new(JsonSerializer::new()),
+        SerializationFormat::CompressedBincode => {
+            Box::new(CompressedSerializer::new(
+                BincodeSerializer::new(),
+                CompressionAlgorithm::Gzip,
+                CompressionLevel::Default
+            ))
+        },
+        SerializationFormat::CompressedJson => {
+            Box::new(CompressedSerializer::new(
+                JsonSerializer::new(),
+                CompressionAlgorithm::Gzip,
+                CompressionLevel::Default
+            ))
+        }
     }
 }
 
@@ -315,5 +468,36 @@ mod tests {
             },
             e => panic!("Expected DeserializationError, got {:?}", e),
         }
+    }
+    
+    #[test]
+    fn test_compressed_serialization() {
+        let test_message = TestMessage {
+            id: 123,
+            name: "Test".to_string(),
+            data: vec![0; 1000], // 1KB 的数据，适合压缩
+        };
+        
+        // 测试 Bincode 压缩
+        let serializer = Serializer::from_format(SerializationFormat::CompressedBincode);
+        let serialized = serializer.serialize(&test_message).unwrap();
+        let deserialized: TestMessage = serializer.deserialize(&serialized).unwrap();
+        assert_eq!(deserialized, test_message);
+        
+        // 测试 JSON 压缩
+        let serializer = Serializer::from_format(SerializationFormat::CompressedJson);
+        let serialized = serializer.serialize(&test_message).unwrap();
+        let deserialized: TestMessage = serializer.deserialize(&serialized).unwrap();
+        assert_eq!(deserialized, test_message);
+        
+        // 比较压缩前后的大小
+        let uncompressed_serializer = Serializer::from_format(SerializationFormat::Bincode);
+        let uncompressed = uncompressed_serializer.serialize(&test_message).unwrap();
+        let compressed_serializer = Serializer::from_format(SerializationFormat::CompressedBincode);
+        let compressed = compressed_serializer.serialize(&test_message).unwrap();
+        
+        assert!(compressed.len() < uncompressed.len(), 
+            "Compressed size ({}) should be smaller than uncompressed size ({})", 
+            compressed.len(), uncompressed.len());
     }
 } 

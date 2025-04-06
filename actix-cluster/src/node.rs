@@ -96,7 +96,7 @@ impl fmt::Display for NodeStatus {
 }
 
 /// Actor placement strategies for distributed actors
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlacementStrategy {
     /// Place actor on any node (default)
     Random,
@@ -114,6 +114,15 @@ pub enum PlacementStrategy {
     Redundant {
         /// Number of replicas to create
         replicas: usize,
+    },
+    
+    /// Place actor with local affinity (prefer local node if possible)
+    /// This optimizes communication by keeping actors with related tasks on the same node
+    LocalAffinity {
+        /// Fallback strategy if local placement is not possible
+        fallback: Box<PlacementStrategy>,
+        /// Affinity group ID - actors with same group ID try to stay together
+        group: Option<String>,
     },
 }
 

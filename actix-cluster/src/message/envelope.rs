@@ -26,6 +26,8 @@ pub struct MessageEnvelope {
     pub delivery_guarantee: DeliveryGuarantee,
     /// 序列化的消息内容
     pub payload: Vec<u8>,
+    /// 指示消息是否已压缩
+    pub compressed: bool,
 }
 
 impl actix::Message for MessageEnvelope {
@@ -56,6 +58,7 @@ impl MessageEnvelope {
             message_type,
             delivery_guarantee,
             payload,
+            compressed: false,
         }
     }
     
@@ -81,6 +84,37 @@ impl MessageEnvelope {
             DeliveryGuarantee::AtMostOnce,
             Vec::new(),
         )
+    }
+    
+    /// 使用压缩功能创建一个消息信封
+    pub fn new_compressed(
+        sender_node: NodeId,
+        target_node: NodeId,
+        target_actor: String,
+        message_type: MessageType,
+        delivery_guarantee: DeliveryGuarantee,
+        payload: Vec<u8>,
+    ) -> Self {
+        let mut envelope = Self::new(
+            sender_node,
+            target_node,
+            target_actor,
+            message_type,
+            delivery_guarantee,
+            payload,
+        );
+        envelope.compressed = true;
+        envelope
+    }
+    
+    /// 检查消息是否已压缩
+    pub fn is_compressed(&self) -> bool {
+        self.compressed
+    }
+    
+    /// 设置压缩标志
+    pub fn set_compressed(&mut self, compressed: bool) {
+        self.compressed = compressed;
     }
 }
 
@@ -110,6 +144,7 @@ mod tests {
         assert_eq!(envelope.message_type, MessageType::ActorMessage);
         assert_eq!(envelope.delivery_guarantee, DeliveryGuarantee::AtLeastOnce);
         assert_eq!(envelope.payload, payload);
+        assert_eq!(envelope.compressed, false);
     }
     
     #[test]
@@ -134,5 +169,39 @@ mod tests {
         assert_eq!(ack.target_node, sender);
         assert_eq!(ack.message_type, MessageType::Pong);
         assert_eq!(ack.delivery_guarantee, DeliveryGuarantee::AtMostOnce);
+        assert_eq!(ack.compressed, false);
+    }
+    
+    #[test]
+    fn test_message_compressed_flag() {
+        let sender = NodeId::default();
+        let target = NodeId::new();
+        let target_actor = "test_actor".to_string();
+        let payload = vec![1, 2, 3, 4];
+        
+        let envelope = MessageEnvelope::new_compressed(
+            sender.clone(),
+            target.clone(),
+            target_actor.clone(),
+            MessageType::ActorMessage,
+            DeliveryGuarantee::AtLeastOnce,
+            payload.clone(),
+        );
+        
+        assert_eq!(envelope.is_compressed(), true);
+        
+        let mut normal_envelope = MessageEnvelope::new(
+            sender.clone(),
+            target.clone(),
+            target_actor.clone(),
+            MessageType::ActorMessage,
+            DeliveryGuarantee::AtLeastOnce,
+            payload.clone(),
+        );
+        
+        assert_eq!(normal_envelope.is_compressed(), false);
+        
+        normal_envelope.set_compressed(true);
+        assert_eq!(normal_envelope.is_compressed(), true);
     }
 } 

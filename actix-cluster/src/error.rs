@@ -208,6 +208,14 @@ pub enum ClusterError {
     #[error("Channel closed")]
     ChannelClosed,
     
+    /// Compression error
+    #[error("Compression error: {0}")]
+    CompressionError(String),
+    
+    /// Decompression error
+    #[error("Decompression error: {0}")]
+    DecompressionError(String),
+    
     /// Other error
     #[error("Other error: {0}")]
     Other(String),

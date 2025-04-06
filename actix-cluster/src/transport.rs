@@ -22,7 +22,8 @@ use serde::{Serialize, Deserialize};
 use crate::error::{ClusterError, ClusterResult};
 use crate::node::{NodeId, NodeInfo, NodeStatus};
 use crate::config::NodeRole;
-use crate::serialization::{SerializationFormat, SerializerTrait, BincodeSerializer, JsonSerializer};
+use crate::serialization::{SerializationFormat, SerializerTrait, BincodeSerializer, JsonSerializer, CompressedSerializer};
+use crate::compression::{CompressionAlgorithm, CompressionLevel, CompressionConfig};
 use crate::message::{MessageEnvelope, MessageType, DeliveryGuarantee, ActorPath};
 use crate::message::MessageEnvelopeHandler;
 use crate::registry::ActorRegistry;
@@ -132,6 +133,9 @@ pub struct P2PTransport {
     /// Message serializer
     serializer: Box<dyn SerializerTrait>,
     
+    /// Compression configuration
+    compression_config: Option<CompressionConfig>,
+    
     /// Message receiver channel
     msg_rx: Option<mpsc::Receiver<(NodeId, TransportMessage)>>,
     
@@ -226,8 +230,12 @@ impl From<actix::Addr<MessageEnvelopeHandler>> for MessageHandlerType {
     }
 }
 
-// Make sure P2PTransport implements Send and Sync
+// 为了支持跨线程安全，我们需要显式实现Send和Sync
+// TODO: 在生产环境中应该使用适当的同步机制而非unsafe
+#[allow(unsafe_code)]
 unsafe impl Send for P2PTransport {}
+
+#[allow(unsafe_code)]
 unsafe impl Sync for P2PTransport {}
 
 // Implement Debug for P2PTransport
@@ -249,6 +257,7 @@ impl Clone for P2PTransport {
             local_node: self.local_node.clone(),
             peers: self.peers.clone(),
             serializer: self.serializer.clone_box(),
+            compression_config: self.compression_config.clone(),
             msg_rx: None,
             msg_tx: self.msg_tx.clone(),
             message_handler: self.message_handler.clone(),
@@ -272,7 +281,16 @@ impl P2PTransport {
         let serializer: Box<dyn SerializerTrait> = match serialization_format {
             SerializationFormat::Json => Box::new(JsonSerializer::new()),
             SerializationFormat::Bincode => Box::new(BincodeSerializer::new()),
-            // SerializationFormat只有两个枚举值，不需要默认分支
+            SerializationFormat::CompressedBincode => Box::new(CompressedSerializer::new(
+                BincodeSerializer::new(),
+                CompressionAlgorithm::Gzip,
+                CompressionLevel::Default
+            )),
+            SerializationFormat::CompressedJson => Box::new(CompressedSerializer::new(
+                JsonSerializer::new(),
+                CompressionAlgorithm::Gzip,
+                CompressionLevel::Default
+            )),
         };
         
         info!("Using serialization format: {:?}", serialization_format);
@@ -284,6 +302,7 @@ impl P2PTransport {
             local_node,
             peers: Arc::new(Mutex::new(HashMap::new())),
             serializer,
+            compression_config: None,
             msg_rx: Some(rx),
             msg_tx: Some(tx),
             message_handler: None,
@@ -739,8 +758,11 @@ impl P2PTransport {
         if let Some(connection) = connection_opt {
             println!("Sending message to node {}", target_node);
             
+            // Create a mutable clone of the envelope so we can modify it if needed
+            let mut envelope_to_send = envelope.clone();
+            
             // Create TransportMessage from the envelope
-            let transport_message = TransportMessage::Envelope(envelope);
+            let transport_message = TransportMessage::Envelope(envelope_to_send);
             println!("Created TransportMessage::Envelope for serialization");
             
             // Serialize the message using BincodeSerializer directly
@@ -749,11 +771,39 @@ impl P2PTransport {
             let serialized = match concrete_serializer.serialize(&transport_message) {
                 Ok(data) => {
                     println!("Serialization successful, data size: {}", data.len());
-                    if !data.is_empty() {
-                        let preview_len = std::cmp::min(data.len(), 16);
-                        println!("Serialized data first {} bytes: {:?}", preview_len, &data[0..preview_len]);
+                    
+                    // Check if we should compress the data
+                    if let Some(compression_config) = &self.compression_config {
+                        if compression_config.should_compress(data.len()) {
+                            println!("Message is large enough for compression ({}), applying compression", data.len());
+                            
+                            // Try to compress the data
+                            match crate::compression::auto_compress(&data, compression_config) {
+                                Ok((compressed_data, was_compressed)) => {
+                                    if was_compressed {
+                                        println!("Data compressed from {} to {} bytes ({}% reduction)",
+                                            data.len(), compressed_data.len(),
+                                            (100.0 - (compressed_data.len() as f64 * 100.0 / data.len() as f64)) as u32);
+                                        // Return the compressed data
+                                        compressed_data
+                                    } else {
+                                        println!("Compression was not effective, using original data");
+                                        data
+                                    }
+                                },
+                                Err(e) => {
+                                    println!("Compression failed: {}, using original data", e);
+                                    data
+                                }
+                            }
+                        } else {
+                            println!("Message too small for compression ({}), skipping", data.len());
+                            data
+                        }
+                    } else {
+                        // No compression configured
+                        data
                     }
-                    data
                 },
                 Err(e) => {
                     error!("Failed to serialize message: {}", e);
@@ -1060,6 +1110,21 @@ impl P2PTransport {
         
         debug!("Reconnected to {} disconnected peers", reconnected_count);
         Ok(reconnected_count)
+    }
+
+    /// 设置压缩配置
+    pub fn set_compression_config(&mut self, config: CompressionConfig) {
+        self.compression_config = Some(config);
+    }
+    
+    /// 获取压缩配置
+    pub fn get_compression_config(&self) -> Option<&CompressionConfig> {
+        self.compression_config.as_ref()
+    }
+    
+    /// 检查是否启用压缩
+    pub fn is_compression_enabled(&self) -> bool {
+        self.compression_config.as_ref().map_or(false, |c| c.enabled)
     }
 }
 
