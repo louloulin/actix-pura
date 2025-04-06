@@ -44,7 +44,7 @@ Actix-Pura 是一个具有分布式能力的 Rust 基础 actor 框架，受到 A
 
 ### 1. 核心架构改进
 
-- [ ] **编程 API 优化**：简化 actor 创建和消息传递 API，使其更加开发者友好（受 Proto.Actor 方法启发）
+- [x] **编程 API 优化**：简化 actor 创建和消息传递 API，使其更加开发者友好（受 Proto.Actor 方法启发）
 - [x] **本地亲和性机制**：实现类似 Proto.Actor 的本地亲和性机制，优化本地与远程通信
 - [ ] **增强监督**：使用更复杂的恢复策略改进监督层次结构
 
@@ -269,6 +269,43 @@ trait Tool: Send + Sync {
    - 利用本地亲和性优化相关Actor的部署
 
 此功能的实现显著提高了集群中的Actor通信效率，特别是对于频繁交互的Actor组。通过将相关Actor放置在同一节点上，可以减少网络通信开销，提高系统整体性能。
+
+### 编程 API 优化 (2024年4月6日)
+
+API优化实现使Actor创建和使用更加直观和开发者友好，参考了Proto.Actor的设计理念。具体改进包括：
+
+1. **ActorProps构建器模式**：添加了流式API用于配置Actor
+   ```rust
+   let addr = actor.props()
+       .with_path("/user/custom-path")
+       .with_local_affinity(Some("group1"), PlacementStrategy::RoundRobin)
+       .with_format(SerializationFormat::Json)
+       .start();
+   ```
+
+2. **简化的Actor创建**：添加了factory函数简化创建过程
+   ```rust
+   let addr = actor(MyActor::new())
+       .with_round_robin()
+       .start();
+   ```
+
+3. **异步API增强**：添加了更好的异步支持和超时处理
+   ```rust
+   // 使用超时的ask模式
+   let result = actor_ref.ask_async(&addr, SomeMessage, Duration::from_secs(5)).await?;
+   ```
+
+4. **策略配置简化**：添加了描述性方法简化放置策略配置
+   ```rust
+   let props = actor.props()
+       .with_local_affinity(...)   // 本地亲和性
+       .with_round_robin()         // 轮询策略
+       .with_least_loaded()        // 最小负载策略
+       .with_redundancy(3);        // 冗余部署
+   ```
+
+此功能的实现大大提高了框架的可用性和开发体验，使复杂的分布式actor配置变得更加简单和直观。新API减少了样板代码，并通过流式接口使代码更具可读性。
 
 ## 结论
 

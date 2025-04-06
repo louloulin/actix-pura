@@ -219,6 +219,14 @@ pub enum ClusterError {
     /// Other error
     #[error("Other error: {0}")]
     Other(String),
+
+    /// Actor error
+    #[error("Actor error: {0}")]
+    ActorError(String),
+    
+    /// Timeout error
+    #[error("Timeout: {0}")]
+    Timeout(String),
 }
 
 /// Type alias for Result with ClusterError

@@ -23,6 +23,7 @@ pub mod placement;
 pub mod registry;
 pub mod security;
 pub mod serialization;
+pub mod supervision;
 pub mod sync;
 pub mod transport;
 
@@ -43,6 +44,7 @@ pub use node::{Node, NodeId, NodeInfo, NodeStatus, PlacementStrategy};
 pub use placement::{NodeSelector, PlacementStrategyImpl};
 pub use registry::{ActorRef, LocalActorRef};
 pub use serialization::{BincodeSerializer, JsonSerializer, SerializationFormat, Serializer, SerializerTrait};
+pub use supervision::{SupervisionStrategy, SupervisedDistributedActor, DistributedSupervisor, SupervisorActor};
 
 /// Re-exports from the actix crate
 pub mod prelude {
@@ -50,6 +52,6 @@ pub mod prelude {
     pub use crate::{
         Architecture, ClusterConfig, ClusterSystem, ConsensusActor, ConsensusCommand, ConsensusState,
         DiscoveryMethod, DistributedActor, MigratableActor, MigrationReason, Node, NodeId, NodeInfo,
-        NodeRole, PlacementStrategy, SerializationFormat,
+        NodeRole, PlacementStrategy, SerializationFormat, SupervisionStrategy, SupervisedDistributedActor,
     };
 } 

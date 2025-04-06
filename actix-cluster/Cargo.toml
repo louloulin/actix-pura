@@ -59,4 +59,8 @@ path = "examples/cluster_benchmark.rs"
 
 [[example]]
 name = "distributed_benchmark"
-path = "examples/distributed_benchmark.rs" 
+path = "examples/distributed_benchmark.rs"
+
+[[example]]
+name = "api_optimization"
+path = "examples/api_optimization/main.rs" 
