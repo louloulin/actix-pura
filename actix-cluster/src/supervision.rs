@@ -263,7 +263,7 @@ where
     A: SupervisedDistributedActor + Send + Sync + 'static,
 {
     /// Actor factory
-    factory: Box<dyn Fn() -> A + Send + Sync + 'static>,
+    factory: Arc<dyn Fn() -> A + Send + Sync + 'static>,
     /// Supervision strategy
     strategy: SupervisionStrategy,
     /// Restart count
@@ -292,7 +292,7 @@ where
         let strategy = strategy.unwrap_or_else(|| actor.supervision_strategy());
         
         Self {
-            factory: Box::new(factory),
+            factory: Arc::new(factory),
             strategy,
             restart_count: 0,
             last_restart: None,
@@ -564,7 +564,7 @@ where
 /// Implementation for getting actor address
 impl<A> Handler<GetActorAddr<A>> for SupervisorActor<A>
 where
-    A: SupervisedDistributedActor,
+    A: SupervisedDistributedActor + Send + Sync + 'static,
 {
     type Result = Option<Addr<A>>;
     

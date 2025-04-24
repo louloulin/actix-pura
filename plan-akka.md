@@ -46,7 +46,7 @@ Actix-Pura 是一个具有分布式能力的 Rust 基础 actor 框架，受到 A
 
 - [x] **编程 API 优化**：简化 actor 创建和消息传递 API，使其更加开发者友好（受 Proto.Actor 方法启发）
 - [x] **本地亲和性机制**：实现类似 Proto.Actor 的本地亲和性机制，优化本地与远程通信
-- [ ] **增强监督**：使用更复杂的恢复策略改进监督层次结构
+- [x] **增强监督**：使用更复杂的恢复策略改进监督层次结构
 
 ### 2. 序列化与通信
 
@@ -306,6 +306,96 @@ API优化实现使Actor创建和使用更加直观和开发者友好，参考了
    ```
 
 此功能的实现大大提高了框架的可用性和开发体验，使复杂的分布式actor配置变得更加简单和直观。新API减少了样板代码，并通过流式接口使代码更具可读性。
+
+### 增强监督 (2024年7月1日)
+
+增强监督功能实现了更复杂的故障恢复策略和分布式环境下的actor监督机制，参考了Akka的监督模型。实现包括：
+
+1. **灵活的监督策略**：提供了多种故障处理策略
+   ```rust
+   enum SupervisionStrategy {
+       // 在同一节点重启actor
+       Restart { max_restarts: usize, window: Duration, delay: Duration },
+       // 停止actor不尝试恢复
+       Stop,
+       // 将故障上报给父级监督者
+       Escalate,
+       // 在不同节点重启actor
+       Relocate { placement: PlacementStrategy, max_relocations: usize, delay: Duration },
+       // 忽略故障继续执行
+       Resume,
+       // 根据错误类型选择不同策略
+       Match { default: Box<SupervisionStrategy>, matchers: Vec<SupervisionMatcher> },
+   }
+   ```
+
+2. **基于错误类型的监督**：支持根据不同错误类型应用不同的监督策略
+   ```rust
+   let strategy = SupervisionStrategy::Match {
+       default: Box::new(SupervisionStrategy::Restart { ... }),
+       matchers: vec![
+           SupervisionMatcher {
+               error_type: "std::io::Error".to_string(),
+               strategy: Box::new(SupervisionStrategy::Relocate { ... }),
+           },
+           SupervisionMatcher {
+               error_type: "MyCustomError".to_string(),
+               strategy: Box::new(SupervisionStrategy::Stop),
+           },
+       ],
+   };
+   ```
+
+3. **监督生命周期钩子**：为分布式actor提供监督生命周期事件通知
+   ```rust
+   impl SupervisedDistributedActor for MyActor {
+       fn before_restart(&mut self, ctx: &mut Context<Self>, failure: Option<FailureInfo>) {
+           // 重启前的清理逻辑
+       }
+       
+       fn after_restart(&mut self, ctx: &mut Context<Self>, failure: Option<FailureInfo>) {
+           // 重启后的初始化逻辑
+       }
+       
+       fn before_relocate(&mut self, ctx: &mut Context<Self>, target_node: NodeId, failure: Option<FailureInfo>) {
+           // 迁移前的准备逻辑
+       }
+   }
+   ```
+
+4. **故障信息跟踪**：记录详细的故障信息，包括失败时间、故障类型和重启次数
+   ```rust
+   pub struct FailureInfo {
+       pub actor_path: String,
+       pub node_id: NodeId,
+       pub time: u64,
+       pub error: String,
+       pub error_type: String,
+       pub restart_count: usize,
+       pub failure_id: Uuid,
+   }
+   ```
+
+5. **用于监督的Fluent API**：为actor监督提供简洁的配置接口
+   ```rust
+   let supervised_actor = actor.props()
+       .with_supervision(
+           SupervisionStrategy::Restart {
+               max_restarts: 5,
+               window: Duration::from_secs(60),
+               delay: Duration::from_millis(500),
+           }
+       )
+       .start();
+   ```
+
+6. **示例应用**：提供了增强监督示例 (`supervised_actor.rs`)，演示了如何:
+   - 配置不同的监督策略
+   - 处理actor故障
+   - 实现故障恢复机制
+   - 监控故障历史
+
+此功能实现大大提升了系统的弹性，使分布式actor系统能更优雅地处理各种故障场景。新的监督机制使开发者能够为不同类型的actor配置最适合的恢复策略，从而提高系统的整体可用性和稳定性。
 
 ## 结论
 

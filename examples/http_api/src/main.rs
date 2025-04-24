@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use actix::prelude::*;
 use actix_web::{web, App, HttpResponse, HttpServer, Responder, middleware, Error};
 use actix_cluster::{
-    ClusterSystem, ClusterConfig, Architecture, NodeRole, 
+    ClusterSystem, ClusterConfig, Architecture, NodeRole,
     SerializationFormat, NodeId, AnyMessage
 };
 use log::{info, warn, error, debug};
@@ -90,7 +90,7 @@ impl UserServiceActor {
             next_id: 1,
         }
     }
-    
+
     fn now_millis() -> u64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -101,7 +101,7 @@ impl UserServiceActor {
 
 impl Actor for UserServiceActor {
     type Context = Context<Self>;
-    
+
     fn started(&mut self, _: &mut Self::Context) {
         info!("UserServiceActor started on node {}", self.node_id);
     }
@@ -110,21 +110,21 @@ impl Actor for UserServiceActor {
 // Create user handler
 impl Handler<CreateUser> for UserServiceActor {
     type Result = Result<User, String>;
-    
+
     fn handle(&mut self, msg: CreateUser, _: &mut Self::Context) -> Self::Result {
         let id = format!("user-{}", self.next_id);
         self.next_id += 1;
-        
+
         let user = User {
             id: id.clone(),
             name: msg.name,
             email: msg.email,
             created_at: Self::now_millis(),
         };
-        
+
         info!("Creating user: {}", id);
         self.users.insert(id, user.clone());
-        
+
         Ok(user)
     }
 }
@@ -132,7 +132,7 @@ impl Handler<CreateUser> for UserServiceActor {
 // Get user handler
 impl Handler<GetUser> for UserServiceActor {
     type Result = Result<User, String>;
-    
+
     fn handle(&mut self, msg: GetUser, _: &mut Self::Context) -> Self::Result {
         match self.users.get(&msg.id) {
             Some(user) => {
@@ -150,7 +150,7 @@ impl Handler<GetUser> for UserServiceActor {
 // List users handler
 impl Handler<ListUsers> for UserServiceActor {
     type Result = Result<Vec<User>, String>;
-    
+
     fn handle(&mut self, _: ListUsers, _: &mut Self::Context) -> Self::Result {
         info!("Listing {} users", self.users.len());
         Ok(self.users.values().cloned().collect())
@@ -160,7 +160,7 @@ impl Handler<ListUsers> for UserServiceActor {
 // Delete user handler
 impl Handler<DeleteUser> for UserServiceActor {
     type Result = Result<bool, String>;
-    
+
     fn handle(&mut self, msg: DeleteUser, _: &mut Self::Context) -> Self::Result {
         if self.users.remove(&msg.id).is_some() {
             info!("Deleted user: {}", msg.id);
@@ -175,7 +175,7 @@ impl Handler<DeleteUser> for UserServiceActor {
 // Handle AnyMessage for cluster communication
 impl Handler<AnyMessage> for UserServiceActor {
     type Result = ();
-    
+
     fn handle(&mut self, msg: AnyMessage, ctx: &mut Self::Context) -> Self::Result {
         // Handle each message type, extracting by reference from the AnyMessage
         // and creating a new instance of the appropriate message type to handle
@@ -218,7 +218,7 @@ async fn create_user(
         name: req.name.clone(),
         email: req.email.clone(),
     };
-    
+
     match data.user_service.send(msg).await {
         Ok(result) => match result {
             Ok(user) => Ok(HttpResponse::Ok().json(user)),
@@ -237,7 +237,7 @@ async fn get_user(
 ) -> Result<impl Responder, Error> {
     let id = path.0.clone();
     let msg = GetUser { id };
-    
+
     match data.user_service.send(msg).await {
         Ok(result) => match result {
             Ok(user) => Ok(HttpResponse::Ok().json(user)),
@@ -271,7 +271,7 @@ async fn delete_user(
 ) -> Result<impl Responder, Error> {
     let id = path.0.clone();
     let msg = DeleteUser { id };
-    
+
     match data.user_service.send(msg).await {
         Ok(result) => match result {
             Ok(_) => Ok(HttpResponse::NoContent().finish()),
@@ -294,7 +294,7 @@ async fn health(
             let cluster_guard = data.cluster.lock().unwrap();
             cluster_guard.is_some() // Presence of cluster means it's initialized
         };
-        
+
         if cluster_connected {
             Ok(HttpResponse::Ok().json(serde_json::json!({
                 "status": "healthy",
@@ -321,7 +321,7 @@ async fn health(
 async fn start_server(args: Args) -> std::io::Result<()> {
     // Create user service actor
     let user_service = UserServiceActor::new(args.id.clone()).start();
-    
+
     // Set up cluster configuration
     let mut config = ClusterConfig::new()
         .architecture(Architecture::Decentralized)
@@ -329,42 +329,42 @@ async fn start_server(args: Args) -> std::io::Result<()> {
         .bind_addr(args.cluster_address)
         .cluster_name("http-api-cluster".to_string())
         .serialization_format(SerializationFormat::Bincode);
-    
+
     // Add seed node if specified
     if let Some(seed) = args.seed {
         info!("Adding seed node: {}", seed);
         config = config.seed_nodes(vec![seed]);
     }
-    
+
     let config = config.build().expect("Failed to create cluster configuration");
-    
+
     // Create and start cluster system
-    let mut sys = ClusterSystem::new(&args.id, config);
+    let mut sys = ClusterSystem::new(config);
     let cluster_start_result = sys.start().await;
-    
+
     match cluster_start_result {
         Ok(_) => info!("Cluster started at {}", args.cluster_address),
         Err(e) => error!("Failed to start cluster: {}", e),
     }
-    
+
     // Register user service actor with the cluster
     let service_path = "/user/services/user";
-    
+
     match sys.register(service_path, user_service.clone()).await {
         Ok(_) => info!("User service registered at {}", service_path),
         Err(e) => error!("Failed to register user service: {}", e),
     }
-    
+
     // Create shared app state
     let cluster_mutex = Arc::new(StdMutex::new(Some(sys)));
     let app_state = web::Data::new(AppState {
         user_service,
         cluster: cluster_mutex.clone(),
     });
-    
+
     // Start HTTP server
     info!("Starting HTTP server at {}", args.http_address);
-    
+
     HttpServer::new(move || {
         App::new()
             .app_data(app_state.clone())
@@ -381,7 +381,7 @@ async fn start_server(args: Args) -> std::io::Result<()> {
     .bind(args.http_address)?
     .run()
     .await?;
-    
+
     // Clean up
     {
         let mut cluster_guard = cluster_mutex.lock().unwrap();
@@ -390,7 +390,7 @@ async fn start_server(args: Args) -> std::io::Result<()> {
             // Just drop the cluster instance
         }
     }
-    
+
     Ok(())
 }
 
@@ -398,18 +398,18 @@ async fn start_server(args: Args) -> std::io::Result<()> {
 async fn main() -> std::io::Result<()> {
     // Initialize logging
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
-    
+
     // Parse command line arguments
     let args = Args::from_args();
-    
+
     info!("Starting node ID: {}", args.id);
     info!("Cluster address: {}", args.cluster_address);
     info!("HTTP address: {}", args.http_address);
-    
+
     if let Some(seed) = &args.seed {
         info!("Seed node: {}", seed);
     }
-    
+
     // Start server
     start_server(args).await
-} 
+}

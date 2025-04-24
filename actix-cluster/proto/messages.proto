@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package actix_cluster;
+
+// Import Google's well-known type definitions
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/any.proto";
+
+// Node identification
+message NodeIdProto {
+  string id = 1;
+  bool is_local = 2;
+}
+
+// Actor path for identifying actors in the cluster
+message ActorPathProto {
+  NodeIdProto node_id = 1;
+  string path = 2;
+}
+
+// Different message delivery guarantees
+enum DeliveryGuaranteeProto {
+  AT_MOST_ONCE = 0;
+  AT_LEAST_ONCE = 1;
+  EXACTLY_ONCE = 2;
+}
+
+// Types of messages in the system
+enum MessageTypeProto {
+  ACTOR_MESSAGE = 0;
+  SYSTEM_CONTROL = 1;
+  DISCOVERY = 2;
+  PING = 3;
+  PONG = 4;
+  CUSTOM = 5;
+}
+
+// Custom message type identifier
+message CustomMessageTypeProto {
+  MessageTypeProto base_type = 1;
+  string custom_type = 2;
+}
+
+// Message envelope for routing and tracking messages
+message MessageEnvelopeProto {
+  string message_id = 1;
+  NodeIdProto sender_node = 2;
+  NodeIdProto target_node = 3;
+  string target_actor = 4;
+  google.protobuf.Timestamp timestamp = 5;
+  MessageTypeProto message_type = 6;
+  string custom_message_type = 7; // Only used when message_type is CUSTOM
+  DeliveryGuaranteeProto delivery_guarantee = 8;
+  bytes payload = 9;
+  bool compressed = 10;
+}
+
+// Transport message for cluster communication
+message TransportMessageProto {
+  enum TransportMessageType {
+    DATA = 0;
+    ACK = 1;
+    DISCOVERY = 2;
+    HEALTH_CHECK = 3;
+    SYSTEM = 4;
+  }
+  
+  string id = 1;
+  TransportMessageType type = 2;
+  NodeIdProto source = 3;
+  NodeIdProto target = 4;
+  google.protobuf.Timestamp sent_at = 5;
+  repeated MessageEnvelopeProto envelopes = 6;
+  map<string, string> headers = 7;
+}
+
+// Node information for discovery and clustering
+message NodeInfoProto {
+  NodeIdProto id = 1;
+  string host = 2;
+  int32 port = 3;
+  repeated string roles = 4;
+  map<string, string> metadata = 5;
+  google.protobuf.Timestamp last_seen = 6;
+  string status = 7;
+  double load = 8;
+} 
