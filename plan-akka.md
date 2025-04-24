@@ -52,7 +52,7 @@ Actix-Pura 是一个具有分布式能力的 Rust 基础 actor 框架，受到 A
 
 - [ ] **标准集成**：不使用自定义序列化，而是利用行业标准如 gRPC 与 Protocol Buffers（受 Proto.Actor 启发）
 - [ ] **可插拔传输**：实现更模块化的传输系统，允许不同的通信机制
-- [ ] **消息压缩**：为大型消息添加自动压缩
+- [x] **消息压缩**：为大型消息添加自动压缩
 - [ ] **通信安全**：为安全的 actor 通信实现 TLS 和认证
 
 ### 3. 集群增强
@@ -352,11 +352,11 @@ API优化实现使Actor创建和使用更加直观和开发者友好，参考了
        fn before_restart(&mut self, ctx: &mut Context<Self>, failure: Option<FailureInfo>) {
            // 重启前的清理逻辑
        }
-       
+
        fn after_restart(&mut self, ctx: &mut Context<Self>, failure: Option<FailureInfo>) {
            // 重启后的初始化逻辑
        }
-       
+
        fn before_relocate(&mut self, ctx: &mut Context<Self>, target_node: NodeId, failure: Option<FailureInfo>) {
            // 迁移前的准备逻辑
        }
@@ -401,4 +401,4 @@ API优化实现使Actor创建和使用更加直观和开发者友好，参考了
 
 Actix-Pura 有潜力成为领先的基于 Rust 的分布式 actor 框架，结合了 Akka 和 Proto.Actor 等既定系统的最佳特性，同时保持 Rust 的性能和安全保证。通过解决已确定的改进领域并添加 AI agent 能力，Actix-Pura 可以同时作为传统分布式计算平台和高级 AI 系统的基础。
 
-该实施计划提供了在未来 18 个月内增强框架的结构化方法，从核心改进到高级 AI 集成的明确进展。 
+该实施计划提供了在未来 18 个月内增强框架的结构化方法，从核心改进到高级 AI 集成的明确进展。

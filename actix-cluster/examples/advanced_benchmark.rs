@@ -10,7 +10,7 @@ use std::fs::File;
 use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 
 use actix_cluster::{
-    Architecture, ClusterConfig, ClusterSystem, DiscoveryMethod, 
+    Architecture, ClusterConfig, ClusterSystem, DiscoveryMethod,
     NodeRole, SerializationFormat, NodeInfo
 };
 
@@ -92,7 +92,7 @@ impl Metrics {
         sorted_latencies.sort();
 
         let len = sorted_latencies.len();
-        
+
         // 计算不同百分位的延迟
         self.percentiles.insert(50, sorted_latencies[len * 50 / 100]);
         self.percentiles.insert(90, sorted_latencies[len * 90 / 100]);
@@ -106,12 +106,12 @@ impl Metrics {
         println!("成功消息数: {}", self.successful_messages);
         println!("失败消息数: {}", self.failed_messages);
         println!("总耗时: {:?}", self.total_time);
-        
+
         if !self.latencies.is_empty() {
             let min = self.latencies.iter().min().unwrap();
             let max = self.latencies.iter().max().unwrap();
             let avg: Duration = self.latencies.iter().sum::<Duration>() / self.latencies.len() as u32;
-            
+
             println!("\n延迟统计:");
             println!("  最小延迟: {:?}", min);
             println!("  最大延迟: {:?}", max);
@@ -121,11 +121,11 @@ impl Metrics {
             println!("  P95 延迟: {:?}", self.percentiles.get(&95).unwrap_or(&Duration::from_secs(0)));
             println!("  P99 延迟: {:?}", self.percentiles.get(&99).unwrap_or(&Duration::from_secs(0)));
         }
-        
+
         println!("\n吞吐量统计:");
         println!("  消息吞吐量: {:.2} 消息/秒", self.throughput);
         println!("  数据吞吐量: {:.2} MB/秒", self.data_throughput);
-        
+
         if !self.errors.is_empty() {
             println!("\n错误统计:");
             for (error, count) in &self.errors {
@@ -136,15 +136,15 @@ impl Metrics {
 
     fn save_to_csv(&self, filename: &str) -> std::io::Result<()> {
         let mut file = File::create(filename)?;
-        
+
         // 写入CSV头
         writeln!(file, "消息ID,延迟(ms)")?;
-        
+
         // 写入所有延迟数据
         for (i, latency) in self.latencies.iter().enumerate() {
             writeln!(file, "{},{}", i, latency.as_millis())?;
         }
-        
+
         Ok(())
     }
 }
@@ -161,7 +161,7 @@ struct BenchmarkActor {
 
 impl Actor for BenchmarkActor {
     type Context = Context<Self>;
-    
+
     fn started(&mut self, _ctx: &mut Self::Context) {
         log::info!("BenchmarkActor started: {}", self.name);
     }
@@ -169,15 +169,15 @@ impl Actor for BenchmarkActor {
 
 impl Handler<BenchmarkMessage> for BenchmarkActor {
     type Result = MessageResult<BenchmarkMessage>;
-    
+
     fn handle(&mut self, msg: BenchmarkMessage, _ctx: &mut Self::Context) -> Self::Result {
         // 记录消息接收
         self.received_count += 1;
-        
+
         if self.received_count % 1000 == 0 {
             log::info!("{} received {} messages", self.name, self.received_count);
         }
-        
+
         // 创建响应
         let response = BenchmarkResponse {
             id: msg.id,
@@ -185,23 +185,23 @@ impl Handler<BenchmarkMessage> for BenchmarkActor {
             response_timestamp: Instant::now(),
             responder_node: self.name.clone(),
         };
-        
+
         MessageResult(response)
     }
 }
 
 impl Handler<BenchmarkResponse> for BenchmarkActor {
     type Result = ();
-    
+
     fn handle(&mut self, msg: BenchmarkResponse, _ctx: &mut Self::Context) -> Self::Result {
         // 计算延迟
         let latency = msg.response_timestamp.duration_since(msg.original_timestamp);
-        
+
         // 记录延迟
         self.latencies.push(latency);
-        
+
         if self.latencies.len() % 1000 == 0 {
-            log::info!("{} received {} responses, latest latency: {:?}", 
+            log::info!("{} received {} responses, latest latency: {:?}",
                       self.name, self.latencies.len(), latency);
         }
     }
@@ -215,20 +215,20 @@ impl Message for FinishBenchmark {
 
 impl Handler<FinishBenchmark> for BenchmarkActor {
     type Result = ();
-    
+
     fn handle(&mut self, _msg: FinishBenchmark, _ctx: &mut Self::Context) -> Self::Result {
         log::info!("{} finishing benchmark", self.name);
-        
+
         // 创建指标结果
         let mut metrics = Metrics::new();
         metrics.total_messages = self.sent_count;
         metrics.successful_messages = self.latencies.len() as u64;
         metrics.failed_messages = self.sent_count - self.latencies.len() as u64;
         metrics.latencies = self.latencies.clone();
-        
+
         // 计算百分位数
         metrics.calculate_percentiles();
-        
+
         // 发送结果
         if let Some(sender) = self.result_sender.take() {
             let _ = sender.try_send(metrics);
@@ -256,7 +256,7 @@ struct SetSentCount(u64);
 
 impl Handler<SetSentCount> for BenchmarkActor {
     type Result = ();
-    
+
     fn handle(&mut self, msg: SetSentCount, _ctx: &mut Self::Context) -> Self::Result {
         self.sent_count = msg.0;
     }
@@ -273,11 +273,11 @@ async fn run_benchmark_node(
 ) {
     // 创建节点配置
     let config = create_config(format!("node{}", node_id), port);
-    
+
     // 创建集群系统
-    let mut system = ClusterSystem::new(&format!("node{}", node_id), config);
+    let mut system = ClusterSystem::new(config);
     log::info!("Node {} created: {}", node_id, system.local_node().id);
-    
+
     // 创建benchmark actor并跟踪sent_count
     let mut sent_count: u64 = 0;
     let benchmark_actor = BenchmarkActor::new(
@@ -285,7 +285,7 @@ async fn run_benchmark_node(
         message_size,
         result_sender
     ).start();
-    
+
     // 启动集群系统
     match system.start().await {
         Ok(_) => {
@@ -296,17 +296,17 @@ async fn run_benchmark_node(
             return;
         }
     };
-    
+
     // 如果是发送者节点
     if let Some(target) = target_node {
         // 让系统稳定下来
         sleep(Duration::from_secs(5)).await;
-        
-        log::info!("Node {} starting to send {} messages to node {}", 
+
+        log::info!("Node {} starting to send {} messages to node {}",
                   node_id, message_count, target);
-        
+
         let start_time = Instant::now();
-        
+
         // 根据负载模式发送消息
         match load_pattern {
             LoadPattern::Constant => {
@@ -319,9 +319,9 @@ async fn run_benchmark_node(
                         timestamp: Instant::now(),
                         payload,
                     });
-                    
+
                     sent_count += 1;
-                    
+
                     if i % 1000 == 0 {
                         sleep(Duration::from_millis(10)).await;
                         log::info!("Sent {} messages", i);
@@ -332,10 +332,10 @@ async fn run_benchmark_node(
                 // 突发流量模式
                 let burst_size = 1000;
                 let bursts = message_count / burst_size;
-                
+
                 for b in 0..bursts {
                     log::info!("Sending burst {} of {}", b+1, bursts);
-                    
+
                     // 快速发送一批消息
                     for i in 0..burst_size {
                         let msg_id = b * burst_size + i;
@@ -346,10 +346,10 @@ async fn run_benchmark_node(
                             timestamp: Instant::now(),
                             payload,
                         });
-                        
+
                         sent_count += 1;
                     }
-                    
+
                     // 休息一段时间
                     sleep(Duration::from_secs(2)).await;
                 }
@@ -358,12 +358,12 @@ async fn run_benchmark_node(
                 // 逐步增加负载
                 let stages = 10;
                 let msgs_per_stage = message_count / stages;
-                
+
                 for stage in 1..=stages {
                     let delay = Duration::from_millis(100 - (stage * 10) as u64);
-                    log::info!("Stage {}/{}: delay between messages: {:?}", 
+                    log::info!("Stage {}/{}: delay between messages: {:?}",
                               stage, stages, delay);
-                    
+
                     for i in 0..msgs_per_stage {
                         let msg_id = (stage-1) * msgs_per_stage + i;
                         let payload = vec![0u8; message_size];
@@ -373,9 +373,9 @@ async fn run_benchmark_node(
                             timestamp: Instant::now(),
                             payload,
                         });
-                        
+
                         sent_count += 1;
-                        
+
                         if i % 100 == 0 {
                             sleep(delay).await;
                         }
@@ -386,7 +386,7 @@ async fn run_benchmark_node(
                 // 波动负载模式
                 let cycle_length = 1000; // 每个周期的消息数
                 let cycles = message_count / cycle_length;
-                
+
                 for c in 0..cycles {
                     for i in 0..cycle_length {
                         let msg_id = c * cycle_length + i;
@@ -397,13 +397,13 @@ async fn run_benchmark_node(
                             timestamp: Instant::now(),
                             payload,
                         });
-                        
+
                         sent_count += 1;
-                        
+
                         // 周期性调整发送间隔
                         let phase = (i as f64 / cycle_length as f64) * 2.0 * std::f64::consts::PI;
                         let delay_ms = ((phase.sin() + 1.0) * 10.0) as u64;
-                        
+
                         if i % 100 == 0 {
                             sleep(Duration::from_millis(delay_ms)).await;
                         }
@@ -411,17 +411,17 @@ async fn run_benchmark_node(
                 }
             }
         }
-        
+
         let elapsed = start_time.elapsed();
-        log::info!("Node {} finished sending {} messages in {:?}", 
+        log::info!("Node {} finished sending {} messages in {:?}",
                   node_id, message_count, elapsed);
-        
+
         // 等待所有响应
         sleep(Duration::from_secs(10)).await;
-        
+
         // 直接在Actor中设置sent_count
         benchmark_actor.do_send(SetSentCount(sent_count));
-        
+
         // 完成测试并发送结果
         benchmark_actor.do_send(FinishBenchmark);
     } else {
@@ -447,7 +447,7 @@ fn create_config(name: String, port: u16) -> ClusterConfig {
 async fn main() {
     // 初始化日志
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
-    
+
     // 测试参数
     let node_count = 3;                           // 节点数量
     let message_count = 10_000;                   // 消息总数
@@ -460,16 +460,16 @@ async fn main() {
     println!("消息数量: {}", message_count);
     println!("消息大小: {} bytes", message_size);
     println!("负载模式: {:?}", load_pattern);
-    
+
     // 创建结果通道
     let (result_sender, mut result_receiver) = mpsc::channel::<Metrics>(node_count);
-    
+
     // 创建共享的任务集合
     let tasks = Arc::new(Mutex::new(Vec::new()));
-    
+
     // 创建LocalSet
     let local = tokio::task::LocalSet::new();
-    
+
     // 在LocalSet内运行测试
     local.run_until(async move {
         // 创建并启动所有节点
@@ -477,15 +477,15 @@ async fn main() {
             let node_id = i;
             let port = base_port + i as u16;
             let sender = result_sender.clone();
-            
+
             // 只让第一个节点发送消息
             let target = if i == 1 { Some(2) } else { None };
-            
+
             // 启动节点任务 - 使用spawn_local
             let task = tokio::task::spawn_local(async move {
                 run_benchmark_node(
-                    node_id, 
-                    port, 
+                    node_id,
+                    port,
                     target,
                     message_count,
                     message_size,
@@ -493,10 +493,10 @@ async fn main() {
                     sender
                 ).await;
             });
-            
+
             tasks.lock().await.push(task);
         }
-        
+
         // 收集所有结果
         let mut all_metrics = Vec::new();
         for _ in 0..node_count {
@@ -504,20 +504,20 @@ async fn main() {
                 all_metrics.push(metrics);
             }
         }
-        
+
         // 等待所有任务完成
         for task in Arc::try_unwrap(tasks).unwrap().into_inner() {
             let _ = task.await;
         }
-        
+
         // 分析结果
         if !all_metrics.is_empty() {
             println!("\n==== 集群性能分析 ====");
-            
+
             for (i, metrics) in all_metrics.iter().enumerate() {
                 println!("\n节点 {} 结果:", i+1);
                 metrics.print_summary();
-                
+
                 // 保存详细结果到CSV
                 let filename = format!("node{}_results.csv", i+1);
                 if let Err(e) = metrics.save_to_csv(&filename) {
@@ -526,7 +526,7 @@ async fn main() {
                     println!("Detailed metrics saved to {}", filename);
                 }
             }
-            
+
             // 汇总集群整体性能
             if let Some(sender_metrics) = all_metrics.first() {
                 println!("\n==== 集群整体性能 ====");
@@ -534,24 +534,24 @@ async fn main() {
                 println!("总耗时: {:?}", sender_metrics.total_time);
                 println!("集群吞吐量: {:.2} msgs/sec", sender_metrics.throughput);
                 println!("数据吞吐量: {:.2} MB/sec", sender_metrics.data_throughput);
-                
+
                 // 性能建议
                 println!("\n==== 性能分析和建议 ====");
-                
+
                 if let Some(p99) = sender_metrics.percentiles.get(&99) {
                     if p99 > &Duration::from_millis(100) {
                         println!("⚠️ P99延迟较高 (>100ms)，可能需要优化消息处理逻辑");
                     }
                 }
-                
+
                 if sender_metrics.throughput < 1000.0 {
                     println!("⚠️ 集群吞吐量较低，建议检查序列化方式或网络配置");
                 }
-                
+
                 if sender_metrics.failed_messages > 0 {
-                    let failure_rate = sender_metrics.failed_messages as f64 / 
+                    let failure_rate = sender_metrics.failed_messages as f64 /
                                       sender_metrics.total_messages as f64 * 100.0;
-                    
+
                     println!("⚠️ 消息失败率: {:.2}%，建议检查错误日志和集群配置", failure_rate);
                 }
             }
@@ -559,4 +559,4 @@ async fn main() {
             println!("No benchmark results received!");
         }
     }).await;
-} 
+}

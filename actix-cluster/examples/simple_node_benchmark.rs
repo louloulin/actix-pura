@@ -6,7 +6,7 @@ use log;
 use tokio::time::sleep;
 
 use actix_cluster::{
-    Architecture, ClusterConfig, ClusterSystem, DiscoveryMethod, NodeRole, 
+    Architecture, ClusterConfig, ClusterSystem, DiscoveryMethod, NodeRole,
     SerializationFormat
 };
 
@@ -62,7 +62,7 @@ struct ReceiverActor {
 
 impl Actor for SenderActor {
     type Context = Context<Self>;
-    
+
     fn started(&mut self, _ctx: &mut Self::Context) {
         log::info!("SenderActor started: {}", self.name);
         self.started_at = Instant::now();
@@ -71,7 +71,7 @@ impl Actor for SenderActor {
 
 impl Actor for ReceiverActor {
     type Context = Context<Self>;
-    
+
     fn started(&mut self, _ctx: &mut Self::Context) {
         log::info!("ReceiverActor started: {}", self.name);
     }
@@ -80,23 +80,23 @@ impl Actor for ReceiverActor {
 // 处理测试消息
 impl Handler<TestMessage> for ReceiverActor {
     type Result = ResponseFuture<TestResponse>;
-    
+
     fn handle(&mut self, msg: TestMessage, _ctx: &mut Self::Context) -> Self::Result {
         self.received_count += 1;
-        
+
         if self.received_count % 10000 == 0 {
             log::info!("{} received {} messages", self.name, self.received_count);
         }
-        
+
         // 计算延迟并返回响应
         let now = Instant::now();
         let round_trip = now.duration_since(msg.timestamp);
-        
+
         let response = TestResponse {
             id: msg.id,
             round_trip,
         };
-        
+
         Box::pin(async move { response })
     }
 }
@@ -104,13 +104,13 @@ impl Handler<TestMessage> for ReceiverActor {
 // 处理测试响应
 impl Handler<TestResponse> for SenderActor {
     type Result = ();
-    
+
     fn handle(&mut self, msg: TestResponse, _ctx: &mut Self::Context) -> Self::Result {
         // 记录延迟
         self.latencies.push(msg.round_trip);
-        
+
         if self.latencies.len() % 10000 == 0 {
-            log::info!("{} received {} responses, latest latency: {:?}", 
+            log::info!("{} received {} responses, latest latency: {:?}",
                      self.name, self.latencies.len(), msg.round_trip);
         }
     }
@@ -119,7 +119,7 @@ impl Handler<TestResponse> for SenderActor {
 // 获取结果
 impl Handler<GetResults> for SenderActor {
     type Result = MessageResult<GetResults>;
-    
+
     fn handle(&mut self, _: GetResults, _ctx: &mut Self::Context) -> Self::Result {
         let result = self.calculate_results();
         MessageResult(result)
@@ -136,12 +136,12 @@ impl SenderActor {
             batch_size,
         }
     }
-    
+
     // 计算测试结果
     fn calculate_results(&self) -> TestResult {
         let received_count = self.latencies.len() as u64;
         let test_duration = self.started_at.elapsed();
-        
+
         if self.latencies.is_empty() {
             return TestResult {
                 sent_count: self.sent_count,
@@ -155,30 +155,30 @@ impl SenderActor {
                 test_duration,
             };
         }
-        
+
         // 计算延迟统计
         let mut sorted = self.latencies.clone();
         sorted.sort();
-        
+
         let min_latency = *sorted.first().unwrap();
         let max_latency = *sorted.last().unwrap();
-        
+
         let sum: Duration = self.latencies.iter().sum();
         let avg_latency = sum / received_count as u32;
-        
+
         let p95_idx = ((received_count as f64 * 0.95) as usize).min(sorted.len() - 1);
         let p99_idx = ((received_count as f64 * 0.99) as usize).min(sorted.len() - 1);
-        
+
         let p95_latency = sorted[p95_idx];
         let p99_latency = sorted[p99_idx];
-        
+
         // 计算吞吐量 (消息/秒)
         let throughput = if test_duration.as_secs_f64() > 0.0 {
             received_count as f64 / test_duration.as_secs_f64()
         } else {
             0.0
         };
-        
+
         TestResult {
             sent_count: self.sent_count,
             received_count,
@@ -191,38 +191,38 @@ impl SenderActor {
             test_duration,
         }
     }
-    
+
     // 批量发送消息
     async fn send_messages(&mut self, receiver: &Addr<ReceiverActor>, message_count: u64, message_size: usize) {
         log::info!("Starting to send {} messages of {} bytes each", message_count, message_size);
         let start_time = Instant::now();
-        
+
         let self_addr = Actor::create(|_| self.clone());
         let batch_size = self.batch_size;
-        
+
         for batch_start in (0..message_count).step_by(batch_size) {
             let batch_end = std::cmp::min(batch_start + batch_size as u64, message_count);
-            
+
             for msg_id in batch_start..batch_end {
                 let msg = TestMessage {
                     id: msg_id,
                     timestamp: Instant::now(),
                     payload: vec![0u8; message_size],
                 };
-                
+
                 self.sent_count += 1;
-                
+
                 // 发送并等待响应
                 if let Ok(response) = receiver.send(msg).await {
                     self_addr.do_send(response);
                 }
             }
-            
+
             if batch_start % (batch_size as u64 * 10) == 0 && batch_start > 0 {
                 log::info!("Sent {} messages, elapsed: {:?}", batch_start, start_time.elapsed());
             }
         }
-        
+
         let elapsed = start_time.elapsed();
         log::info!("Finished sending {} messages in {:?}", message_count, elapsed);
     }
@@ -245,27 +245,27 @@ impl Clone for SenderActor {
 async fn main() -> std::io::Result<()> {
     // 初始化日志
     env_logger::init_from_env(env_logger::Env::default().default_filter_or("info"));
-    
+
     // 创建LocalSet以支持本地任务
     let local = tokio::task::LocalSet::new();
-    
+
     // 在LocalSet上运行主测试逻辑
     let result = local.run_until(async {
         // 测试参数
         let message_count = 100000;  // 消息数量
         let message_size = 1024;     // 消息大小(字节)
         let batch_size = 1000;       // 批处理大小
-        
-        log::info!("Starting benchmark with {} messages of {} bytes", 
+
+        log::info!("Starting benchmark with {} messages of {} bytes",
                  message_count, message_size);
-        
+
         // 创建发送者和接收者Actor
         let sender_actor = SenderActor::new("Sender".to_string(), batch_size).start();
         let receiver_actor = ReceiverActor {
             name: "Receiver".to_string(),
             received_count: 0
         }.start();
-        
+
         // 创建集群配置
         let config = ClusterConfig::new()
             .bind_addr(SocketAddr::new(
@@ -275,34 +275,34 @@ async fn main() -> std::io::Result<()> {
             .node_role(NodeRole::Worker)
             .architecture(Architecture::Decentralized)
             .serialization_format(SerializationFormat::Bincode)
-            .discovery(DiscoveryMethod::Static { 
+            .discovery(DiscoveryMethod::Static {
                 seed_nodes: Vec::new()
             });
-        
+
         // 创建集群系统
-        let mut cluster = ClusterSystem::new("node1", config);
-        
+        let mut cluster = ClusterSystem::new(config);
+
         // 启动集群系统
         match cluster.start().await {
             Ok(_addr) => {
                 log::info!("Cluster system started");
                 // 等待集群启动
                 sleep(Duration::from_secs(1)).await;
-                
+
                 // 发送测试消息并收集结果
                 let mut sender_instance = SenderActor::new("SenderInstance".to_string(), batch_size);
                 sender_instance.send_messages(&receiver_actor, message_count, message_size).await;
-                
+
                 // 等待所有处理完成
                 sleep(Duration::from_secs(2)).await;
-                
+
                 // 计算结果
                 let result = sender_instance.calculate_results();
-                
+
                 // 关闭集群系统
                 log::info!("Shutting down cluster system");
                 System::current().stop();
-                
+
                 Ok(result)
             },
             Err(e) => {
@@ -311,14 +311,14 @@ async fn main() -> std::io::Result<()> {
             }
         }
     }).await;
-    
+
     // 输出结果
     match result {
         Ok(test_result) => {
             log::info!("\n===== BENCHMARK RESULTS =====");
             log::info!("Messages sent: {}", test_result.sent_count);
             log::info!("Messages received: {}", test_result.received_count);
-            log::info!("Success rate: {:.2}%", 
+            log::info!("Success rate: {:.2}%",
                     (test_result.received_count as f64 / test_result.sent_count as f64) * 100.0);
             log::info!("Test duration: {:?}", test_result.test_duration);
             log::info!("Average latency: {:?}", test_result.avg_latency);
@@ -332,6 +332,6 @@ async fn main() -> std::io::Result<()> {
             log::error!("Benchmark failed: {}", e);
         }
     }
-    
+
     Ok(())
-} 
+}
