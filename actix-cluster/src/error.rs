@@ -63,7 +63,7 @@ pub enum ClusterError {
     /// Actor registration failed
     #[error("Actor registration failed: {0}")]
     ActorRegistrationFailed(String),
-    
+
     /// Actor not registered
     #[error("Actor not registered: {0}")]
     ActorNotRegistered(String),
@@ -135,23 +135,23 @@ pub enum ClusterError {
     /// Transport not available or not initialized
     #[error("Transport not available or not initialized")]
     TransportNotAvailable,
-    
+
     /// Protocol error during message exchange
     #[error("Protocol error: {0}")]
     ProtocolError(String),
-    
+
     /// Transport layer error
     #[error("Transport error: {0}")]
     TransportError(String),
-    
+
     /// No nodes available for operation
     #[error("No nodes available")]
     NoNodesAvailable,
-    
+
     /// Feature not implemented
     #[error("Not implemented: {0}")]
     NotImplemented(String),
-    
+
     /// Component not initialized
     #[error("Not initialized: {0}")]
     NotInitialized(String),
@@ -203,19 +203,19 @@ pub enum ClusterError {
     /// Raft error
     #[error("Raft error: {0}")]
     RaftError(String),
-    
+
     /// Channel closed
     #[error("Channel closed")]
     ChannelClosed,
-    
+
     /// Compression error
     #[error("Compression error: {0}")]
     CompressionError(String),
-    
+
     /// Decompression error
     #[error("Decompression error: {0}")]
     DecompressionError(String),
-    
+
     /// Other error
     #[error("Other error: {0}")]
     Other(String),
@@ -223,10 +223,22 @@ pub enum ClusterError {
     /// Actor error
     #[error("Actor error: {0}")]
     ActorError(String),
-    
+
     /// Timeout error
     #[error("Timeout: {0}")]
     Timeout(String),
+
+    /// Unsupported transport
+    #[error("Unsupported transport: {0}")]
+    UnsupportedTransport(String),
+
+    /// Transport initialization error
+    #[error("Transport initialization error: {0}")]
+    TransportInitializationError(String),
+
+    /// Transport configuration error
+    #[error("Transport configuration error: {0}")]
+    TransportConfigurationError(String),
 }
 
 /// Type alias for Result with ClusterError
@@ -249,4 +261,4 @@ impl<T> From<tokio::sync::mpsc::error::SendError<T>> for ClusterError {
     fn from(_: tokio::sync::mpsc::error::SendError<T>) -> Self {
         ClusterError::ChannelClosed
     }
-} 
+}

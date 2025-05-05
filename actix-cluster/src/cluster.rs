@@ -15,6 +15,7 @@ use crate::error::{ClusterError, ClusterResult};
 use crate::message::{MessageEnvelope, MessageType, DeliveryGuarantee, AnyMessage};
 use crate::registry::{ActorRegistry, RegistryActor, RegisterLocal, Lookup, DiscoverActor};
 use crate::transport::{RemoteActorRef, P2PTransport};
+use crate::transport_trait::{TransportTrait, TransportConfig, create_transport};
 use crate::config::NodeRole;
 
 // Import traits
@@ -47,8 +48,11 @@ pub struct ClusterSystem {
     /// System actor address
     system_actor: Option<Addr<ClusterSystemActor>>,
 
-    /// P2P transport for decentralized architecture
+    /// P2P transport for decentralized architecture (legacy)
     pub transport: Option<Arc<Mutex<crate::transport::P2PTransport>>>,
+
+    /// Pluggable transport for flexible communication
+    pub pluggable_transport: Option<Arc<Mutex<Box<dyn TransportTrait>>>>,
 
     /// Actor注册表
     registry: Arc<ActorRegistry>,
@@ -102,6 +106,7 @@ impl ClusterSystem {
             discovery: Arc::new(Mutex::new(discovery)),
             system_actor: None,
             transport: None,
+            pluggable_transport: None,
             registry: Arc::new(registry),
             registry_actor: None,
         };
@@ -120,12 +125,14 @@ impl ClusterSystem {
         println!("Starting cluster system with local node: {:?}", self.local_node);
 
         // 创建传输层
-        let transport = match self.config.architecture {
+        let (transport, pluggable_transport) = match self.config.architecture {
             Architecture::Decentralized => {
-                // 对于去中心化架构，使用P2P传输
-                info!("Creating P2P transport for decentralized architecture");
-                println!("Creating P2P transport for decentralized architecture");
-                let mut transport = P2PTransport::new(
+                // 对于去中心化架构，使用配置的传输类型
+                info!("Creating transport for decentralized architecture");
+                println!("Creating transport for decentralized architecture");
+
+                // 创建传统的P2P传输（向后兼容）
+                let mut p2p_transport = P2PTransport::new(
                     self.local_node.clone(),
                     self.config.serialization_format.clone(),
                 )?;
@@ -133,17 +140,45 @@ impl ClusterSystem {
                 // Set compression configuration if available
                 if let Some(compression_config) = self.config.get_compression_config() {
                     info!("Setting compression configuration on P2P transport");
-                    transport.set_compression_config(compression_config.clone());
+                    p2p_transport.set_compression_config(compression_config.clone());
                 }
 
-                Some(Arc::new(Mutex::new(transport)))
+                // 创建可插拔传输
+                let transport_config = crate::transport_trait::TransportConfig::new(
+                    self.config.transport_type,
+                    self.local_node.addr,
+                )
+                .with_serialization_format(self.config.serialization_format.clone());
+
+                // 如果有压缩配置，也应用到可插拔传输
+                let transport_config = if let Some(compression_config) = self.config.get_compression_config() {
+                    transport_config.with_compression_config(compression_config.clone())
+                } else {
+                    transport_config
+                };
+
+                // 创建可插拔传输实例
+                let pluggable = match crate::transport_trait::create_transport(transport_config, self.local_node.clone()) {
+                    Ok(t) => {
+                        info!("Successfully created pluggable transport of type {:?}", self.config.transport_type);
+                        Some(Arc::new(Mutex::new(t)))
+                    },
+                    Err(e) => {
+                        warn!("Failed to create pluggable transport: {}. Falling back to P2P transport.", e);
+                        None
+                    }
+                };
+
+                (Some(Arc::new(Mutex::new(p2p_transport))), pluggable)
             },
             Architecture::Centralized => {
                 if self.local_node.role == NodeRole::Peer {
-                    // 对于中心化架构中的对等节点，也使用P2P传输
-                    info!("Creating P2P transport for centralized architecture (peer node)");
-                    println!("Creating P2P transport for centralized architecture (peer node)");
-                    let mut transport = P2PTransport::new(
+                    // 对于中心化架构中的对等节点，也使用配置的传输类型
+                    info!("Creating transport for centralized architecture (peer node)");
+                    println!("Creating transport for centralized architecture (peer node)");
+
+                    // 创建传统的P2P传输（向后兼容）
+                    let mut p2p_transport = P2PTransport::new(
                         self.local_node.clone(),
                         self.config.serialization_format.clone(),
                     )?;
@@ -151,20 +186,47 @@ impl ClusterSystem {
                     // Set compression configuration if available
                     if let Some(compression_config) = self.config.get_compression_config() {
                         info!("Setting compression configuration on P2P transport");
-                        transport.set_compression_config(compression_config.clone());
+                        p2p_transport.set_compression_config(compression_config.clone());
                     }
 
-                    Some(Arc::new(Mutex::new(transport)))
+                    // 创建可插拔传输
+                    let transport_config = crate::transport_trait::TransportConfig::new(
+                        self.config.transport_type,
+                        self.local_node.addr,
+                    )
+                    .with_serialization_format(self.config.serialization_format.clone());
+
+                    // 如果有压缩配置，也应用到可插拔传输
+                    let transport_config = if let Some(compression_config) = self.config.get_compression_config() {
+                        transport_config.with_compression_config(compression_config.clone())
+                    } else {
+                        transport_config
+                    };
+
+                    // 创建可插拔传输实例
+                    let pluggable = match crate::transport_trait::create_transport(transport_config, self.local_node.clone()) {
+                        Ok(t) => {
+                            info!("Successfully created pluggable transport of type {:?}", self.config.transport_type);
+                            Some(Arc::new(Mutex::new(t)))
+                        },
+                        Err(e) => {
+                            warn!("Failed to create pluggable transport: {}. Falling back to P2P transport.", e);
+                            None
+                        }
+                    };
+
+                    (Some(Arc::new(Mutex::new(p2p_transport))), pluggable)
                 } else {
                     // 对于中心化架构中的主节点，目前不需要传输层
                     info!("No transport needed for centralized master node");
                     println!("No transport needed for centralized master node");
-                    None
+                    (None, None)
                 }
             }
         };
 
         self.transport = transport.clone();
+        self.pluggable_transport = pluggable_transport;
 
         // 创建注册表Actor
         let registry_actor = RegistryActor::new(self.registry.clone()).start();
@@ -173,13 +235,16 @@ impl ClusterSystem {
         println!("Registry actor started");
 
         // 创建系统Actor
-        let system_actor = ClusterSystemActor::new(
+        let mut system_actor = ClusterSystemActor::new(
             self.config.clone(),
             self.local_node.clone(),
             self.nodes.clone(),
             self.discovery.clone(),
             self.transport.clone(),
         );
+
+        // 设置可插拔传输
+        system_actor.pluggable_transport = self.pluggable_transport.clone();
 
         // 启动系统Actor
         let addr = system_actor.start();
@@ -416,8 +481,11 @@ pub struct ClusterSystemActor {
     /// Service discovery
     discovery: Arc<Mutex<Box<dyn ServiceDiscovery>>>,
 
-    /// P2P transport for decentralized architecture
+    /// P2P transport for decentralized architecture (legacy)
     transport: Option<Arc<Mutex<crate::transport::P2PTransport>>>,
+
+    /// Pluggable transport for flexible communication
+    pluggable_transport: Option<Arc<Mutex<Box<dyn TransportTrait>>>>,
 }
 
 impl ClusterSystemActor {
@@ -435,6 +503,7 @@ impl ClusterSystemActor {
             nodes,
             discovery,
             transport,
+            pluggable_transport: None, // 初始化为None，在start方法中设置
         }
     }
 

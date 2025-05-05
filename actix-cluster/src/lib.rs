@@ -27,6 +27,7 @@ pub mod serialization;
 pub mod supervision;
 pub mod sync;
 pub mod transport;
+pub mod transport_trait;
 
 // 添加测试工具模块，用于测试和集成测试
 #[doc(hidden)]
@@ -46,6 +47,7 @@ pub use placement::{NodeSelector, PlacementStrategyImpl};
 pub use registry::{ActorRef, LocalActorRef};
 pub use serialization::{BincodeSerializer, JsonSerializer, SerializationFormat, Serializer, SerializerTrait};
 pub use supervision::{SupervisionStrategy, SupervisedDistributedActor, DistributedSupervisor, SupervisorActor};
+pub use transport_trait::{TransportTrait, TransportType, TransportConfig, create_transport};
 
 /// Re-exports from the actix crate
 pub mod prelude {
@@ -54,5 +56,6 @@ pub mod prelude {
         Architecture, ClusterConfig, ClusterSystem, ConsensusActor, ConsensusCommand, ConsensusState,
         DiscoveryMethod, DistributedActor, MigratableActor, MigrationReason, Node, NodeId, NodeInfo,
         NodeRole, PlacementStrategy, SerializationFormat, SupervisionStrategy, SupervisedDistributedActor,
+        TransportTrait, TransportType, TransportConfig, create_transport,
     };
 }
