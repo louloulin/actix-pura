@@ -20,6 +20,7 @@ pub mod message;
 pub mod migration;
 pub mod node;
 pub mod placement;
+pub mod proto;
 pub mod registry;
 pub mod security;
 pub mod serialization;
@@ -54,4 +55,4 @@ pub mod prelude {
         DiscoveryMethod, DistributedActor, MigratableActor, MigrationReason, Node, NodeId, NodeInfo,
         NodeRole, PlacementStrategy, SerializationFormat, SupervisionStrategy, SupervisedDistributedActor,
     };
-} 
+}

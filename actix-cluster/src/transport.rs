@@ -22,7 +22,7 @@ use serde::{Serialize, Deserialize};
 use crate::error::{ClusterError, ClusterResult};
 use crate::node::{NodeId, NodeInfo, NodeStatus};
 use crate::config::NodeRole;
-use crate::serialization::{SerializationFormat, SerializerTrait, BincodeSerializer, JsonSerializer, CompressedSerializer};
+use crate::serialization::{SerializationFormat, SerializerTrait, BincodeSerializer, JsonSerializer, ProtobufSerializer, CompressedSerializer};
 use crate::compression::{CompressionAlgorithm, CompressionLevel, CompressionConfig};
 use crate::message::{MessageEnvelope, MessageType, DeliveryGuarantee, ActorPath};
 use crate::message::MessageEnvelopeHandler;
@@ -281,6 +281,7 @@ impl P2PTransport {
         let serializer: Box<dyn SerializerTrait> = match serialization_format {
             SerializationFormat::Json => Box::new(JsonSerializer::new()),
             SerializationFormat::Bincode => Box::new(BincodeSerializer::new()),
+            SerializationFormat::Protobuf => Box::new(ProtobufSerializer::new()),
             SerializationFormat::CompressedBincode => Box::new(CompressedSerializer::new(
                 BincodeSerializer::new(),
                 CompressionAlgorithm::Gzip,
@@ -288,6 +289,11 @@ impl P2PTransport {
             )),
             SerializationFormat::CompressedJson => Box::new(CompressedSerializer::new(
                 JsonSerializer::new(),
+                CompressionAlgorithm::Gzip,
+                CompressionLevel::Default
+            )),
+            SerializationFormat::CompressedProtobuf => Box::new(CompressedSerializer::new(
+                ProtobufSerializer::new(),
                 CompressionAlgorithm::Gzip,
                 CompressionLevel::Default
             )),

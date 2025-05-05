@@ -50,7 +50,7 @@ Actix-Pura 是一个具有分布式能力的 Rust 基础 actor 框架，受到 A
 
 ### 2. 序列化与通信
 
-- [ ] **标准集成**：不使用自定义序列化，而是利用行业标准如 gRPC 与 Protocol Buffers（受 Proto.Actor 启发）
+- [x] **标准集成**：不使用自定义序列化，而是利用行业标准如 gRPC 与 Protocol Buffers（受 Proto.Actor 启发）
 - [ ] **可插拔传输**：实现更模块化的传输系统，允许不同的通信机制
 - [x] **消息压缩**：为大型消息添加自动压缩
 - [ ] **通信安全**：为安全的 actor 通信实现 TLS 和认证
@@ -97,9 +97,9 @@ Actix-Pura 是一个具有分布式能力的 Rust 基础 actor 框架，受到 A
    - 创建更直观的错误处理
 
 2. **序列化增强**
-   - 集成 Protocol Buffers 用于消息序列化
+   - 集成 Protocol Buffers 用于消息序列化 ✅
    - 实现基于 gRPC 的通信
-   - 添加消息压缩
+   - 添加消息压缩 ✅
 
 3. **核心集群改进**
    - 增强节点发现机制
@@ -238,6 +238,110 @@ trait Tool: Send + Sync {
 ```
 
 ## 已实现功能详情
+
+### Protocol Buffers 序列化集成 (2024年7月15日)
+
+Protocol Buffers 序列化集成实现了高效、跨语言的消息序列化机制，参考了 Proto.Actor 的设计理念。该实现包括：
+
+1. **Protocol Buffers 定义**：为系统中的核心消息类型创建了 .proto 文件
+   ```protobuf
+   message ProtoMessageEnvelope {
+     string message_id = 1;
+     string sender_actor = 2;
+     string target_actor = 3;
+     string sender_node = 4;
+     string target_node = 5;
+     ProtoMessageType message_type = 6;
+     bytes payload = 7;
+     uint64 timestamp = 8;
+     uint64 ttl = 9;
+     ProtoDeliveryGuarantee delivery_guarantee = 10;
+     string correlation_id = 11;
+     string custom_type = 12;
+     map<string, string> headers = 13;
+   }
+   ```
+
+2. **序列化格式扩展**：添加了 Protocol Buffers 相关的序列化格式
+   ```rust
+   pub enum SerializationFormat {
+       Bincode,
+       Json,
+       Protobuf,
+       CompressedBincode,
+       CompressedJson,
+       CompressedProtobuf,
+   }
+   ```
+
+3. **ProtobufSerializer 实现**：创建了专用的 Protocol Buffers 序列化器
+   ```rust
+   pub struct ProtobufSerializer;
+
+   impl ProtobufSerializer {
+       pub fn serialize<T: Serialize + prost::Message + Default>(&self, value: &T) -> Result<Vec<u8>, ClusterError> {
+           let mut buf = Vec::new();
+           buf.reserve(value.encoded_len());
+           value.encode(&mut buf)
+               .map_err(|e| ClusterError::SerializationError(e.to_string()))?;
+           Ok(buf)
+       }
+
+       pub fn deserialize<T: DeserializeOwned + prost::Message + Default>(&self, bytes: &[u8]) -> Result<T, ClusterError> {
+           T::decode(bytes)
+               .map_err(|e| ClusterError::DeserializationError(e.to_string()))
+       }
+   }
+   ```
+
+4. **类型转换实现**：为核心消息类型实现了与 Protocol Buffers 类型的相互转换
+   ```rust
+   impl TryFrom<MessageEnvelope> for ProtoMessageEnvelope {
+       type Error = ClusterError;
+
+       fn try_from(envelope: MessageEnvelope) -> Result<Self, Self::Error> {
+           // 实现细节
+       }
+   }
+
+   impl TryFrom<ProtoMessageEnvelope> for MessageEnvelope {
+       type Error = ClusterError;
+
+       fn try_from(proto: ProtoMessageEnvelope) -> Result<Self, Self::Error> {
+           // 实现细节
+       }
+   }
+   ```
+
+5. **压缩支持**：为 Protocol Buffers 序列化添加了压缩支持
+   ```rust
+   impl CompressedSerializer<ProtobufSerializer> {
+       pub fn serialize<T: Serialize + prost::Message + Default>(&self, value: &T) -> Result<Vec<u8>, ClusterError> {
+           let serialized = self.inner.serialize(value)?;
+           compress(&serialized, self.algorithm, self.level)
+       }
+
+       pub fn deserialize<T: DeserializeOwned + prost::Message + Default>(&self, bytes: &[u8]) -> Result<T, ClusterError> {
+           let decompressed = decompress(bytes, self.algorithm)?;
+           self.inner.deserialize(&decompressed)
+       }
+   }
+   ```
+
+6. **性能测试**：添加了序列化性能和大小比较的示例应用
+   ```rust
+   // 测试不同序列化格式的大小比较
+   let bincode_serializer = Serializer::from_format(SerializationFormat::Bincode);
+   let bincode_size = bincode_serializer.serialize(&test_message).unwrap().len();
+
+   let json_serializer = Serializer::from_format(SerializationFormat::Json);
+   let json_size = json_serializer.serialize(&test_message).unwrap().len();
+
+   let protobuf_serializer = Serializer::from_format(SerializationFormat::Protobuf);
+   let protobuf_size = protobuf_serializer.serialize(&test_message).unwrap().len();
+   ```
+
+此功能的实现显著提高了系统的互操作性和性能。Protocol Buffers 提供了比 JSON 更紧凑的序列化格式，同时保持了跨语言兼容性，使系统能够与其他语言编写的组件无缝集成。结合压缩功能，可以进一步减少网络传输的数据量，提高系统的整体效率。
 
 ### 本地亲和性机制 (2024年4月6日)
 

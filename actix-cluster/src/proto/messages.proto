@@ -1,0 +1,165 @@
+syntax = "proto3";
+
+package actix_cluster;
+
+// Message type enum
+enum ProtoMessageType {
+  REGULAR = 0;
+  SYSTEM = 1;
+  PING = 2;
+  PONG = 3;
+  ACK = 4;
+  ERROR = 5;
+  BROADCAST = 6;
+  MIGRATION = 7;
+  SUPERVISION = 8;
+  CUSTOM = 9;
+}
+
+// Delivery guarantee enum
+enum ProtoDeliveryGuarantee {
+  AT_MOST_ONCE = 0;
+  AT_LEAST_ONCE = 1;
+  EXACTLY_ONCE = 2;
+}
+
+// Message envelope for actor communication
+message ProtoMessageEnvelope {
+  string message_id = 1;
+  string sender_actor = 2;
+  string target_actor = 3;
+  string sender_node = 4;
+  string target_node = 5;
+  ProtoMessageType message_type = 6;
+  bytes payload = 7;
+  uint64 timestamp = 8;
+  uint64 ttl = 9;
+  ProtoDeliveryGuarantee delivery_guarantee = 10;
+  string correlation_id = 11;
+  string custom_type = 12;  // Used when message_type is CUSTOM
+  map<string, string> headers = 13;
+}
+
+// Transport message types
+message ProtoTransportMessage {
+  oneof message {
+    ProtoMessageEnvelope actor_message = 1;
+    ProtoBrokerMessage broker_message = 2;
+    ProtoNodeInfo heartbeat = 3;
+    ProtoElectionMessage election = 4;
+    ProtoMasterState master_state = 5;
+    ProtoStatusUpdate status_update = 6;
+    ProtoAck ack = 7;
+    ProtoClose close = 8;
+    ProtoNodeInfo handshake = 9;
+    ProtoActorDiscoveryRequest actor_discovery_request = 10;
+    ProtoActorDiscoveryResponse actor_discovery_response = 11;
+    ProtoBrokerSubscribe broker_subscribe = 12;
+    ProtoBrokerUnsubscribe broker_unsubscribe = 13;
+    ProtoBrokerAck broker_ack = 14;
+    ProtoSubscribe subscribe = 15;
+    ProtoMessageEnvelope envelope = 16;
+    ProtoConsensus consensus = 17;
+  }
+}
+
+// Node information
+message ProtoNodeInfo {
+  string id = 1;
+  string name = 2;
+  int32 role = 3;
+  string addr = 4;
+  map<string, string> metadata = 5;
+}
+
+// Status update message
+message ProtoStatusUpdate {
+  string node_id = 1;
+  string status = 2;
+}
+
+// Acknowledgement message
+message ProtoAck {
+  string message_id = 1;
+}
+
+// Close connection message
+message ProtoClose {}
+
+// Actor discovery request
+message ProtoActorDiscoveryRequest {
+  string node_id = 1;
+  string path = 2;
+}
+
+// Actor discovery response
+message ProtoActorDiscoveryResponse {
+  string path = 1;
+  repeated string locations = 2;
+}
+
+// Broker message
+message ProtoBrokerMessage {
+  string topic = 1;
+  bytes payload = 2;
+  string sender_id = 3;
+  uint64 timestamp = 4;
+  string message_id = 5;
+  map<string, string> headers = 6;
+}
+
+// Broker subscribe message
+message ProtoBrokerSubscribe {
+  string topic = 1;
+  string node_id = 2;
+  ProtoBrokerSubscriptionOptions options = 3;
+}
+
+// Broker subscription options
+message ProtoBrokerSubscriptionOptions {
+  bool durable = 1;
+  string queue_group = 2;
+  uint32 max_inflight = 3;
+  uint64 ack_wait = 4;
+}
+
+// Broker unsubscribe message
+message ProtoBrokerUnsubscribe {
+  string topic = 1;
+  string node_id = 2;
+}
+
+// Broker acknowledgement
+message ProtoBrokerAck {
+  string message_id = 1;
+  string topic = 2;
+  string subscriber_id = 3;
+}
+
+// Subscribe message
+message ProtoSubscribe {
+  string topic = 1;
+  ProtoBrokerSubscriptionOptions options = 2;
+}
+
+// Consensus message
+message ProtoConsensus {
+  bytes data = 1;
+}
+
+// Election message
+message ProtoElectionMessage {
+  int32 election_type = 1;
+  string candidate_id = 2;
+  uint64 term = 3;
+  uint64 last_log_index = 4;
+  uint64 last_log_term = 5;
+}
+
+// Master state message
+message ProtoMasterState {
+  string master_id = 1;
+  uint64 term = 2;
+  repeated string nodes = 3;
+  uint64 timestamp = 4;
+}
