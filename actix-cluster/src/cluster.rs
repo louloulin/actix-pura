@@ -315,14 +315,14 @@ impl ClusterSystem {
 
     /// Send a message to an actor
     #[allow(unused_variables)]
-    pub fn send<M: 'static + actix::Message + Send>(
+    pub async fn send<M: 'static + actix::Message + Send>(
         &self,
         actor_path: String,
         message: M,
         _delivery_guarantee: DeliveryGuarantee,
     ) -> ClusterResult<()> {
         // Lookup the actor in the registry
-        if let Some(actor_ref) = self.registry.lookup(&actor_path) {
+        if let Some(actor_ref) = self.registry.lookup(&actor_path).await {
             actor_ref.send_any(Box::new(message))?;
             return Ok(());
         } else {

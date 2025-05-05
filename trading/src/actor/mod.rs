@@ -54,7 +54,7 @@ impl ActorContext {
     pub fn new(path: String) -> Self {
         Self { path }
     }
-    
+
     /// 向Actor发送消息并等待响应
     pub async fn ask<M>(&self, target: Box<dyn ActorRef>, msg: M) -> Option<Box<dyn std::any::Any>>
     where
@@ -64,9 +64,9 @@ impl ActorContext {
         // 这里为了演示，直接返回None
         None
     }
-    
+
     /// 向Actor发送消息但不等待响应
-    pub fn tell<M>(&self, target: Box<dyn ActorRef>, msg: M) -> bool
+    pub fn tell<M>(&self, _target: Box<dyn ActorRef>, _msg: M) -> bool
     where
         M: Send + 'static,
     {
@@ -89,7 +89,7 @@ impl ActorSystem {
             name: "trading-system".to_string(),
         }
     }
-    
+
     /// 创建Actor并返回其引用
     pub async fn create_actor(&self, actor: Box<dyn Actor>) -> Box<dyn ActorRef> {
         // 在实际实现中，这里会创建Actor并注册到系统
@@ -98,7 +98,7 @@ impl ActorSystem {
             path: format!("/user/{}", uuid::Uuid::new_v4()),
         })
     }
-    
+
     /// 向Actor发送消息并等待响应
     pub async fn ask<M, R>(&self, target: Box<dyn ActorRef>, msg: M) -> Option<R>
     where
@@ -107,27 +107,31 @@ impl ActorSystem {
     {
         // 检查消息类型
         let type_name = std::any::type_name::<M>();
-        
+
         // 处理创建订单消息
         if type_name.contains("CreateOrderMessage") {
             // 返回模拟的OrderResult
             use crate::models::order::OrderResult;
             let result = OrderResult::Accepted("test-order-1".to_string());
-            return Some(unsafe { std::mem::transmute_copy(&result) });
-        } 
-        
+            // 使用Any类型转换，避免unsafe
+            let boxed: Box<dyn std::any::Any> = Box::new(result);
+            return boxed.downcast::<R>().ok().map(|b| *b);
+        }
+
         // 处理取消订单消息
         else if type_name.contains("CancelOrderMessage") {
             // 返回模拟的OrderResult
             use crate::models::order::OrderResult;
             let result = OrderResult::Accepted("test-order-2".to_string());
-            return Some(unsafe { std::mem::transmute_copy(&result) });
-        } 
-        
+            // 使用Any类型转换，避免unsafe
+            let boxed: Box<dyn std::any::Any> = Box::new(result);
+            return boxed.downcast::<R>().ok().map(|b| *b);
+        }
+
         // 处理查询订单消息
         else if type_name.contains("QueryOrderMessage") {
             let mut orders = Vec::new();
-            
+
             // 检查是否是订单取消测试
             if std::thread::current().name().map_or(false, |name| name.contains("order_cancellation")) {
                 let order = Order {
@@ -163,7 +167,7 @@ impl ActorSystem {
                     created_at: Utc::now(),
                     updated_at: Utc::now(),
                 };
-                
+
                 let order2 = Order {
                     order_id: "order-2".to_string(),
                     account_id: "client-2".to_string(),
@@ -178,7 +182,7 @@ impl ActorSystem {
                     created_at: Utc::now(),
                     updated_at: Utc::now(),
                 };
-                
+
                 orders.push(order1);
                 orders.push(order2);
             }
@@ -200,15 +204,17 @@ impl ActorSystem {
                 };
                 orders.push(order);
             }
-            
-            return Some(unsafe { std::mem::transmute_copy(&orders) });
+
+            // 使用Any类型转换，避免unsafe
+            let boxed: Box<dyn std::any::Any> = Box::new(orders);
+            return boxed.downcast::<R>().ok().map(|b| *b);
         }
-        
+
         None
     }
-    
+
     /// 向Actor发送消息但不等待响应
-    pub fn tell<M>(&self, target: Box<dyn ActorRef>, msg: M) -> bool
+    pub fn tell<M>(&self, _target: Box<dyn ActorRef>, _msg: M) -> bool
     where
         M: Send + 'static,
     {
@@ -233,4 +239,4 @@ impl Clone for Box<dyn ActorRef> {
     }
 }
 
-pub use order::OrderActor; 
+pub use order::OrderActor;

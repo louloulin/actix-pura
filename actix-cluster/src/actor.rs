@@ -27,17 +27,17 @@ pub trait DistributedActor: Actor<Context = Context<Self>> + Clone + 'static {
     fn actor_path(&self) -> String {
         format!("/user/{}", std::any::type_name::<Self>())
     }
-    
+
     /// Get the placement strategy for this actor
     fn placement_strategy(&self) -> PlacementStrategy {
         PlacementStrategy::Random
     }
-    
+
     /// Get the serialization format for this actor
     fn serialization_format(&self) -> SerializationFormat {
         SerializationFormat::Bincode
     }
-    
+
     /// Migrate this actor to another node
     fn migrate_to(&self, _node_id: NodeId, _reason: MigrationReason) -> ClusterResult<uuid::Uuid> {
         // In a real implementation, this would use the MigrationManager
@@ -71,25 +71,25 @@ impl<A: DistributedActor> ActorProps<A> {
             affinity_group: None,
         }
     }
-    
+
     /// Set a custom actor path
     pub fn with_path(mut self, path: impl Into<String>) -> Self {
         self.path = Some(path.into());
         self
     }
-    
+
     /// Set the placement strategy
     pub fn with_strategy(mut self, strategy: PlacementStrategy) -> Self {
         self.strategy = strategy;
         self
     }
-    
+
     /// Set the serialization format
     pub fn with_format(mut self, format: SerializationFormat) -> Self {
         self.format = format;
         self
     }
-    
+
     /// Use local affinity placement strategy
     pub fn with_local_affinity(mut self, group: Option<String>, fallback: PlacementStrategy) -> Self {
         self.strategy = PlacementStrategy::LocalAffinity {
@@ -99,58 +99,58 @@ impl<A: DistributedActor> ActorProps<A> {
         self.affinity_group = group;
         self
     }
-    
+
     /// Use round robin placement strategy
     pub fn with_round_robin(mut self) -> Self {
         self.strategy = PlacementStrategy::RoundRobin;
         self
     }
-    
+
     /// Use least loaded placement strategy
     pub fn with_least_loaded(mut self) -> Self {
         self.strategy = PlacementStrategy::LeastLoaded;
         self
     }
-    
+
     /// Use redundant placement strategy with multiple replicas
     pub fn with_redundancy(mut self, replicas: usize) -> Self {
         self.strategy = PlacementStrategy::Redundant { replicas };
         self
     }
-    
+
     /// Set specific node for placement
     pub fn on_node(mut self, node_id: uuid::Uuid) -> Self {
         self.strategy = PlacementStrategy::Node(node_id);
         self
     }
-    
+
     /// Start the actor with the configured properties
     pub fn start(self) -> Addr<A> {
         // Create the actor with the custom configuration
         let addr = self.actor.clone().start();
-        
+
         // Here we would register with the cluster registry using the configured props
         // In a real implementation, this would get the registry from the system and
         // register the actor with all the custom settings
-        
+
         addr
     }
-    
+
     /// Get the actor instance
     pub fn actor(&self) -> &A {
         &self.actor
     }
-    
+
     /// Get the actor path (custom or default)
     pub fn actor_path(&self) -> String {
         self.path.clone().unwrap_or_else(|| self.actor.actor_path())
     }
-    
+
     /// Get the placement strategy
     pub fn placement_strategy(&self) -> PlacementStrategy {
         self.strategy.clone()
     }
-    
+
     /// Get the serialization format
     pub fn serialization_format(&self) -> SerializationFormat {
         self.format
@@ -166,7 +166,7 @@ pub trait DistributedActorExt: DistributedActor {
     {
         ActorProps::new(self).start()
     }
-    
+
     /// Create props for this actor with fluent configuration API
     fn props(self) -> ActorProps<Self>
     where
@@ -174,7 +174,7 @@ pub trait DistributedActorExt: DistributedActor {
     {
         ActorProps::new(self)
     }
-    
+
     /// Start the actor and wait for a message (async version)
     async fn start_and_wait_async<M, T>(self, msg: M, timeout: Duration) -> ClusterResult<T>
     where
@@ -189,7 +189,7 @@ pub trait DistributedActorExt: DistributedActor {
             Err(_) => Err(ClusterError::Timeout(format!("Timeout waiting for actor response after {:?}", timeout)))
         }
     }
-    
+
     /// Start the actor and wait for a message (sync version)
     fn start_and_wait<M, T>(self, msg: M, timeout: Duration) -> Request<Self, M>
     where
@@ -201,7 +201,7 @@ pub trait DistributedActorExt: DistributedActor {
         let addr = self.start_distributed();
         addr.send(msg)
     }
-    
+
     /// Ask the actor for a response (async helper)
     fn ask<M, T>(&self, addr: &Addr<Self>, msg: M) -> Request<Self, M>
     where
@@ -211,7 +211,7 @@ pub trait DistributedActorExt: DistributedActor {
     {
         addr.send(msg)
     }
-    
+
     /// Ask the actor for a response with timeout (async version)
     async fn ask_async<M, T>(&self, addr: &Addr<Self>, msg: M, timeout: Duration) -> ClusterResult<T>
     where
@@ -227,7 +227,7 @@ pub trait DistributedActorExt: DistributedActor {
 }
 
 // Implement the extension trait for all DistributedActor implementors
-impl<T> DistributedActorExt for T 
+impl<T> DistributedActorExt for T
 where
     T: DistributedActor
 {}
@@ -264,7 +264,7 @@ impl ClusterSystemActor {
             registry: Some(registry),
         }
     }
-    
+
     /// Get the actor registry
     pub fn registry(&self) -> Option<Arc<ActorRegistry>> {
         self.registry.clone()
@@ -273,7 +273,7 @@ impl ClusterSystemActor {
 
 impl Actor for ClusterSystemActor {
     type Context = Context<Self>;
-    
+
     fn started(&mut self, _ctx: &mut Self::Context) {
         log::info!("ClusterSystemActor started");
     }
@@ -293,7 +293,7 @@ pub struct RegisterDistributedActor {
 
 impl Handler<RegisterDistributedActor> for ClusterSystemActor {
     type Result = ClusterResult<()>;
-    
+
     fn handle(&mut self, msg: RegisterDistributedActor, _ctx: &mut Self::Context) -> Self::Result {
         if let Some(registry) = &self.registry {
             registry.register_local(msg.path, msg.addr)
@@ -313,13 +313,13 @@ pub struct HandleRemoteInvocation {
 
 impl Handler<HandleRemoteInvocation> for ClusterSystemActor {
     type Result = ResponseFuture<ClusterResult<Vec<u8>>>;
-    
+
     fn handle(&mut self, msg: HandleRemoteInvocation, _ctx: &mut Self::Context) -> Self::Result {
         let registry = self.registry.clone();
-        
+
         Box::pin(async move {
             if let Some(registry) = registry {
-                if let Some(actor_ref) = registry.lookup(&msg.invocation.actor_path) {
+                if let Some(actor_ref) = registry.lookup(&msg.invocation.actor_path).await {
                     // In a real implementation, this would deserialize the args,
                     // invoke the method on the actor, and serialize the result
                     Err(ClusterError::NotImplemented("Remote invocation".to_string()))
@@ -339,138 +339,138 @@ mod tests {
     use super::*;
     use actix::prelude::*;
     use crate::migration::MigratableActor;
-    
+
     #[derive(Clone, Debug, Serialize, Deserialize)]
     struct TestDistributedActor {
         value: i32,
     }
-    
+
     impl Actor for TestDistributedActor {
         type Context = Context<Self>;
-        
+
         fn started(&mut self, ctx: &mut Self::Context) {
             println!("TestDistributedActor started with path: {:?}", ctx.address());
         }
     }
-    
+
     impl MigratableActor for TestDistributedActor {
         fn get_state(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
             Ok(bincode::serialize(self).unwrap())
         }
-        
+
         fn restore_state(&mut self, state: Vec<u8>) -> Result<(), Box<dyn std::error::Error>> {
             let actor: TestDistributedActor = bincode::deserialize(&state)?;
             self.value = actor.value;
             Ok(())
         }
-        
+
         fn before_migration(&mut self, _ctx: &mut Self::Context) {}
-        
+
         fn after_migration(&mut self, _ctx: &mut Self::Context) {}
-        
+
         fn can_migrate(&self) -> bool {
             true
         }
     }
-    
+
     impl DistributedActor for TestDistributedActor {
         fn actor_path(&self) -> String {
             format!("/user/test-actor-{}", self.value)
         }
-        
+
         fn placement_strategy(&self) -> PlacementStrategy {
             PlacementStrategy::RoundRobin
         }
-        
+
         fn serialization_format(&self) -> SerializationFormat {
             SerializationFormat::Bincode
         }
     }
-    
+
     #[derive(Message)]
     #[rtype(result = "i32")]
     struct GetValue;
-    
+
     impl Handler<GetValue> for TestDistributedActor {
         type Result = i32;
-        
+
         fn handle(&mut self, _msg: GetValue, _ctx: &mut Self::Context) -> Self::Result {
             self.value
         }
     }
-    
+
     #[derive(Message)]
     #[rtype(result = "i32")]
     struct IncrementBy(i32);
-    
+
     impl Handler<IncrementBy> for TestDistributedActor {
         type Result = i32;
-        
+
         fn handle(&mut self, msg: IncrementBy, _ctx: &mut Self::Context) -> Self::Result {
             self.value += msg.0;
             self.value
         }
     }
-    
+
     #[actix_rt::test]
     async fn test_distributed_actor() {
         // Create and start a distributed actor
         let actor = TestDistributedActor { value: 42 };
         let addr = actor.start_distributed();
-        
+
         // Send a message and check the result
         let res = addr.send(GetValue).await.unwrap();
         assert_eq!(res, 42);
     }
-    
+
     #[actix_rt::test]
     async fn test_actor_props() {
         // Create an actor with props
         let actor = TestDistributedActor { value: 42 };
-        
+
         // Test fluent API for actor configuration
         let addr = actor.props()
             .with_path("/user/custom-actor-path")
             .with_local_affinity(Some("test-group".to_string()), PlacementStrategy::RoundRobin)
             .with_format(SerializationFormat::Json)
             .start();
-            
+
         // Send a message and check the result
         let res = addr.send(GetValue).await.unwrap();
         assert_eq!(res, 42);
-        
+
         // Test the increment operation
         let new_value = addr.send(IncrementBy(8)).await.unwrap();
         assert_eq!(new_value, 50);
     }
-    
+
     #[actix_rt::test]
     async fn test_actor_factory() {
         // Test the simplified actor creation function
         let addr = actor(TestDistributedActor { value: 100 })
             .with_round_robin()
             .start();
-            
+
         // Send a message and check the result
         let res = addr.send(GetValue).await.unwrap();
         assert_eq!(res, 100);
     }
-    
+
     #[actix_rt::test]
     async fn test_ask_pattern() {
         // Create an actor - keep a clone for later use
         let actor = TestDistributedActor { value: 42 };
         let actor_ref = actor.clone(); // Clone before moving
-        
+
         // Start the actor - this consumes the original actor
         let addr = actor.start_distributed();
-        
+
         // Test the ask pattern
         let res = addr.send(GetValue).await.unwrap();
         assert_eq!(res, 42);
-        
+
         // Test the ask_async helper with timeout
         let ask_result = actor_ref.ask_async(&addr, IncrementBy(10), Duration::from_secs(1)).await.unwrap();
         assert_eq!(ask_result, 52);
     }
-} 
+}

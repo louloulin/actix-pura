@@ -167,12 +167,12 @@ impl MigrationManager {
             active_migrations: Vec::new(),
         }
     }
-    
+
     /// Set the transport layer
     pub fn set_transport(&mut self, transport: Arc<tokio::sync::Mutex<P2PTransport>>) {
         self.transport = Some(transport);
     }
-    
+
     /// Initiate migration of an actor to another node
     pub async fn migrate_actor(
         &mut self,
@@ -182,10 +182,10 @@ impl MigrationManager {
         options: MigrationOptions,
     ) -> ClusterResult<Uuid> {
         // Check if the actor exists locally
-        if let Some(actor_ref) = self.registry.lookup(actor_path) {
+        if let Some(actor_ref) = self.registry.lookup(actor_path).await {
             // Generate migration ID
             let migration_id = Uuid::new_v4();
-            
+
             // Create migration request
             let request = MigrationRequest {
                 id: migration_id,
@@ -196,14 +196,14 @@ impl MigrationManager {
                 reason,
                 options,
             };
-            
+
             // Record active migration
             self.active_migrations.push((migration_id, MigrationStatus::InProgress));
-            
+
             // Send migration request to target node
             if let Some(transport) = &self.transport {
                 let request_bytes = serialize(&request)?;
-                
+
                 // Create a message envelope
                 let envelope = MessageEnvelope::new(
                     self.local_node_id.clone(),
@@ -213,10 +213,10 @@ impl MigrationManager {
                     DeliveryGuarantee::AtLeastOnce,
                     request_bytes,
                 );
-                
+
                 let mut transport_lock = transport.lock().await;
                 transport_lock.send_message(&target_node, TransportMessage::Envelope(envelope)).await?;
-                
+
                 Ok(migration_id)
             } else {
                 Err(ClusterError::TransportError("Transport not set".to_string()))
@@ -225,23 +225,23 @@ impl MigrationManager {
             Err(ClusterError::ActorNotFound(actor_path.to_string()))
         }
     }
-    
+
     /// Handle incoming migration request
     pub async fn handle_migration_request(&mut self, request: MigrationRequest) -> ClusterResult<()> {
         // Check if we can accept the migration
         let can_accept = true; // In a real implementation, this would check resources
-        
+
         let response = MigrationResponse {
             request_id: request.id,
             accepted: can_accept,
             rejection_reason: if can_accept { None } else { Some("Not enough resources".to_string()) },
         };
-        
+
         // Send response back to the source node
         if let Some(transport) = &self.transport {
             let response_bytes = serialize(&response)?;
-            
-            // Create a message envelope 
+
+            // Create a message envelope
             let envelope = MessageEnvelope::new(
                 self.local_node_id.clone(),
                 request.source_node.clone(),
@@ -250,67 +250,67 @@ impl MigrationManager {
                 DeliveryGuarantee::AtLeastOnce,
                 response_bytes,
             );
-            
+
             let mut transport_lock = transport.lock().await;
             transport_lock.send_message(&request.source_node, TransportMessage::Envelope(envelope)).await?;
-            
+
             if can_accept {
                 // Record active migration
                 self.active_migrations.push((request.id, MigrationStatus::InProgress));
             }
-            
+
             Ok(())
         } else {
             Err(ClusterError::TransportError("Transport not set".to_string()))
         }
     }
-    
+
     /// Handle migration response
     pub async fn handle_migration_response(&mut self, response: MigrationResponse) -> ClusterResult<()> {
         if let Some(position) = self.active_migrations.iter().position(|(id, _)| *id == response.request_id) {
             if response.accepted {
                 // If accepted, prepare to transfer state
                 // In a real implementation, this would extract the actor state and send it
-                
+
                 // For now, just update the status
                 self.active_migrations[position].1 = MigrationStatus::InProgress;
             } else {
                 // If rejected, mark migration as failed
                 self.active_migrations[position].1 = MigrationStatus::Failed;
             }
-            
+
             Ok(())
         } else {
             Err(ClusterError::ProtocolError(format!("Unknown migration request ID: {}", response.request_id)))
         }
     }
-    
+
     /// Complete a migration
     pub async fn complete_migration(&mut self, request_id: Uuid, new_actor_path: String) -> ClusterResult<()> {
         if let Some(position) = self.active_migrations.iter().position(|(id, _)| *id == request_id) {
             self.active_migrations[position].1 = MigrationStatus::Completed;
-            
+
             // In a real implementation, this would update references and clean up
-            
+
             Ok(())
         } else {
             Err(ClusterError::ProtocolError(format!("Unknown migration request ID: {}", request_id)))
         }
     }
-    
+
     /// Fail a migration
     pub async fn fail_migration(&mut self, request_id: Uuid, reason: String) -> ClusterResult<()> {
         if let Some(position) = self.active_migrations.iter().position(|(id, _)| *id == request_id) {
             self.active_migrations[position].1 = MigrationStatus::Failed;
-            
+
             // In a real implementation, this would clean up and possibly retry
-            
+
             Ok(())
         } else {
             Err(ClusterError::ProtocolError(format!("Unknown migration request ID: {}", request_id)))
         }
     }
-    
+
     /// Get migration status
     pub fn get_migration_status(&self, migration_id: Uuid) -> Option<MigrationStatus> {
         self.active_migrations
@@ -324,16 +324,16 @@ impl MigrationManager {
 pub trait MigratableActor: Actor {
     /// Get the current state for migration
     fn get_state(&self) -> Result<Vec<u8>, Box<dyn std::error::Error>>;
-    
+
     /// Restore from migrated state
     fn restore_state(&mut self, state: Vec<u8>) -> Result<(), Box<dyn std::error::Error>>;
-    
+
     /// Called before migration starts
     fn before_migration(&mut self, ctx: &mut Self::Context) {}
-    
+
     /// Called after migration completes
     fn after_migration(&mut self, ctx: &mut Self::Context) {}
-    
+
     /// Whether this actor can be migrated
     fn can_migrate(&self) -> bool {
         true
@@ -352,4 +352,4 @@ pub struct MigrateActor {
     pub options: MigrationOptions,
 }
 
-// Messages for the migration protocol would be defined and handled here 
+// Messages for the migration protocol would be defined and handled here
