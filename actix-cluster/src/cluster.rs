@@ -25,7 +25,7 @@ use crate::registry::ActorRef;
 pub enum Architecture {
     /// Centralized architecture with master-worker nodes
     Centralized,
-    
+
     /// Decentralized architecture with peer nodes
     Decentralized,
 }
@@ -34,25 +34,25 @@ pub enum Architecture {
 pub struct ClusterSystem {
     /// Cluster configuration
     config: ClusterConfig,
-    
+
     /// Local node
     local_node: NodeInfo,
-    
+
     /// Known nodes in the cluster
     nodes: Arc<RwLock<HashMap<NodeId, Node>>>,
-    
+
     /// Service discovery
     discovery: Arc<Mutex<Box<dyn ServiceDiscovery>>>,
-    
+
     /// System actor address
     system_actor: Option<Addr<ClusterSystemActor>>,
-    
+
     /// P2P transport for decentralized architecture
     pub transport: Option<Arc<Mutex<crate::transport::P2PTransport>>>,
-    
+
     /// Actor注册表
     registry: Arc<ActorRegistry>,
-    
+
     /// 注册表Actor
     registry_actor: Option<Addr<RegistryActor>>,
 }
@@ -61,28 +61,39 @@ impl ClusterSystem {
     /// Create a new cluster system with the provided configuration
     pub fn new(config: ClusterConfig) -> Self {
         info!("Creating new cluster system with name: {}", config.cluster_name);
-        
+
         // Create a new local node with provided configuration
         let node_id = NodeId::new();
         println!("Generated node ID: {}", node_id);
-        
+
         let bind_addr = config.bind_addr.clone();
         let public_addr = config.public_addr.clone().unwrap_or_else(|| bind_addr.clone());
-        
+
         info!("Cluster node binding to: {}, public address: {}", bind_addr, public_addr);
-        
+
         let local_node = NodeInfo::new(
             node_id.clone(),
             config.cluster_name.clone(),
             config.node_role.clone(),
             public_addr
         );
-        
+
         info!("Local node info created: {:?}", local_node);
 
         // Create discovery service based on configuration
         let discovery = crate::discovery::create_discovery_service(config.discovery.clone());
-        
+
+        // Create the actor registry with proper cache configuration
+        let mut registry = ActorRegistry::new(local_node.id.clone());
+
+        // Apply cache configuration from ClusterConfig
+        let cache_config = config.get_cache_config();
+        registry.set_cache_ttl(cache_config.get_ttl());
+        registry.set_max_cache_size(cache_config.get_max_size());
+        if !cache_config.is_enabled() {
+            registry.disable_cache();
+        }
+
         // Create the cluster system
         let system = ClusterSystem {
             config: config.clone(),
@@ -91,23 +102,23 @@ impl ClusterSystem {
             discovery: Arc::new(Mutex::new(discovery)),
             system_actor: None,
             transport: None,
-            registry: Arc::new(ActorRegistry::new(local_node.id.clone())),
+            registry: Arc::new(registry),
             registry_actor: None,
         };
-        
-        info!("Cluster system created");
-        
+
+        info!("Cluster system created with cache TTL: {}", cache_config.get_ttl());
+
         // Return the created system
         system
     }
-    
+
     /// Start the cluster system
     pub async fn start(&mut self) -> ClusterResult<Addr<ClusterSystemActor>> {
         info!("Starting cluster system...");
         debug!("Local node: {:?}", self.local_node);
         debug!("Config: {:?}", self.config);
         println!("Starting cluster system with local node: {:?}", self.local_node);
-        
+
         // 创建传输层
         let transport = match self.config.architecture {
             Architecture::Decentralized => {
@@ -118,13 +129,13 @@ impl ClusterSystem {
                     self.local_node.clone(),
                     self.config.serialization_format.clone(),
                 )?;
-                
+
                 // Set compression configuration if available
                 if let Some(compression_config) = self.config.get_compression_config() {
                     info!("Setting compression configuration on P2P transport");
                     transport.set_compression_config(compression_config.clone());
                 }
-                
+
                 Some(Arc::new(Mutex::new(transport)))
             },
             Architecture::Centralized => {
@@ -136,13 +147,13 @@ impl ClusterSystem {
                         self.local_node.clone(),
                         self.config.serialization_format.clone(),
                     )?;
-                    
+
                     // Set compression configuration if available
                     if let Some(compression_config) = self.config.get_compression_config() {
                         info!("Setting compression configuration on P2P transport");
                         transport.set_compression_config(compression_config.clone());
                     }
-                    
+
                     Some(Arc::new(Mutex::new(transport)))
                 } else {
                     // 对于中心化架构中的主节点，目前不需要传输层
@@ -152,15 +163,15 @@ impl ClusterSystem {
                 }
             }
         };
-        
+
         self.transport = transport.clone();
-        
+
         // 创建注册表Actor
         let registry_actor = RegistryActor::new(self.registry.clone()).start();
         self.registry_actor = Some(registry_actor);
-        
+
         println!("Registry actor started");
-        
+
         // 创建系统Actor
         let system_actor = ClusterSystemActor::new(
             self.config.clone(),
@@ -169,30 +180,30 @@ impl ClusterSystem {
             self.discovery.clone(),
             self.transport.clone(),
         );
-        
+
         // 启动系统Actor
         let addr = system_actor.start();
         self.system_actor = Some(addr.clone());
-        
+
         println!("Cluster system started successfully");
         Ok(addr)
     }
-    
+
     /// Get the local node information
     pub fn local_node(&self) -> &NodeInfo {
         &self.local_node
     }
-    
+
     /// Get the cluster configuration
     pub fn config(&self) -> &ClusterConfig {
         &self.config
     }
-    
+
     /// 获取Actor注册表
     pub fn registry(&self) -> Arc<ActorRegistry> {
         self.registry.clone()
     }
-    
+
     /// 注册本地Actor - 使用SimpleActorRef来注册
     pub async fn register<A>(&self, path: &str, addr: Addr<A>) -> ClusterResult<()>
     where
@@ -204,19 +215,19 @@ impl ClusterSystem {
         if self.registry_actor.is_none() {
             return Err(ClusterError::RegistryNotInitialized);
         }
-        
+
         // 创建一个SimpleActorRef
         let actor_ref = Box::new(SimpleActorRef::new(addr, path.to_string())) as Box<dyn ActorRef>;
-        
+
         // 发送注册消息
         self.registry_actor.as_ref().unwrap()
             .send(RegisterLocal {
-                path: path.to_string(), 
+                path: path.to_string(),
                 actor_ref
             })
             .await?
     }
-    
+
     /// 查找Actor
     pub async fn lookup(&self, path: &str) -> Option<Box<dyn ActorRef>> {
         if let Some(registry) = &self.registry_actor {
@@ -228,7 +239,7 @@ impl ClusterSystem {
             None
         }
     }
-    
+
     /// 查找远程Actor
     pub async fn lookup_remote(&self, node_id: &NodeId, path: &str) -> Option<RemoteActorRef> {
         if let Some(transport) = &self.transport {
@@ -242,7 +253,7 @@ impl ClusterSystem {
             None
         }
     }
-    
+
     /// 发送远程消息
     pub async fn send_remote<M: serde::Serialize + Message + 'static>(
         &self,
@@ -254,7 +265,7 @@ impl ClusterSystem {
         if let Some(_transport) = &self.transport {
             let remote_ref = self.lookup_remote(target_node, target_actor).await
                 .ok_or_else(|| ClusterError::ActorNotFound(target_actor.to_string()))?;
-            
+
             remote_ref.send(message).await
         } else {
             Err(ClusterError::TransportNotInitialized)
@@ -266,9 +277,9 @@ impl ClusterSystem {
         if self.registry_actor.is_none() {
             return None;
         }
-        
-        match self.registry_actor.as_ref().unwrap().send(DiscoverActor { 
-            path: path.to_string() 
+
+        match self.registry_actor.as_ref().unwrap().send(DiscoverActor {
+            path: path.to_string()
         }).await {
             Ok(actor_ref) => actor_ref,
             Err(e) => {
@@ -340,24 +351,24 @@ impl ClusterSystem {
             Some(t) => t.clone(),
             None => return Err(ClusterError::TransportNotAvailable),
         };
-        
+
         // Get the system name for logging
         let system_name = self.local_node().name.clone();
-        
+
         // Spawn the background task
         tokio::spawn(async move {
             let interval = Duration::from_secs(interval_secs);
-            
+
             loop {
                 // Sleep first to allow initial connections to establish naturally
                 tokio::time::sleep(interval).await;
-                
+
                 // Get a list of peers without holding the lock across an await point
                 let peer_ids = {
                     let transport_guard = transport.lock().await;
                     transport_guard.get_peers().into_iter().map(|node| node.id).collect::<Vec<NodeId>>()
                 };
-                
+
                 // For each peer, check connection and reconnect if needed
                 for peer_id in peer_ids {
                     // Skip reconnection attempt if already connected
@@ -365,19 +376,19 @@ impl ClusterSystem {
                         let transport_guard = transport.lock().await;
                         transport_guard.is_connected(&peer_id)
                     };
-                    
+
                     if is_connected {
                         debug!("[{}] Peer {} is already connected", system_name, peer_id);
                         continue;
                     }
-                    
+
                     // Attempt to reconnect
                     debug!("[{}] Attempting to reconnect to peer {}", system_name, peer_id);
                     let reconnect_result = {
                         let transport_guard = transport.lock().await;
                         transport_guard.reconnect_to_peer(&peer_id).await
                     };
-                    
+
                     match reconnect_result {
                         Ok(true) => info!("[{}] Successfully reconnected to peer {}", system_name, peer_id),
                         Ok(false) => warn!("[{}] Reconnection attempt to peer {} failed but recoverable", system_name, peer_id),
@@ -386,7 +397,7 @@ impl ClusterSystem {
                 }
             }
         });
-        
+
         Ok(())
     }
 }
@@ -395,16 +406,16 @@ impl ClusterSystem {
 pub struct ClusterSystemActor {
     /// Cluster configuration
     config: ClusterConfig,
-    
+
     /// Local node information
     local_node: NodeInfo,
-    
+
     /// Known nodes in the cluster
     nodes: Arc<RwLock<HashMap<NodeId, Node>>>,
-    
+
     /// Service discovery
     discovery: Arc<Mutex<Box<dyn ServiceDiscovery>>>,
-    
+
     /// P2P transport for decentralized architecture
     transport: Option<Arc<Mutex<crate::transport::P2PTransport>>>,
 }
@@ -426,27 +437,27 @@ impl ClusterSystemActor {
             transport,
         }
     }
-    
+
     /// Register the local node with the discovery service
     async fn register_local_node(&self) -> ClusterResult<()> {
         let mut discovery = self.discovery.lock().await;
         discovery.register_node(&self.local_node).await
     }
-    
+
     /// Discover nodes using the discovery service
     async fn discover_nodes(&self) -> ClusterResult<Vec<NodeInfo>> {
         log::debug!("Discovering nodes...");
         let mut discovery = self.discovery.lock().await;
         let result = discovery.discover_nodes().await?;
-        
+
         log::debug!("Discovered {} nodes", result.len());
         Ok(result)
     }
-    
+
     /// Update node statuses based on heartbeats
     async fn update_node_statuses(&self) -> ClusterResult<()> {
         let mut nodes_to_update = Vec::new();
-        
+
         // Collect nodes to update
         {
             let nodes = self.nodes.read().await;
@@ -456,13 +467,13 @@ impl ClusterSystemActor {
                 }
             }
         }
-        
+
         // Update node statuses in discovery service
         let mut discovery = self.discovery.lock().await;
         for node_id in nodes_to_update {
             discovery.update_node_status(&node_id, NodeStatus::Unreachable).await?;
         }
-        
+
         Ok(())
     }
 
@@ -476,14 +487,14 @@ impl ClusterSystemActor {
     /// Send a heartbeat to all known nodes
     fn send_heartbeat(&mut self, ctx: &mut <Self as Actor>::Context) {
         log::debug!("Sending heartbeat from node {}", self.local_node.id);
-        
+
         // In decentralized mode, send heartbeats directly via transport
         if self.config.architecture == Architecture::Decentralized {
             if let Some(transport) = &self.transport {
                 let transport_clone = transport.clone();
                 let local_node_info = self.local_node.clone();
                 let nodes_clone = self.nodes.clone();
-                
+
                 // Send heartbeat in background
                 let fut = async move {
                     // Get nodes to send heartbeat to
@@ -491,13 +502,13 @@ impl ClusterSystemActor {
                         let nodes = nodes_clone.read().await;
                         nodes.keys().cloned().collect::<Vec<NodeId>>()
                     };
-                    
+
                     for node_id in nodes_vec {
                         // Skip local node
                         if node_id == local_node_info.id {
                             continue;
                         }
-                        
+
                         // Send heartbeat message
                         let message = crate::transport::TransportMessage::Heartbeat(local_node_info.clone());
                         let mut transport = transport_clone.lock().await;
@@ -507,7 +518,7 @@ impl ClusterSystemActor {
                     }
                     Ok::<(), ClusterError>(())
                 };
-                
+
                 // Spawn future and convert Result to ()
                 let fut = fut.into_actor(self)
                     .map(|res, _act, _ctx| {
@@ -516,15 +527,15 @@ impl ClusterSystemActor {
                         }
                         // Return unit to match ActorFuture<Output = ()>
                     });
-                
+
                 ctx.spawn(fut);
             }
         }
-        
+
         // In both modes, update discovery service
         let discovery = self.discovery.clone();
         let local_node = self.local_node.clone();
-        
+
         let fut = async move {
             let mut discovery = discovery.lock().await;
             discovery.update_node_status(&local_node.id, NodeStatus::Up).await
@@ -535,14 +546,14 @@ impl ClusterSystemActor {
             }
             // Return unit to match ActorFuture<Output = ()>
         });
-        
+
         ctx.spawn(fut);
     }
-    
+
     /// Notify about node status change
     fn notify_node_status_changed(&mut self, node_id: &NodeId, status: NodeStatus) {
         log::info!("Node {} status changed to {:?}", node_id, status);
-        
+
         // In decentralized mode, notify other nodes via transport
         if self.config.architecture == Architecture::Decentralized {
             if let Some(transport) = &self.transport {
@@ -550,7 +561,7 @@ impl ClusterSystemActor {
                 let status = status.clone();
                 let transport_clone = transport.clone();
                 let nodes_clone = self.nodes.clone();
-                
+
                 // Send status update in background
                 actix::spawn(async move {
                     // Get nodes to notify
@@ -558,19 +569,19 @@ impl ClusterSystemActor {
                         let nodes = nodes_clone.read().await;
                         nodes.keys().cloned().collect::<Vec<NodeId>>()
                     };
-                    
+
                     for target_id in nodes_vec {
                         // Skip the node that changed status
                         if target_id == node_id {
                             continue;
                         }
-                        
+
                         // Send status update message
                         let message = crate::transport::TransportMessage::StatusUpdate(
                             node_id.clone(),
                             status.to_string()
                         );
-                        
+
                         let mut transport = transport_clone.lock().await;
                         if let Err(e) = transport.send_message(&target_id, message).await {
                             log::warn!("Failed to send status update to node {}: {}", target_id, e);
@@ -579,19 +590,19 @@ impl ClusterSystemActor {
                 });
             }
         }
-        
+
         // TODO: Notify local subscribers when actor registry is implemented
     }
 }
 
 impl Actor for ClusterSystemActor {
     type Context = Context<Self>;
-    
+
     fn started(&mut self, ctx: &mut Self::Context) {
         // Register the local node
         let discovery = self.discovery.clone();
         let local_node = self.local_node.clone();
-        
+
         // Register with the discovery service
         let fut = async move {
             let mut discovery = discovery.lock().await;
@@ -603,22 +614,22 @@ impl Actor for ClusterSystemActor {
                 ctx.stop();
                 return;
             }
-            
+
             log::info!("Local node registered: {}", act.local_node.id);
-            
+
             // Start regular heartbeat
             ctx.run_interval(act.config.heartbeat_interval, |act, ctx| {
                 // Execute heartbeat
                 act.send_heartbeat(ctx);
             });
-            
+
             // Start discovery interval - using default 30 seconds
             let discovery_interval = Duration::from_secs(30);
-            
+
             ctx.run_interval(discovery_interval, move |act, ctx| {
                 // 使用克隆的变量进行节点发现，避免借用act
                 let discovery_clone = act.discovery.clone();
-                
+
                 // Create async function to discover nodes
                 ctx.spawn(async move {
                     let mut discovery = discovery_clone.lock().await;
@@ -635,15 +646,15 @@ impl Actor for ClusterSystemActor {
                 }));
             });
         });
-        
+
         ctx.spawn(fut);
     }
-    
+
     fn stopping(&mut self, _ctx: &mut Self::Context) -> Running {
         log::info!("Cluster system actor is stopping");
         Running::Stop
     }
-    
+
     fn stopped(&mut self, _ctx: &mut Self::Context) {
         log::info!("Cluster system actor stopped");
     }
@@ -651,16 +662,16 @@ impl Actor for ClusterSystemActor {
 
 impl Handler<MessageEnvelope> for ClusterSystemActor {
     type Result = ();  // 与MessageEnvelope::Result类型一致
-    
+
     fn handle(&mut self, envelope: MessageEnvelope, ctx: &mut Self::Context) {
         // 使用一个异步块来处理消息，避免阻塞actor
         let transport = self.transport.clone();
         let nodes = self.nodes.clone();
-        
+
         ctx.spawn(
             async move {
                 debug!("Handling message envelope: {:?}", envelope);
-                
+
                 // Check message type and route accordingly
                 match envelope.message_type {
                     MessageType::ActorMessage => {
@@ -724,8 +735,8 @@ pub struct SimpleActorRef {
 
 impl SimpleActorRef {
     /// 创建一个新的SimpleActorRef
-    pub fn new<A>(addr: Addr<A>, path: String) -> Self 
-    where 
+    pub fn new<A>(addr: Addr<A>, path: String) -> Self
+    where
         A: Actor + Handler<AnyMessage>,
         <A as Handler<AnyMessage>>::Result: Send,
         A::Context: ToEnvelope<A, AnyMessage>,
@@ -736,7 +747,7 @@ impl SimpleActorRef {
             addr_clone.do_send(AnyMessage(msg));
             Ok(())
         });
-        
+
         Self { path, sender }
     }
 }
@@ -754,11 +765,11 @@ impl ActorRef for SimpleActorRef {
     fn send_any(&self, msg: Box<dyn std::any::Any + Send>) -> ClusterResult<()> {
         (self.sender)(msg)
     }
-    
+
     fn path(&self) -> &str {
         &self.path
     }
-    
+
     fn clone_box(&self) -> Box<dyn ActorRef> {
         Box::new(self.clone())
     }
@@ -771,7 +782,7 @@ pub struct GetPeers {}
 
 impl Handler<GetPeers> for ClusterSystemActor {
     type Result = MessageResult<GetPeers>;
-    
+
     fn handle(&mut self, _msg: GetPeers, _ctx: &mut Self::Context) -> Self::Result {
         let peers = {
             let nodes = self.nodes.blocking_read();
@@ -780,7 +791,7 @@ impl Handler<GetPeers> for ClusterSystemActor {
                 .map(|node| node.info.clone())
                 .collect()
         };
-        
+
         MessageResult(peers)
     }
 }
@@ -792,7 +803,7 @@ pub struct GetLocalActors {}
 
 impl Handler<GetLocalActors> for RegistryActor {
     type Result = MessageResult<GetLocalActors>;
-    
+
     fn handle(&mut self, _msg: GetLocalActors, _ctx: &mut Self::Context) -> Self::Result {
         if let Some(registry) = self.registry() {
             MessageResult(registry.get_local_actors())
@@ -809,7 +820,7 @@ mod tests {
     use crate::discovery::MockDiscovery;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::time::Duration;
-    
+
     #[test]
     fn test_cluster_system_creation() {
         let config = ClusterConfig::new()
@@ -818,11 +829,11 @@ mod tests {
             .cluster_name("test-cluster".to_string())
             .build()
             .unwrap();
-        
+
         let system = ClusterSystem::new(config);
-        
+
         assert_eq!(system.config().architecture, Architecture::Decentralized);
         assert_eq!(system.config().node_role, NodeRole::Peer);
         assert_eq!(system.local_node().role, NodeRole::Peer);
     }
-} 
+}

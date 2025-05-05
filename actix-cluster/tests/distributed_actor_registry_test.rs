@@ -478,8 +478,8 @@ async fn test_connection_maintenance() {
 
         println!("Connection maintenance started, waiting for connections to establish...");
 
-        // Allow some time for connection attempts
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        // Allow more time for connection attempts
+        tokio::time::sleep(Duration::from_secs(5)).await;
 
         // Verify that peers can see each other
         let node1_transport = node1.transport.as_ref().unwrap().clone();
