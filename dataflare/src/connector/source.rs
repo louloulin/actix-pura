@@ -112,7 +112,7 @@ impl SourceConnector for MemorySourceConnector {
         Ok(self.schema.clone())
     }
 
-    async fn read(&mut self, state: Option<SourceState>) -> Result<Box<dyn Stream<Item = Result<DataRecord>> + Send + Unpin>> {
+    async fn read(&mut self, _state: Option<SourceState>) -> Result<Box<dyn Stream<Item = Result<DataRecord>> + Send + Unpin>> {
         // Crear un stream a partir de los datos en memoria
         let data = self.data.clone();
         let stream = futures::stream::iter(data.into_iter().map(Ok));

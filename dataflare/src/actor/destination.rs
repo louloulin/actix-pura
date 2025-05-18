@@ -174,9 +174,10 @@ impl Handler<LoadBatch> for DestinationActor {
 
         // Verificar que el actor esté inicializado
         if self.status != ActorStatus::Initialized && self.status != ActorStatus::Running {
+            let status = self.status.clone();
             return Box::pin(async move {
                 Err(DataFlareError::Actor(format!(
-                    "Actor no está en estado adecuado para carga: {:?}", self.status
+                    "Actor no está en estado adecuado para carga: {:?}", status
                 )))
             }.into_actor(self));
         }
@@ -188,9 +189,8 @@ impl Handler<LoadBatch> for DestinationActor {
         self.report_progress(&msg.workflow_id, WorkflowPhase::Loading, 0.0, "Iniciando carga");
 
         // Crear una copia de los valores necesarios para el futuro
-        let workflow_id = msg.workflow_id.clone();
         let batch = msg.batch.clone();
-        let config = msg.config.clone();
+        let _config = msg.config.clone();
 
         // Iniciar la carga en un futuro
         let fut = async move {
@@ -204,17 +204,21 @@ impl Handler<LoadBatch> for DestinationActor {
             Ok(())
         };
 
+        // Clonar workflow_id para el callback
+        let workflow_id_for_callback = msg.workflow_id.clone();
+        let batch_size = batch.records.len() as u64;
+
         Box::pin(fut.into_actor(self).map(move |result: Result<()>, actor, _ctx| {
             match result {
                 Ok(_) => {
-                    actor.report_progress(&workflow_id, WorkflowPhase::Loading, 1.0, "Carga completada");
+                    actor.report_progress(&workflow_id_for_callback, WorkflowPhase::Loading, 1.0, "Carga completada");
                     actor.status = ActorStatus::Initialized;
-                    actor.records_processed += batch.records.len() as u64;
+                    actor.records_processed += batch_size;
                     Ok(())
                 },
                 Err(e) => {
                     error!("Error en carga: {}", e);
-                    actor.report_progress(&workflow_id, WorkflowPhase::Error, 0.0, &format!("Error en carga: {}", e));
+                    actor.report_progress(&workflow_id_for_callback, WorkflowPhase::Error, 0.0, &format!("Error en carga: {}", e));
                     actor.status = ActorStatus::Error(e.to_string());
                     Err(e)
                 }
@@ -281,7 +285,6 @@ impl Handler<crate::actor::UnsubscribeFromProgress> for DestinationActor {
 mod tests {
     use super::*;
     use crate::connector::MockDestinationConnector;
-    use actix::prelude::*;
 
     #[actix::test]
     async fn test_destination_actor_initialization() {

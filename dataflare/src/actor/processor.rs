@@ -199,9 +199,9 @@ impl Handler<ProcessBatch> for ProcessorActor {
         self.report_progress(&msg.workflow_id, WorkflowPhase::Transforming, 0.0, "Iniciando procesamiento");
 
         // Crear una copia de los valores necesarios para el futuro
-        let workflow_id = msg.workflow_id.clone();
+        let workflow_id_clone = msg.workflow_id.clone();
         let batch = msg.batch.clone();
-        let config = msg.config.clone();
+        let _config = msg.config.clone();
         let next_actor = self.next_actor.clone();
 
         // Iniciar el procesamiento en un futuro
@@ -227,7 +227,7 @@ impl Handler<ProcessBatch> for ProcessorActor {
             // Si hay un actor siguiente, enviar el lote procesado
             if let Some(next) = next_actor {
                 next.send(SendBatch {
-                    workflow_id: workflow_id.clone(),
+                    workflow_id: workflow_id_clone.clone(),
                     batch: processed_batch.clone(),
                 }).await.map_err(|e| DataFlareError::Actor(format!("Error al enviar lote procesado: {}", e)))?;
             }
@@ -235,17 +235,20 @@ impl Handler<ProcessBatch> for ProcessorActor {
             Ok(processed_batch)
         };
 
+        // Clonar workflow_id para el callback
+        let workflow_id_for_callback = msg.workflow_id.clone();
+
         Box::pin(fut.into_actor(self).map(move |result: Result<DataRecordBatch>, actor, _ctx| {
             match result {
                 Ok(batch) => {
-                    actor.report_progress(&workflow_id, WorkflowPhase::Transforming, 1.0, "Procesamiento completado");
+                    actor.report_progress(&workflow_id_for_callback, WorkflowPhase::Transforming, 1.0, "Procesamiento completado");
                     actor.status = ActorStatus::Initialized;
                     actor.records_processed += batch.records.len() as u64;
                     Ok(batch)
                 },
                 Err(e) => {
                     error!("Error en procesamiento: {}", e);
-                    actor.report_progress(&workflow_id, WorkflowPhase::Error, 0.0, &format!("Error en procesamiento: {}", e));
+                    actor.report_progress(&workflow_id_for_callback, WorkflowPhase::Error, 0.0, &format!("Error en procesamiento: {}", e));
                     actor.status = ActorStatus::Error(e.to_string());
                     Err(e)
                 }
@@ -312,7 +315,6 @@ impl Handler<crate::actor::UnsubscribeFromProgress> for ProcessorActor {
 mod tests {
     use super::*;
     use crate::processor::MockProcessor;
-    use actix::prelude::*;
 
     #[actix::test]
     async fn test_processor_actor_initialization() {

@@ -125,7 +125,7 @@ impl DestinationConnector for MemoryDestinationConnector {
         Ok(true)
     }
 
-    async fn prepare_schema(&self, schema: &Schema) -> Result<()> {
+    async fn prepare_schema(&self, _schema: &Schema) -> Result<()> {
         // No hace nada, siempre exitoso
         Ok(())
     }
