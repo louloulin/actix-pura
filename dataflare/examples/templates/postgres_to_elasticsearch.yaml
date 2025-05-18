@@ -1,0 +1,197 @@
+# PostgreSQL 到 Elasticsearch 工作流模板
+id: postgres-to-elasticsearch
+name: PostgreSQL to Elasticsearch
+description: 将 PostgreSQL 数据同步到 Elasticsearch 的工作流模板
+version: 1.0.0
+
+# 模板参数
+parameters:
+  workflow_id:
+    name: 工作流 ID
+    description: 工作流的唯一标识符
+    type: string
+    required: true
+    default: postgres-to-es-workflow
+  
+  workflow_name:
+    name: 工作流名称
+    description: 工作流的显示名称
+    type: string
+    required: true
+    default: PostgreSQL to Elasticsearch Workflow
+  
+  postgres_host:
+    name: PostgreSQL 主机
+    description: PostgreSQL 数据库主机地址
+    type: string
+    required: true
+    default: localhost
+  
+  postgres_port:
+    name: PostgreSQL 端口
+    description: PostgreSQL 数据库端口
+    type: number
+    required: true
+    default: 5432
+  
+  postgres_database:
+    name: PostgreSQL 数据库名
+    description: PostgreSQL 数据库名称
+    type: string
+    required: true
+  
+  postgres_username:
+    name: PostgreSQL 用户名
+    description: PostgreSQL 数据库用户名
+    type: string
+    required: true
+  
+  postgres_password:
+    name: PostgreSQL 密码
+    description: PostgreSQL 数据库密码
+    type: string
+    required: true
+  
+  postgres_table:
+    name: PostgreSQL 表名
+    description: 要同步的 PostgreSQL 表名
+    type: string
+    required: true
+  
+  extraction_mode:
+    name: 提取模式
+    description: 数据提取模式
+    type: enum
+    required: true
+    default: full
+    options:
+      - full
+      - incremental
+      - cdc
+  
+  incremental_cursor_field:
+    name: 增量游标字段
+    description: 用于增量提取的游标字段（仅在增量模式下使用）
+    type: string
+    required: false
+    default: updated_at
+  
+  incremental_cursor_value:
+    name: 增量游标初始值
+    description: 增量游标的初始值（仅在增量模式下使用）
+    type: string
+    required: false
+    default: "2023-01-01T00:00:00Z"
+  
+  elasticsearch_host:
+    name: Elasticsearch 主机
+    description: Elasticsearch 主机地址
+    type: string
+    required: true
+    default: localhost
+  
+  elasticsearch_port:
+    name: Elasticsearch 端口
+    description: Elasticsearch 端口
+    type: number
+    required: true
+    default: 9200
+  
+  elasticsearch_index:
+    name: Elasticsearch 索引
+    description: Elasticsearch 索引名称
+    type: string
+    required: true
+  
+  elasticsearch_id_field:
+    name: Elasticsearch ID 字段
+    description: 用作 Elasticsearch 文档 ID 的字段
+    type: string
+    required: true
+    default: id
+  
+  schedule_type:
+    name: 调度类型
+    description: 工作流调度类型
+    type: enum
+    required: true
+    default: cron
+    options:
+      - cron
+      - interval
+      - once
+  
+  schedule_expression:
+    name: 调度表达式
+    description: 工作流调度表达式
+    type: string
+    required: true
+    default: "0 0 * * *"
+  
+  schedule_timezone:
+    name: 调度时区
+    description: 工作流调度时区
+    type: string
+    required: false
+    default: UTC
+
+# 模板内容
+template: |
+  # PostgreSQL 到 Elasticsearch 工作流
+  id: {{ workflow_id }}
+  name: {{ workflow_name }}
+  description: 将 PostgreSQL 数据同步到 Elasticsearch
+  version: 1.0.0
+
+  # 数据源配置
+  sources:
+    postgres_source:
+      type: postgres
+      mode: {{ extraction_mode }}
+      config:
+        host: {{ postgres_host }}
+        port: {{ postgres_port }}
+        database: {{ postgres_database }}
+        username: {{ postgres_username }}
+        password: {{ postgres_password }}
+        table: {{ postgres_table }}
+        {% if extraction_mode == "incremental" %}
+        incremental:
+          cursor_field: {{ incremental_cursor_field }}
+          cursor_value: {{ incremental_cursor_value }}
+        {% endif %}
+        {% if extraction_mode == "cdc" %}
+        cdc:
+          slot_name: dataflare_{{ postgres_table }}_slot
+          publication_name: dataflare_{{ postgres_table }}_pub
+          plugin: pgoutput
+        {% endif %}
+
+  # 转换配置
+  transformations:
+    data_mapping:
+      inputs:
+        - postgres_source
+      type: mapping
+      config:
+        mappings:
+          - source: "*"
+            destination: "*"
+
+  # 目标配置
+  destinations:
+    elasticsearch_destination:
+      inputs:
+        - data_mapping
+      type: elasticsearch
+      config:
+        host: {{ elasticsearch_host }}
+        port: {{ elasticsearch_port }}
+        index: {{ elasticsearch_index }}
+        id_field: {{ elasticsearch_id_field }}
+
+  # 调度配置
+  schedule:
+    type: {{ schedule_type }}
+    expression: {{ schedule_expression }}
+    timezone: {{ schedule_timezone }}

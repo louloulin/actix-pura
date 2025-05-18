@@ -5,11 +5,13 @@
 mod builder;
 mod executor;
 mod parser;
+mod template;
 mod yaml_parser;
 
 pub use builder::WorkflowBuilder;
 pub use executor::WorkflowExecutor;
 pub use parser::WorkflowParser;
+pub use template::{WorkflowTemplate, WorkflowTemplateManager, TemplateParameter, TemplateParameterValues};
 pub use yaml_parser::YamlWorkflowParser;
 
 use std::collections::HashMap;

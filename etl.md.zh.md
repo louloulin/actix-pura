@@ -1611,24 +1611,37 @@ spec:
 1. **从 YAML 文件加载工作流定义**：
    - 支持从文件系统加载 YAML 工作流定义
    - 提供友好的错误消息，帮助用户调试 YAML 工作流定义
+   - 支持环境变量替换，格式为 `${ENV_VAR}` 或 `${ENV_VAR:-default}`
 
 2. **灵活的 YAML 格式支持**：
    - 支持直接解析为 Workflow 结构
    - 支持更灵活的 YamlWorkflowDefinition 格式
    - 自动转换 YAML 值到 JSON 配置
 
-3. **完整的工作流验证**：
+3. **工作流模板系统**：
+   - 支持创建和使用可重用的工作流模板
+   - 模板参数化，支持不同类型的参数（字符串、数字、布尔值、对象、数组、枚举）
+   - 参数验证，确保必需参数存在且值有效
+   - 模板目录管理，支持加载和保存模板
+
+4. **增强的工作流验证**：
    - 验证工作流结构和依赖关系
-   - 检测循环依赖
+   - 检测循环依赖并识别循环路径
    - 识别未使用的组件
+   - 检测孤立组件（没有输入和输出）
+   - 检测悬空组件（有输入但没有输出）
+   - 检测未连接的源组件（没有输出）
    - 生成工作流 DAG 图
 
-4. **命令行工具**：
+5. **命令行工具**：
    - 提供命令行界面，用于验证和执行 YAML 工作流
    - 支持生成 DOT 图，用于可视化工作流
+   - 详细的验证报告，包括所有检测到的问题
 
-5. **示例工作流**：
+6. **示例工作流和模板**：
    - 提供简单、增量和 CDC 模式的示例 YAML 工作流
+   - 提供工作流模板示例，如 PostgreSQL 到 Elasticsearch 模板
+   - 提供有问题的工作流示例，用于测试验证功能
    - 详细的文档和最佳实践指南
 
 使用示例：
@@ -1640,6 +1653,49 @@ let workflow = YamlWorkflowParser::load_from_file("workflow.yaml")?;
 // 验证工作流
 let mut parser = WorkflowParser::new(workflow.clone());
 parser.parse()?;
+
+// 检查工作流是否有问题
+if parser.has_cycles() {
+    println!("工作流包含循环!");
+    if let Some(cycle_path) = parser.get_cycle_path() {
+        println!("循环路径: {:?}", cycle_path);
+    }
+}
+
+// 检查未使用的组件
+let unused = parser.find_unused_components();
+if !unused.is_empty() {
+    println!("未使用的组件: {:?}", unused);
+}
+
+// 执行工作流
+let mut executor = WorkflowExecutor::new();
+executor.execute(&workflow).await?;
+```
+
+使用工作流模板示例：
+
+```rust
+// 创建模板管理器
+let mut template_manager = WorkflowTemplateManager::new("templates")?;
+
+// 加载模板
+template_manager.load_templates()?;
+
+// 创建参数值
+let param_values = TemplateParameterValues {
+    values: serde_json::from_value(json!({
+        "workflow_id": "my-postgres-to-es",
+        "postgres_database": "testdb",
+        "postgres_username": "postgres",
+        "postgres_password": "postgres",
+        "postgres_table": "users",
+        "elasticsearch_index": "users"
+    }))?,
+};
+
+// 应用模板
+let workflow = template_manager.apply_template("postgres-to-elasticsearch", &param_values)?;
 
 // 执行工作流
 let mut executor = WorkflowExecutor::new();
@@ -1654,19 +1710,23 @@ name: Simple Workflow
 description: 一个简单的数据集成工作流示例
 version: 1.0.0
 
+# 数据源配置
 sources:
   users:
     type: postgres
     mode: incremental
     config:
-      host: localhost
-      port: 5432
+      host: ${POSTGRES_HOST:-localhost}
+      port: ${POSTGRES_PORT:-5432}
       database: testdb
+      username: ${POSTGRES_USERNAME}
+      password: ${POSTGRES_PASSWORD}
       table: users
       incremental:
         cursor_field: updated_at
         cursor_value: "2023-01-01T00:00:00Z"
 
+# 转换配置
 transformations:
   user_transform:
     inputs:
@@ -1678,16 +1738,101 @@ transformations:
           destination: user.name
         - source: email
           destination: user.email
+          transform: lowercase
 
+# 目标配置
 destinations:
   es_users:
     inputs:
       - user_transform
     type: elasticsearch
     config:
-      host: localhost
-      port: 9200
+      host: ${ES_HOST:-localhost}
+      port: ${ES_PORT:-9200}
       index: users
+
+# 调度配置
+schedule:
+  type: cron
+  expression: "0 0 * * *"
+  timezone: UTC
+```
+
+工作流模板示例：
+
+```yaml
+# PostgreSQL 到 Elasticsearch 工作流模板
+id: postgres-to-elasticsearch
+name: PostgreSQL to Elasticsearch
+description: 将 PostgreSQL 数据同步到 Elasticsearch 的工作流模板
+version: 1.0.0
+
+# 模板参数
+parameters:
+  workflow_id:
+    name: 工作流 ID
+    description: 工作流的唯一标识符
+    type: string
+    required: true
+    default: postgres-to-es-workflow
+
+  postgres_host:
+    name: PostgreSQL 主机
+    description: PostgreSQL 数据库主机地址
+    type: string
+    required: true
+    default: localhost
+
+  postgres_database:
+    name: PostgreSQL 数据库名
+    description: PostgreSQL 数据库名称
+    type: string
+    required: true
+
+  postgres_table:
+    name: PostgreSQL 表名
+    description: 要同步的 PostgreSQL 表名
+    type: string
+    required: true
+
+  elasticsearch_index:
+    name: Elasticsearch 索引
+    description: Elasticsearch 索引名称
+    type: string
+    required: true
+
+# 模板内容
+template: |
+  id: {{ workflow_id }}
+  name: PostgreSQL to Elasticsearch Workflow
+  description: 将 PostgreSQL 数据同步到 Elasticsearch
+  version: 1.0.0
+
+  sources:
+    postgres_source:
+      type: postgres
+      config:
+        host: {{ postgres_host }}
+        database: {{ postgres_database }}
+        table: {{ postgres_table }}
+
+  transformations:
+    data_mapping:
+      inputs:
+        - postgres_source
+      type: mapping
+      config:
+        mappings:
+          - source: "*"
+            destination: "*"
+
+  destinations:
+    elasticsearch_destination:
+      inputs:
+        - data_mapping
+      type: elasticsearch
+      config:
+        index: {{ elasticsearch_index }}
 ```
 
 ### DataFlare 模块
