@@ -38,7 +38,7 @@ pub use crate::{
     message::{DataRecord, DataRecordBatch},
     model::{DataType, Field, Schema},
     plugin::PluginManager,
-    processor::Processor,
+    processor::{Processor, AggregateProcessor, FilterProcessor, MappingProcessor},
     registry::ConnectorRegistry,
     state::{CheckpointState, SourceState},
     workflow::{Workflow, WorkflowBuilder, WorkflowExecutor},

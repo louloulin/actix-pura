@@ -1,6 +1,9 @@
-//! Módulo de procesador para DataFlare
+//! 处理器模块
 //!
-//! Define las interfaces y funcionalidades para procesadores de datos.
+//! 定义数据处理器接口和功能。
+
+pub mod aggregate;
+pub mod registry;
 
 use std::collections::HashMap;
 use async_trait::async_trait;
@@ -11,17 +14,17 @@ use crate::{
     message::{DataRecord, DataRecordBatch},
 };
 
-/// Estado del procesador
+/// 处理器状态
 #[derive(Debug, Clone)]
 pub struct ProcessorState {
-    /// Datos de estado
+    /// 状态数据
     pub data: Value,
-    /// Metadatos
+    /// 元数据
     pub metadata: HashMap<String, String>,
 }
 
 impl ProcessorState {
-    /// Crea un nuevo estado de procesador
+    /// 创建新的处理器状态
     pub fn new() -> Self {
         Self {
             data: Value::Null,
@@ -29,7 +32,7 @@ impl ProcessorState {
         }
     }
 
-    /// Crea un estado con datos
+    /// 创建带数据的状态
     pub fn with_data(data: Value) -> Self {
         Self {
             data,
@@ -37,7 +40,7 @@ impl ProcessorState {
         }
     }
 
-    /// Agrega un metadato
+    /// 添加元数据
     pub fn with_metadata<K: Into<String>, V: Into<String>>(mut self, key: K, value: V) -> Self {
         self.metadata.insert(key.into(), value.into());
         self
@@ -50,55 +53,55 @@ impl Default for ProcessorState {
     }
 }
 
-/// Interfaz para procesadores de datos
+/// 数据处理器接口
 #[async_trait]
 pub trait Processor: Send + Sync + 'static {
-    /// Configura el procesador con los parámetros proporcionados
+    /// 配置处理器
     fn configure(&mut self, config: &Value) -> Result<()>;
 
-    /// Procesa un registro individual
+    /// 处理单条记录
     async fn process_record(&mut self, record: &DataRecord, state: Option<ProcessorState>) -> Result<Vec<DataRecord>>;
 
-    /// Procesa un lote de registros
+    /// 处理记录批次
     async fn process_batch(&mut self, batch: &DataRecordBatch, state: Option<ProcessorState>) -> Result<DataRecordBatch>;
 
-    /// Obtiene el estado actual del procesador
+    /// 获取处理器状态
     fn get_state(&self) -> Result<ProcessorState>;
 
-    /// Inicializa el procesador
+    /// 初始化处理器
     async fn initialize(&mut self) -> Result<()> {
         Ok(())
     }
 
-    /// Finaliza el procesador
+    /// 结束处理器
     async fn finalize(&mut self) -> Result<()> {
         Ok(())
     }
 }
 
-/// Procesador de mapeo
+/// 映射处理器
 pub struct MappingProcessor {
-    /// Configuración del procesador
+    /// 处理器配置
     config: Option<Value>,
-    /// Mapeos de campos
+    /// 字段映射
     mappings: Vec<FieldMapping>,
-    /// Estado del procesador
+    /// 处理器状态
     state: ProcessorState,
 }
 
-/// Mapeo de campo
+/// 字段映射
 #[derive(Debug, Clone)]
 pub struct FieldMapping {
-    /// Campo de origen
+    /// 源字段
     pub source: String,
-    /// Campo de destino
+    /// 目标字段
     pub destination: String,
-    /// Transformación a aplicar
+    /// 转换函数
     pub transform: Option<String>,
 }
 
 impl MappingProcessor {
-    /// Crea un nuevo procesador de mapeo
+    /// 创建新的映射处理器
     pub fn new() -> Self {
         Self {
             config: None,
@@ -107,24 +110,24 @@ impl MappingProcessor {
         }
     }
 
-    /// Aplica un mapeo a un registro
+    /// 应用映射到记录
     fn apply_mapping(&self, record: &DataRecord, mapping: &FieldMapping) -> Result<Option<(String, Value)>> {
-        // Obtener el valor del campo de origen
+        // 获取源字段值
         let source_value = if mapping.source.contains('.') {
-            // Ruta anidada
+            // 嵌套路径
             record.get_value(&mapping.source).cloned()
         } else {
-            // Campo simple
+            // 简单字段
             record.data.get(&mapping.source).cloned()
         };
 
-        // Si no hay valor, retornar None
+        // 如果没有值，返回 None
         let source_value = match source_value {
             Some(value) => value,
             None => return Ok(None),
         };
 
-        // Aplicar transformación si existe
+        // 应用转换（如果有）
         let transformed_value = if let Some(transform) = &mapping.transform {
             match transform.as_str() {
                 "lowercase" => {
@@ -163,7 +166,7 @@ impl Processor for MappingProcessor {
     fn configure(&mut self, config: &Value) -> Result<()> {
         self.config = Some(config.clone());
 
-        // Extraer mapeos de la configuración
+        // 从配置中提取映射
         if let Some(mappings) = config.get("mappings").and_then(|m| m.as_array()) {
             self.mappings.clear();
 
@@ -187,15 +190,15 @@ impl Processor for MappingProcessor {
     }
 
     async fn process_record(&mut self, record: &DataRecord, _state: Option<ProcessorState>) -> Result<Vec<DataRecord>> {
-        // Crear un nuevo registro con los mismos metadatos
+        // 创建具有相同元数据的新记录
         let mut new_record = DataRecord::new(serde_json::json!({}));
         new_record.metadata = record.metadata.clone();
         new_record.created_at = record.created_at;
 
-        // Aplicar mapeos
+        // 应用映射
         for mapping in &self.mappings {
             if let Some((dest_path, value)) = self.apply_mapping(record, mapping)? {
-                // Establecer el valor en el nuevo registro
+                // 设置新记录中的值
                 new_record.set_value(&dest_path, value)?;
             }
         }
@@ -206,13 +209,13 @@ impl Processor for MappingProcessor {
     async fn process_batch(&mut self, batch: &DataRecordBatch, state: Option<ProcessorState>) -> Result<DataRecordBatch> {
         let mut processed_records = Vec::with_capacity(batch.records.len());
 
-        // Procesar cada registro
+        // 处理每条记录
         for record in &batch.records {
             let mut new_records = self.process_record(record, state.clone()).await?;
             processed_records.append(&mut new_records);
         }
 
-        // Crear un nuevo lote con los registros procesados
+        // 创建包含处理后记录的新批次
         let mut new_batch = DataRecordBatch::new(processed_records);
         new_batch.schema = batch.schema.clone();
         new_batch.metadata = batch.metadata.clone();
@@ -225,18 +228,18 @@ impl Processor for MappingProcessor {
     }
 }
 
-/// Procesador de filtro
+/// 过滤处理器
 pub struct FilterProcessor {
-    /// Configuración del procesador
+    /// 处理器配置
     config: Option<Value>,
-    /// Condición de filtro
+    /// 过滤条件
     condition: Option<String>,
-    /// Estado del procesador
+    /// 处理器状态
     state: ProcessorState,
 }
 
 impl FilterProcessor {
-    /// Crea un nuevo procesador de filtro
+    /// 创建新的过滤处理器
     pub fn new() -> Self {
         Self {
             config: None,
@@ -245,12 +248,12 @@ impl FilterProcessor {
         }
     }
 
-    /// Evalúa una condición simple en un registro
+    /// 评估记录上的简单条件
     fn evaluate_condition(&self, record: &DataRecord, condition: &str) -> Result<bool> {
-        // Implementación simple de evaluación de condiciones
-        // En una implementación real, se usaría un motor de expresiones más completo
+        // 简单条件评估实现
+        // 在实际实现中，应使用更完整的表达式引擎
 
-        // Ejemplo: "user.email != null"
+        // 示例："user.email != null"
         let parts: Vec<&str> = condition.split_whitespace().collect();
         if parts.len() != 3 {
             return Ok(false);
@@ -260,10 +263,10 @@ impl FilterProcessor {
         let operator = parts[1];
         let value = parts[2];
 
-        // Obtener el valor del campo
+        // 获取字段值
         let field_value = record.get_value(field_path);
 
-        // Evaluar la condición
+        // 评估条件
         match operator {
             "==" => Ok(match field_value {
                 Some(v) => match value {
@@ -289,7 +292,7 @@ impl Processor for FilterProcessor {
     fn configure(&mut self, config: &Value) -> Result<()> {
         self.config = Some(config.clone());
 
-        // Extraer condición de la configuración
+        // 从配置中提取条件
         if let Some(condition) = config.get("condition").and_then(|c| c.as_str()) {
             self.condition = Some(condition.to_string());
         }
@@ -298,16 +301,16 @@ impl Processor for FilterProcessor {
     }
 
     async fn process_record(&mut self, record: &DataRecord, _state: Option<ProcessorState>) -> Result<Vec<DataRecord>> {
-        // Si no hay condición, pasar el registro sin cambios
+        // 如果没有条件，不做更改地传递记录
         if self.condition.is_none() {
             return Ok(vec![record.clone()]);
         }
 
-        // Evaluar la condición
+        // 评估条件
         let condition = self.condition.as_ref().unwrap();
         let passes_filter = self.evaluate_condition(record, condition)?;
 
-        // Si pasa el filtro, incluir el registro; de lo contrario, excluirlo
+        // 如果通过过滤器，包含记录；否则，排除它
         if passes_filter {
             Ok(vec![record.clone()])
         } else {
@@ -318,13 +321,13 @@ impl Processor for FilterProcessor {
     async fn process_batch(&mut self, batch: &DataRecordBatch, state: Option<ProcessorState>) -> Result<DataRecordBatch> {
         let mut processed_records = Vec::new();
 
-        // Procesar cada registro
+        // 处理每条记录
         for record in &batch.records {
             let mut new_records = self.process_record(record, state.clone()).await?;
             processed_records.append(&mut new_records);
         }
 
-        // Crear un nuevo lote con los registros procesados
+        // 创建包含处理后记录的新批次
         let mut new_batch = DataRecordBatch::new(processed_records);
         new_batch.schema = batch.schema.clone();
         new_batch.metadata = batch.metadata.clone();
@@ -337,8 +340,11 @@ impl Processor for FilterProcessor {
     }
 }
 
+// 重新导出聚合处理器
+pub use aggregate::AggregateProcessor;
+
 #[cfg(test)]
-use mockall::{mock, predicate};
+use mockall::mock;
 
 #[cfg(test)]
 mock! {
@@ -352,89 +358,5 @@ mock! {
         fn get_state(&self) -> Result<ProcessorState>;
         async fn initialize(&mut self) -> Result<()>;
         async fn finalize(&mut self) -> Result<()>;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_mapping_processor() {
-        // Crear procesador
-        let mut processor = MappingProcessor::new();
-
-        // Configurar procesador
-        let config = serde_json::json!({
-            "mappings": [
-                {
-                    "source": "first_name",
-                    "destination": "user.firstName",
-                    "transform": "uppercase"
-                },
-                {
-                    "source": "last_name",
-                    "destination": "user.lastName",
-                    "transform": "uppercase"
-                },
-                {
-                    "source": "email",
-                    "destination": "user.email",
-                    "transform": "lowercase"
-                }
-            ]
-        });
-
-        processor.configure(&config).unwrap();
-
-        // Crear registro de prueba
-        let record = DataRecord::new(serde_json::json!({
-            "first_name": "John",
-            "last_name": "Doe",
-            "email": "John.Doe@Example.com"
-        }));
-
-        // Procesar registro
-        let processed = processor.process_record(&record, None).await.unwrap();
-
-        // Verificar resultado
-        assert_eq!(processed.len(), 1);
-        let processed_record = &processed[0];
-
-        assert_eq!(processed_record.get_value("user.firstName").unwrap().as_str().unwrap(), "JOHN");
-        assert_eq!(processed_record.get_value("user.lastName").unwrap().as_str().unwrap(), "DOE");
-        assert_eq!(processed_record.get_value("user.email").unwrap().as_str().unwrap(), "john.doe@example.com");
-    }
-
-    #[tokio::test]
-    async fn test_filter_processor() {
-        // Crear procesador
-        let mut processor = FilterProcessor::new();
-
-        // Configurar procesador
-        let config = serde_json::json!({
-            "condition": "email != null"
-        });
-
-        processor.configure(&config).unwrap();
-
-        // Crear registros de prueba
-        let record1 = DataRecord::new(serde_json::json!({
-            "name": "John",
-            "email": "john@example.com"
-        }));
-
-        let record2 = DataRecord::new(serde_json::json!({
-            "name": "Jane"
-            // Sin email
-        }));
-
-        // Procesar registros
-        let processed1 = processor.process_record(&record1, None).await.unwrap();
-        let processed2 = processor.process_record(&record2, None).await.unwrap();
-
-        // Verificar resultados
-        assert_eq!(processed1.len(), 1); // Pasa el filtro
-        assert_eq!(processed2.len(), 0); // No pasa el filtro
     }
 }

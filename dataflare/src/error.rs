@@ -71,6 +71,10 @@ pub enum DataFlareError {
     #[error("Error de IO: {0}")]
     Io(#[from] io::Error),
 
+    /// Error de CSV
+    #[error("Error de CSV: {0}")]
+    Csv(String),
+
     /// Error de Serde JSON
     #[error("Error de JSON: {0}")]
     Json(#[from] serde_json::Error),

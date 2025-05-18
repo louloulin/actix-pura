@@ -5,6 +5,8 @@
 pub mod source;
 pub mod destination;
 pub mod registry;
+pub mod postgres;
+pub mod csv;
 
 pub use source::SourceConnector;
 pub use destination::DestinationConnector;
@@ -21,6 +23,12 @@ pub fn register_default_connectors() {
 
         // Registrar conectores de destino predeterminados
         destination::register_default_destinations();
+
+        // Registrar conector PostgreSQL
+        postgres::register_postgres_connector();
+
+        // Registrar conectores CSV
+        csv::register_csv_connectors();
     });
 }
 
