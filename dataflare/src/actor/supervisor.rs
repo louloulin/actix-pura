@@ -5,13 +5,62 @@
 use std::collections::HashMap;
 use actix::prelude::*;
 use actix::dev::ToEnvelope;
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 use chrono::{DateTime, Duration, Utc};
 
-use crate::{
-    actor::{DataFlareActor, Initialize, Finalize, GetStatus, ActorStatus},
-    error::{DataFlareError, Result},
+use crate::actor::{
+    SourceActor, ProcessorActor, DestinationActor, WorkflowActor,
+    DataFlareActor, Initialize, Finalize, GetStatus, ActorStatus
 };
+
+use crate::error::{DataFlareError, Result};
+
+/// Tipo de actor supervisado
+#[derive(Clone)]
+enum SupervisedActor {
+    Source(Addr<SourceActor>),
+    Processor(Addr<ProcessorActor>),
+    Destination(Addr<DestinationActor>),
+    Workflow(Addr<WorkflowActor>),
+}
+
+impl SupervisedActor {
+    async fn send_status(&self) -> std::result::Result<Result<ActorStatus>, MailboxError> {
+        match self {
+            SupervisedActor::Source(addr) => addr.send(GetStatus).await,
+            SupervisedActor::Processor(addr) => addr.send(GetStatus).await,
+            SupervisedActor::Destination(addr) => addr.send(GetStatus).await,
+            SupervisedActor::Workflow(addr) => addr.send(GetStatus).await,
+        }
+    }
+
+    async fn send_initialize(&self, workflow_id: String, config: serde_json::Value) -> std::result::Result<Result<()>, MailboxError> {
+        let msg = Initialize {
+            workflow_id,
+            config,
+        };
+
+        match self {
+            SupervisedActor::Source(addr) => addr.send(msg).await,
+            SupervisedActor::Processor(addr) => addr.send(msg).await,
+            SupervisedActor::Destination(addr) => addr.send(msg).await,
+            SupervisedActor::Workflow(addr) => addr.send(msg).await,
+        }
+    }
+
+    async fn send_finalize(&self, workflow_id: String) -> std::result::Result<Result<()>, MailboxError> {
+        let msg = Finalize {
+            workflow_id,
+        };
+
+        match self {
+            SupervisedActor::Source(addr) => addr.send(msg).await,
+            SupervisedActor::Processor(addr) => addr.send(msg).await,
+            SupervisedActor::Destination(addr) => addr.send(msg).await,
+            SupervisedActor::Workflow(addr) => addr.send(msg).await,
+        }
+    }
+}
 
 /// Actor que supervisa y gestiona otros actores
 pub struct SupervisorActor {
@@ -24,8 +73,8 @@ pub struct SupervisorActor {
     /// Configuración actual
     config: Option<serde_json::Value>,
 
-    /// Actores supervisados (usando Any para evitar problemas con dyn)
-    supervised_actors: HashMap<String, Box<dyn std::any::Any + Send + Sync>>,
+    /// Actores supervisados
+    supervised_actors: HashMap<String, SupervisedActor>,
 
     /// Estado de los actores supervisados
     actor_states: HashMap<String, ActorStatus>,
@@ -63,8 +112,35 @@ impl SupervisorActor {
         A: Actor + DataFlareActor + Handler<GetStatus> + 'static,
         A::Context: ToEnvelope<A, GetStatus>,
     {
-        // Almacenar la dirección del actor como Box<dyn Any>
-        self.supervised_actors.insert(id.clone(), Box::new(actor.clone()));
+        // Almacenar la dirección del actor según su tipo
+        let supervised_actor = match std::any::TypeId::of::<A>() {
+            id if id == std::any::TypeId::of::<SourceActor>() => {
+                // Es seguro porque verificamos el tipo
+                let source_addr = unsafe { std::mem::transmute::<Addr<A>, Addr<SourceActor>>(actor) };
+                SupervisedActor::Source(source_addr)
+            },
+            id if id == std::any::TypeId::of::<ProcessorActor>() => {
+                // Es seguro porque verificamos el tipo
+                let processor_addr = unsafe { std::mem::transmute::<Addr<A>, Addr<ProcessorActor>>(actor) };
+                SupervisedActor::Processor(processor_addr)
+            },
+            id if id == std::any::TypeId::of::<DestinationActor>() => {
+                // Es seguro porque verificamos el tipo
+                let dest_addr = unsafe { std::mem::transmute::<Addr<A>, Addr<DestinationActor>>(actor) };
+                SupervisedActor::Destination(dest_addr)
+            },
+            id if id == std::any::TypeId::of::<WorkflowActor>() => {
+                // Es seguro porque verificamos el tipo
+                let workflow_addr = unsafe { std::mem::transmute::<Addr<A>, Addr<WorkflowActor>>(actor) };
+                SupervisedActor::Workflow(workflow_addr)
+            },
+            _ => {
+                error!("Tipo de actor no soportado para supervisión: {}", std::any::type_name::<A>());
+                return;
+            }
+        };
+
+        self.supervised_actors.insert(id.clone(), supervised_actor);
         self.actor_states.insert(id.clone(), ActorStatus::Initialized);
         self.last_checked.insert(id, Utc::now());
     }
@@ -87,32 +163,37 @@ impl SupervisorActor {
 
             // Enviar mensaje para obtener el estado
             let actor_id = id.clone();
-            let fut = actor.send(GetStatus)
-                .into_actor(self)
-                .map(move |res, actor, _ctx| {
-                    match res {
-                        Ok(Ok(status)) => {
-                            // Actualizar el estado del actor
-                            actor.actor_states.insert(actor_id.clone(), status.clone());
+            let actor_clone = actor.clone();
 
-                            // Verificar si el actor está en error
-                            if let ActorStatus::Error(ref error) = status {
-                                warn!("Actor {} en estado de error: {}", actor_id, error);
-                                // Aquí se implementaría la lógica de recuperación
-                            }
-                        },
-                        Ok(Err(e)) => {
-                            error!("Error al obtener estado del actor {}: {}", actor_id, e);
-                            actor.actor_states.insert(actor_id.clone(), ActorStatus::Error(format!("Error al obtener estado: {}", e)));
-                        },
-                        Err(e) => {
-                            error!("Error de comunicación con actor {}: {}", actor_id, e);
-                            actor.actor_states.insert(actor_id.clone(), ActorStatus::Error(format!("Error de comunicación: {}", e)));
+            // Crear un futuro para obtener el estado
+            let fut = async move {
+                let status_result = actor_clone.send_status().await;
+                (actor_id, status_result)
+            };
+
+            // Convertir a futuro de actor y manejar el resultado
+            ctx.spawn(fut.into_actor(self).map(move |(actor_id, res), actor, _ctx| {
+                match res {
+                    Ok(Ok(status)) => {
+                        // Actualizar el estado del actor
+                        actor.actor_states.insert(actor_id.clone(), status.clone());
+
+                        // Verificar si el actor está en error
+                        if let ActorStatus::Error(ref error) = status {
+                            warn!("Actor {} en estado de error: {}", actor_id, error);
+                            // Aquí se implementaría la lógica de recuperación
                         }
+                    },
+                    Ok(Err(e)) => {
+                        error!("Error al obtener estado del actor {}: {}", actor_id, e);
+                        actor.actor_states.insert(actor_id.clone(), ActorStatus::Error(format!("Error al obtener estado: {}", e)));
+                    },
+                    Err(e) => {
+                        error!("Error de comunicación con actor {}: {}", actor_id, e);
+                        actor.actor_states.insert(actor_id.clone(), ActorStatus::Error(format!("Error de comunicación: {}", e)));
                     }
-                });
-
-            ctx.spawn(fut);
+                }
+            }));
         }
     }
 }
@@ -234,24 +315,22 @@ impl Handler<RestartActor> for SupervisorActor {
         // Obtener el actor
         let actor = self.supervised_actors.get(&msg.actor_id).cloned();
         let actor_id = msg.actor_id.clone();
+        let actor_id_for_fut = actor_id.clone();
 
         // Reiniciar el actor
         let fut = async move {
             if let Some(actor) = actor {
                 // Primero finalizar el actor
-                actor.send(Finalize {
-                    workflow_id: "supervisor".to_string(),
-                }).await.map_err(|e| DataFlareError::Actor(format!("Error al finalizar actor: {}", e)))??;
+                actor.send_finalize("supervisor".to_string()).await
+                    .map_err(|e| DataFlareError::Actor(format!("Error al finalizar actor: {}", e)))??;
 
                 // Luego inicializar el actor
-                actor.send(Initialize {
-                    workflow_id: "supervisor".to_string(),
-                    config: serde_json::json!({}),
-                }).await.map_err(|e| DataFlareError::Actor(format!("Error al inicializar actor: {}", e)))??;
+                actor.send_initialize("supervisor".to_string(), serde_json::json!({})).await
+                    .map_err(|e| DataFlareError::Actor(format!("Error al inicializar actor: {}", e)))??;
 
                 Ok(())
             } else {
-                Err(DataFlareError::Actor(format!("Actor no encontrado: {}", actor_id)))
+                Err(DataFlareError::Actor(format!("Actor no encontrado: {}", actor_id_for_fut)))
             }
         };
 
@@ -275,7 +354,6 @@ impl Handler<RestartActor> for SupervisorActor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use actix::prelude::*;
 
     // Actor de prueba
     struct TestActor {

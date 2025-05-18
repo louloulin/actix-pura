@@ -184,14 +184,15 @@ impl Handler<GetStatus> for SourceActor {
 impl Handler<StartExtraction> for SourceActor {
     type Result = ResponseActFuture<Self, Result<()>>;
 
-    fn handle(&mut self, msg: StartExtraction, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: StartExtraction, _ctx: &mut Self::Context) -> Self::Result {
         info!("Iniciando extracción para workflow {} en fuente {}", msg.workflow_id, msg.source_id);
 
         // Verificar que el actor esté inicializado
         if self.status != ActorStatus::Initialized && self.status != ActorStatus::Running {
+            let status = self.status.clone();
             return Box::pin(async move {
                 Err(DataFlareError::Actor(format!(
-                    "Actor no está en estado adecuado para extracción: {:?}", self.status
+                    "Actor no está en estado adecuado para extracción: {:?}", status
                 )))
             }.into_actor(self));
         }
@@ -214,8 +215,6 @@ impl Handler<StartExtraction> for SourceActor {
 
         // Crear una copia de los valores necesarios para el futuro
         let workflow_id = msg.workflow_id.clone();
-        let batch_size = self.batch_size;
-        let addr = ctx.address();
 
         // Iniciar la extracción en un futuro
         let fut = async move {

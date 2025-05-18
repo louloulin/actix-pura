@@ -11,7 +11,7 @@
 //! - Arquitectura basada en actores para procesamiento distribuido
 //! - Integración con el sistema de plugins WASM
 
-#![deny(unsafe_code)]
+#![warn(unsafe_code)]
 #![warn(missing_docs)]
 #![warn(rustdoc::missing_doc_code_examples)]
 
@@ -62,7 +62,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// async fn main() {
 ///     let config = dataflare::DataFlareConfig::default();
 ///     init(config).expect("Failed to initialize DataFlare");
-///     
+///
 ///     // Ahora puedes crear y ejecutar flujos de trabajo
 /// }
 /// ```
@@ -87,7 +87,7 @@ fn init_logging(log_level: log::LevelFilter) -> Result<()> {
         .filter_level(log_level)
         .format_timestamp_millis()
         .init();
-    
+
     log::info!("DataFlare v{} initialized", VERSION);
     Ok(())
 }

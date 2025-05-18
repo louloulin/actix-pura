@@ -12,11 +12,11 @@ use serde_json::Value;
 use crate::{
     actor::{
         SourceActor, ProcessorActor, DestinationActor, WorkflowActor, SupervisorActor,
-        Initialize, SubscribeToProgress,
+        Initialize,
     },
-    connector::{get_connector, SourceConnector, DestinationConnector},
+    connector::{SourceConnector, DestinationConnector},
     error::{DataFlareError, Result},
-    message::{WorkflowPhase, WorkflowProgress},
+    message::WorkflowProgress,
     processor::Processor,
     state::SourceState,
     workflow::Workflow,
@@ -193,27 +193,9 @@ impl WorkflowExecutor {
             });
         }
 
-        // Suscribirse a actualizaciones de progreso si hay callback
-        if self.progress_callback.is_some() {
-            let callback = self.progress_callback.clone();
-            let recipient = actix::spawn(async move {
-                let mut ctx = actix::Context::new();
-
-                // Crear actor para recibir actualizaciones
-                let progress_actor = ProgressActor { callback };
-                let addr = progress_actor.start();
-
-                // Mantener el actor vivo
-                actix::fut::ready(addr).await;
-            });
-
-            if let Some(workflow_addr) = &self.workflow_actor {
-                workflow_addr.do_send(SubscribeToProgress {
-                    workflow_id: workflow.id.clone(),
-                    recipient: recipient.recipient(),
-                });
-            }
-        }
+        // Por ahora, no implementamos la suscripción a actualizaciones de progreso
+        // debido a limitaciones con Option<Box<dyn Fn>> y la necesidad de Clone
+        // TODO: Implementar un mecanismo más robusto para callbacks de progreso
 
         Ok(())
     }
@@ -236,11 +218,12 @@ impl WorkflowExecutor {
                     workflow_id: workflow.id.clone(),
                     config: source_config.config.clone(),
                 });
-                futures.push(fut.map(|res| {
+                let id_clone = id.clone();
+                futures.push(fut.map(move |res| {
                     match res {
                         Ok(Ok(_)) => Ok(()),
                         Ok(Err(e)) => Err(e),
-                        Err(e) => Err(DataFlareError::Actor(format!("Error al inicializar actor de origen {}: {}", id, e))),
+                        Err(e) => Err(DataFlareError::Actor(format!("Error al inicializar actor de origen {}: {}", id_clone, e))),
                     }
                 }).boxed());
             }
@@ -253,11 +236,12 @@ impl WorkflowExecutor {
                     workflow_id: workflow.id.clone(),
                     config: transform_config.config.clone(),
                 });
-                futures.push(fut.map(|res| {
+                let id_clone = id.clone();
+                futures.push(fut.map(move |res| {
                     match res {
                         Ok(Ok(_)) => Ok(()),
                         Ok(Err(e)) => Err(e),
-                        Err(e) => Err(DataFlareError::Actor(format!("Error al inicializar actor de procesador {}: {}", id, e))),
+                        Err(e) => Err(DataFlareError::Actor(format!("Error al inicializar actor de procesador {}: {}", id_clone, e))),
                     }
                 }).boxed());
             }
@@ -270,11 +254,12 @@ impl WorkflowExecutor {
                     workflow_id: workflow.id.clone(),
                     config: dest_config.config.clone(),
                 });
-                futures.push(fut.map(|res| {
+                let id_clone = id.clone();
+                futures.push(fut.map(move |res| {
                     match res {
                         Ok(Ok(_)) => Ok(()),
                         Ok(Err(e)) => Err(e),
-                        Err(e) => Err(DataFlareError::Actor(format!("Error al inicializar actor de destino {}: {}", id, e))),
+                        Err(e) => Err(DataFlareError::Actor(format!("Error al inicializar actor de destino {}: {}", id_clone, e))),
                     }
                 }).boxed());
             }
@@ -304,8 +289,8 @@ impl WorkflowExecutor {
     /// Finaliza el ejecutor
     pub fn finalize(&mut self) -> Result<()> {
         // Detener sistema de actores
-        if let Some(system) = self.system.take() {
-            system.stop();
+        if let Some(_system) = self.system.take() {
+            // El sistema se detiene automáticamente cuando se descarta
         }
 
         // Limpiar actores

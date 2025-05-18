@@ -184,9 +184,10 @@ impl Handler<ProcessBatch> for ProcessorActor {
 
         // Verificar que el actor esté inicializado
         if self.status != ActorStatus::Initialized && self.status != ActorStatus::Running {
+            let status = self.status.clone();
             return Box::pin(async move {
                 Err(DataFlareError::Actor(format!(
-                    "Actor no está en estado adecuado para procesamiento: {:?}", self.status
+                    "Actor no está en estado adecuado para procesamiento: {:?}", status
                 )))
             }.into_actor(self));
         }
