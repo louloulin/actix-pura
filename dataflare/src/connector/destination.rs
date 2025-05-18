@@ -45,25 +45,25 @@ pub struct WriteStats {
 pub trait DestinationConnector: Send + Sync + 'static {
     /// Configura el conector con los parámetros proporcionados
     fn configure(&mut self, config: &Value) -> Result<()>;
-    
+
     /// Verifica la conexión con el destino de datos
     async fn check_connection(&self) -> Result<bool>;
-    
+
     /// Prepara el esquema en el destino
     async fn prepare_schema(&self, schema: &Schema) -> Result<()>;
-    
+
     /// Escribe un lote de registros en el destino
     async fn write_batch(&mut self, batch: &DataRecordBatch, mode: WriteMode) -> Result<WriteStats>;
-    
+
     /// Escribe un registro individual en el destino
     async fn write_record(&mut self, record: &DataRecord, mode: WriteMode) -> Result<WriteStats>;
-    
+
     /// Finaliza la escritura (commit)
     async fn commit(&mut self) -> Result<()>;
-    
+
     /// Cancela la escritura (rollback)
     async fn rollback(&mut self) -> Result<()>;
-    
+
     /// Obtiene los modos de escritura soportados
     fn get_supported_write_modes(&self) -> Vec<WriteMode>;
 }
@@ -73,7 +73,7 @@ pub fn register_default_destinations() {
     // Registrar conector de memoria
     crate::connector::register_connector::<dyn DestinationConnector>(
         "memory",
-        Box::new(|config: Value| -> Result<Box<dyn DestinationConnector>> {
+        Arc::new(|config: Value| -> Result<Box<dyn DestinationConnector>> {
             Ok(Box::new(MemoryDestinationConnector::new(config)))
         }),
     );
@@ -106,7 +106,7 @@ impl MemoryDestinationConnector {
             },
         }
     }
-    
+
     /// Obtiene los datos almacenados
     pub fn get_data(&self) -> &[DataRecord] {
         &self.data
@@ -119,20 +119,20 @@ impl DestinationConnector for MemoryDestinationConnector {
         self.config = config.clone();
         Ok(())
     }
-    
+
     async fn check_connection(&self) -> Result<bool> {
         // Siempre está conectado
         Ok(true)
     }
-    
+
     async fn prepare_schema(&self, schema: &Schema) -> Result<()> {
         // No hace nada, siempre exitoso
         Ok(())
     }
-    
+
     async fn write_batch(&mut self, batch: &DataRecordBatch, mode: WriteMode) -> Result<WriteStats> {
         let start = std::time::Instant::now();
-        
+
         match mode {
             WriteMode::Append => {
                 // Agregar todos los registros
@@ -179,33 +179,33 @@ impl DestinationConnector for MemoryDestinationConnector {
                 }
             },
         }
-        
+
         // Calcular bytes escritos (aproximado)
         let bytes_written = batch.records.iter()
             .map(|r| serde_json::to_string(&r.data).unwrap_or_default().len() as u64)
             .sum::<u64>();
-        
+
         self.stats.bytes_written += bytes_written;
         self.stats.write_time_ms += start.elapsed().as_millis() as u64;
-        
+
         Ok(self.stats.clone())
     }
-    
+
     async fn write_record(&mut self, record: &DataRecord, mode: WriteMode) -> Result<WriteStats> {
         let batch = DataRecordBatch::new(vec![record.clone()]);
         self.write_batch(&batch, mode).await
     }
-    
+
     async fn commit(&mut self) -> Result<()> {
         // No hace nada, siempre exitoso
         Ok(())
     }
-    
+
     async fn rollback(&mut self) -> Result<()> {
         // No hace nada, siempre exitoso
         Ok(())
     }
-    
+
     fn get_supported_write_modes(&self) -> Vec<WriteMode> {
         vec![
             WriteMode::Append,
@@ -223,7 +223,7 @@ use mockall::{mock, predicate};
 #[cfg(test)]
 mock! {
     pub DestinationConnector {}
-    
+
     #[async_trait]
     impl DestinationConnector for DestinationConnector {
         fn configure(&mut self, config: &Value) -> Result<()>;
@@ -240,30 +240,30 @@ mock! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_memory_destination_connector() {
         // Crear conector
         let mut connector = MemoryDestinationConnector::new(serde_json::json!({}));
-        
+
         // Verificar conexión
         let connected = connector.check_connection().await.unwrap();
         assert!(connected);
-        
+
         // Crear registros de prueba
         let record1 = DataRecord::new(serde_json::json!({"id": 1, "name": "Test 1"}));
         let record2 = DataRecord::new(serde_json::json!({"id": 2, "name": "Test 2"}));
-        
+
         // Crear lote
         let batch = DataRecordBatch::new(vec![record1, record2]);
-        
+
         // Escribir lote
         let stats = connector.write_batch(&batch, WriteMode::Append).await.unwrap();
-        
+
         // Verificar estadísticas
         assert_eq!(stats.records_written, 2);
         assert_eq!(stats.records_failed, 0);
-        
+
         // Verificar datos almacenados
         assert_eq!(connector.get_data().len(), 2);
         assert_eq!(connector.get_data()[0].data.get("name").unwrap().as_str().unwrap(), "Test 1");

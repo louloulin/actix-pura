@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use actix::prelude::*;
+use actix::dev::ToEnvelope;
 use log::{debug, error, info, warn};
 use chrono::{DateTime, Duration, Utc};
 
@@ -59,7 +60,7 @@ impl SupervisorActor {
     /// Agrega un actor para supervisar
     pub fn add_supervised_actor<A>(&mut self, id: String, actor: Addr<A>)
     where
-        A: Actor + DataFlareActor + 'static,
+        A: Actor + DataFlareActor + Handler<GetStatus> + 'static,
         A::Context: ToEnvelope<A, GetStatus>,
     {
         // Almacenar la dirección del actor como Box<dyn Any>

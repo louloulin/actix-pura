@@ -14,7 +14,7 @@ use crate::{
         SourceActor, ProcessorActor, DestinationActor, WorkflowActor, SupervisorActor,
         Initialize, SubscribeToProgress,
     },
-    connector::{create_connector, SourceConnector, DestinationConnector},
+    connector::{get_connector, SourceConnector, DestinationConnector},
     error::{DataFlareError, Result},
     message::{WorkflowPhase, WorkflowProgress},
     processor::Processor,
@@ -26,25 +26,25 @@ use crate::{
 pub struct WorkflowExecutor {
     /// Sistema de actores
     system: Option<actix::SystemRunner>,
-    
+
     /// Actor de flujo de trabajo
     workflow_actor: Option<Addr<WorkflowActor>>,
-    
+
     /// Actor supervisor
     supervisor_actor: Option<Addr<SupervisorActor>>,
-    
+
     /// Actores de origen
     source_actors: HashMap<String, Addr<SourceActor>>,
-    
+
     /// Actores de procesador
     processor_actors: HashMap<String, Addr<ProcessorActor>>,
-    
+
     /// Actores de destino
     destination_actors: HashMap<String, Addr<DestinationActor>>,
-    
+
     /// Estados de las fuentes
     source_states: HashMap<String, SourceState>,
-    
+
     /// Receptor de actualizaciones de progreso
     progress_callback: Option<Box<dyn Fn(WorkflowProgress) + Send + Sync>>,
 }
@@ -63,7 +63,7 @@ impl WorkflowExecutor {
             progress_callback: None,
         }
     }
-    
+
     /// Establece un callback para recibir actualizaciones de progreso
     pub fn with_progress_callback<F>(mut self, callback: F) -> Self
     where
@@ -72,7 +72,7 @@ impl WorkflowExecutor {
         self.progress_callback = Some(Box::new(callback));
         self
     }
-    
+
     /// Inicializa el ejecutor
     pub fn initialize(&mut self) -> Result<()> {
         // Crear sistema de actores si no existe
@@ -80,35 +80,35 @@ impl WorkflowExecutor {
             let system = actix::System::new();
             self.system = Some(system);
         }
-        
+
         // Crear actor supervisor
         let supervisor = SupervisorActor::new("supervisor");
         let supervisor_addr = supervisor.start();
         self.supervisor_actor = Some(supervisor_addr);
-        
+
         Ok(())
     }
-    
+
     /// Prepara un flujo de trabajo para su ejecución
     pub fn prepare(&mut self, workflow: &Workflow) -> Result<()> {
         // Validar el flujo de trabajo
         workflow.validate()?;
-        
+
         // Crear actores de origen
         for (id, source_config) in &workflow.sources {
             // Crear conector
-            let connector = create_connector::<dyn SourceConnector>(
+            let connector = crate::connector::create_connector::<dyn SourceConnector>(
                 &source_config.r#type,
                 source_config.config.clone(),
             )?;
-            
+
             // Crear actor
             let source_actor = SourceActor::new(id.clone(), connector);
             let source_addr = source_actor.start();
-            
+
             // Registrar actor
             self.source_actors.insert(id.clone(), source_addr.clone());
-            
+
             // Supervisar actor
             if let Some(supervisor) = &self.supervisor_actor {
                 supervisor.do_send(crate::actor::supervisor::RestartActor {
@@ -116,7 +116,7 @@ impl WorkflowExecutor {
                 });
             }
         }
-        
+
         // Crear actores de procesador
         for (id, transform_config) in &workflow.transformations {
             // Crear procesador según el tipo
@@ -127,14 +127,14 @@ impl WorkflowExecutor {
                     "Tipo de procesador no soportado: {}", transform_config.r#type
                 ))),
             };
-            
+
             // Crear actor
             let processor_actor = ProcessorActor::new(id.clone(), processor);
             let processor_addr = processor_actor.start();
-            
+
             // Registrar actor
             self.processor_actors.insert(id.clone(), processor_addr.clone());
-            
+
             // Supervisar actor
             if let Some(supervisor) = &self.supervisor_actor {
                 supervisor.do_send(crate::actor::supervisor::RestartActor {
@@ -142,22 +142,22 @@ impl WorkflowExecutor {
                 });
             }
         }
-        
+
         // Crear actores de destino
         for (id, dest_config) in &workflow.destinations {
             // Crear conector
-            let connector = create_connector::<dyn DestinationConnector>(
+            let connector = crate::connector::create_connector::<dyn DestinationConnector>(
                 &dest_config.r#type,
                 dest_config.config.clone(),
             )?;
-            
+
             // Crear actor
             let dest_actor = DestinationActor::new(id.clone(), connector);
             let dest_addr = dest_actor.start();
-            
+
             // Registrar actor
             self.destination_actors.insert(id.clone(), dest_addr.clone());
-            
+
             // Supervisar actor
             if let Some(supervisor) = &self.supervisor_actor {
                 supervisor.do_send(crate::actor::supervisor::RestartActor {
@@ -165,48 +165,48 @@ impl WorkflowExecutor {
                 });
             }
         }
-        
+
         // Crear actor de flujo de trabajo
         let mut workflow_actor = WorkflowActor::new(workflow.id.clone());
-        
+
         // Agregar actores al flujo de trabajo
         for (id, addr) in &self.source_actors {
             workflow_actor.add_source_actor(id.clone(), addr.clone());
         }
-        
+
         for (id, addr) in &self.processor_actors {
             workflow_actor.add_processor_actor(id.clone(), addr.clone());
         }
-        
+
         for (id, addr) in &self.destination_actors {
             workflow_actor.add_destination_actor(id.clone(), addr.clone());
         }
-        
+
         // Iniciar actor de flujo de trabajo
         let workflow_addr = workflow_actor.start();
         self.workflow_actor = Some(workflow_addr.clone());
-        
+
         // Supervisar actor de flujo de trabajo
         if let Some(supervisor) = &self.supervisor_actor {
             supervisor.do_send(crate::actor::supervisor::RestartActor {
                 actor_id: workflow.id.clone(),
             });
         }
-        
+
         // Suscribirse a actualizaciones de progreso si hay callback
         if self.progress_callback.is_some() {
             let callback = self.progress_callback.clone();
             let recipient = actix::spawn(async move {
                 let mut ctx = actix::Context::new();
-                
+
                 // Crear actor para recibir actualizaciones
                 let progress_actor = ProgressActor { callback };
                 let addr = progress_actor.start();
-                
+
                 // Mantener el actor vivo
                 actix::fut::ready(addr).await;
             });
-            
+
             if let Some(workflow_addr) = &self.workflow_actor {
                 workflow_addr.do_send(SubscribeToProgress {
                     workflow_id: workflow.id.clone(),
@@ -214,10 +214,10 @@ impl WorkflowExecutor {
                 });
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Ejecuta un flujo de trabajo
     pub async fn execute(&self, workflow: &Workflow) -> Result<()> {
         // Verificar que el actor de flujo de trabajo exista
@@ -225,10 +225,10 @@ impl WorkflowExecutor {
             Some(addr) => addr,
             None => return Err(DataFlareError::Workflow("Actor de flujo de trabajo no inicializado".to_string())),
         };
-        
+
         // Inicializar actores
         let mut futures = Vec::new();
-        
+
         // Inicializar actores de origen
         for (id, source_config) in &workflow.sources {
             if let Some(actor) = self.source_actors.get(id) {
@@ -245,7 +245,7 @@ impl WorkflowExecutor {
                 }).boxed());
             }
         }
-        
+
         // Inicializar actores de procesador
         for (id, transform_config) in &workflow.transformations {
             if let Some(actor) = self.processor_actors.get(id) {
@@ -262,7 +262,7 @@ impl WorkflowExecutor {
                 }).boxed());
             }
         }
-        
+
         // Inicializar actores de destino
         for (id, dest_config) in &workflow.destinations {
             if let Some(actor) = self.destination_actors.get(id) {
@@ -279,13 +279,13 @@ impl WorkflowExecutor {
                 }).boxed());
             }
         }
-        
+
         // Esperar a que todos los actores se inicialicen
         let results = future::join_all(futures).await;
         for result in results {
             result?;
         }
-        
+
         // Ejecutar flujo de trabajo
         let result = workflow_addr.send(crate::actor::workflow::ExecuteWorkflow {
             workflow_id: workflow.id.clone(),
@@ -293,28 +293,28 @@ impl WorkflowExecutor {
                 DataFlareError::Serialization(format!("Error al serializar flujo de trabajo: {}", e))
             })?,
         }).await;
-        
+
         match result {
             Ok(Ok(_)) => Ok(()),
             Ok(Err(e)) => Err(e),
             Err(e) => Err(DataFlareError::Actor(format!("Error al ejecutar flujo de trabajo: {}", e))),
         }
     }
-    
+
     /// Finaliza el ejecutor
     pub fn finalize(&mut self) -> Result<()> {
         // Detener sistema de actores
         if let Some(system) = self.system.take() {
             system.stop();
         }
-        
+
         // Limpiar actores
         self.workflow_actor = None;
         self.supervisor_actor = None;
         self.source_actors.clear();
         self.processor_actors.clear();
         self.destination_actors.clear();
-        
+
         Ok(())
     }
 }
@@ -337,7 +337,7 @@ impl Actor for ProgressActor {
 
 impl Handler<WorkflowProgress> for ProgressActor {
     type Result = ();
-    
+
     fn handle(&mut self, msg: WorkflowProgress, _ctx: &mut Self::Context) -> Self::Result {
         if let Some(callback) = &self.callback {
             callback(msg);
@@ -350,7 +350,7 @@ mod tests {
     use super::*;
     use crate::workflow::WorkflowBuilder;
     use std::sync::{Arc, Mutex};
-    
+
     #[actix::test]
     async fn test_workflow_executor() {
         // Crear flujo de trabajo
@@ -373,30 +373,30 @@ mod tests {
             .destination("dest", "memory", vec!["transform"], serde_json::json!({}))
             .build()
             .unwrap();
-        
+
         // Crear ejecutor
         let progress_updates = Arc::new(Mutex::new(Vec::new()));
         let progress_updates_clone = progress_updates.clone();
-        
+
         let mut executor = WorkflowExecutor::new()
             .with_progress_callback(move |progress| {
                 let mut updates = progress_updates_clone.lock().unwrap();
                 updates.push(progress);
             });
-        
+
         // Inicializar ejecutor
         executor.initialize().unwrap();
-        
+
         // Preparar flujo de trabajo
         executor.prepare(&workflow).unwrap();
-        
+
         // Ejecutar flujo de trabajo
         executor.execute(&workflow).await.unwrap();
-        
+
         // Verificar actualizaciones de progreso
         let updates = progress_updates.lock().unwrap();
         assert!(!updates.is_empty());
-        
+
         // Finalizar ejecutor
         executor.finalize().unwrap();
     }
