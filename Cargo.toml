@@ -5,6 +5,7 @@ members = [
     "actix-broker",
     "actix-derive",
     "actix-cluster",
+    "dataflare",
     "examples/chat_system",
     "examples/task_processor",
     "examples/http_api",
@@ -24,6 +25,7 @@ actix = { path = "actix" }
 actix-broker = { path = "actix-broker" }
 actix_derive = { path = "actix-derive" }
 actix-cluster = { path = "actix-cluster" }
+dataflare = { path = "dataflare" }
 
 [profile.release]
 lto = true
