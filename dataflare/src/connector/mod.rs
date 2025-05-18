@@ -2,8 +2,8 @@
 //!
 //! Define las interfaces y funcionalidades para conectores de fuentes y destinos.
 
-mod source;
-mod destination;
+pub mod source;
+pub mod destination;
 pub mod registry;
 
 pub use source::SourceConnector;

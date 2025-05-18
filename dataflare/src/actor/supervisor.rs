@@ -417,16 +417,19 @@ mod tests {
 
     #[actix::test]
     async fn test_supervisor_actor() {
-        // Crear un actor de prueba
-        let test_actor = TestActor {
-            id: "test-actor".to_string(),
-            status: ActorStatus::Initialized,
-        };
-        let test_addr = test_actor.start();
+        // Crear un conector de origen para la prueba
+        let source_connector = Box::new(crate::connector::source::MemorySourceConnector::new(serde_json::json!({})));
+
+        // Crear un actor de origen para usar en la prueba
+        let source_actor = SourceActor::new("test-source", source_connector);
+        let source_addr = source_actor.start();
 
         // Crear el supervisor
         let mut supervisor = SupervisorActor::new("test-supervisor");
-        supervisor.add_supervised_actor("test-actor".to_string(), test_addr.clone());
+
+        // Agregar el actor de origen como supervisado
+        supervisor.add_supervised_actor("test-source".to_string(), source_addr.clone());
+
         let supervisor_addr = supervisor.start();
 
         // Inicializar el supervisor
@@ -439,11 +442,11 @@ mod tests {
 
         // Obtener el estado de los actores supervisados
         let status = supervisor_addr.send(GetSupervisedActorsStatus).await.unwrap().unwrap();
-        assert!(status.contains_key("test-actor"));
+        assert!(status.contains_key("test-source"));
 
         // Reiniciar el actor supervisado
         let result = supervisor_addr.send(RestartActor {
-            actor_id: "test-actor".to_string(),
+            actor_id: "test-source".to_string(),
         }).await.unwrap();
 
         assert!(result.is_ok());

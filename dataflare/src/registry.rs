@@ -121,7 +121,7 @@ mod tests {
         // 移除组件
         let removed = registry.remove::<String>("component1");
         assert!(removed.is_some());
-        assert_eq!(removed.unwrap(), "Hello");
+        assert_eq!(*removed.unwrap(), "Hello");
 
         // 验证已移除
         let component1 = registry.get::<String>("component1");
