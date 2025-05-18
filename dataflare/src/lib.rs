@@ -38,7 +38,7 @@ pub use crate::{
     message::{DataRecord, DataRecordBatch},
     model::{DataType, Field, Schema},
     plugin::PluginManager,
-    processor::{Processor, AggregateProcessor, FilterProcessor, MappingProcessor},
+    processor::{Processor, AggregateProcessor, EnrichmentProcessor, FilterProcessor, MappingProcessor, registry::register_default_processors},
     registry::ConnectorRegistry,
     state::{CheckpointState, SourceState},
     workflow::{Workflow, WorkflowBuilder, WorkflowExecutor},
@@ -74,6 +74,9 @@ pub fn init(config: DataFlareConfig) -> Result<()> {
 
     // Registrar conectores predeterminados
     connector::register_default_connectors();
+
+    // Registrar procesadores predeterminados
+    processor::registry::register_default_processors();
 
     // Inicializar el sistema de plugins
     plugin::init_plugin_system(config.plugin_dir)?;

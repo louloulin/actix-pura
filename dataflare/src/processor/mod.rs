@@ -3,6 +3,7 @@
 //! 定义数据处理器接口和功能。
 
 pub mod aggregate;
+pub mod enrichment;
 pub mod registry;
 
 use std::collections::HashMap;
@@ -340,8 +341,9 @@ impl Processor for FilterProcessor {
     }
 }
 
-// 重新导出聚合处理器
+// 重新导出处理器
 pub use aggregate::AggregateProcessor;
+pub use enrichment::EnrichmentProcessor;
 
 #[cfg(test)]
 use mockall::mock;

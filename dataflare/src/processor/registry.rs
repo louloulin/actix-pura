@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::{
     error::Result,
-    processor::{Processor, MappingProcessor, FilterProcessor, AggregateProcessor},
+    processor::{Processor, MappingProcessor, FilterProcessor, AggregateProcessor, EnrichmentProcessor},
 };
 
 /// 注册默认处理器
@@ -29,6 +29,12 @@ pub fn register_default_processors() {
     // 注册聚合处理器
     register_processor("aggregate", Arc::new(|config: Value| -> Result<Box<dyn Processor>> {
         let processor = AggregateProcessor::from_config(&config)?;
+        Ok(Box::new(processor))
+    }));
+
+    // 注册丰富处理器
+    register_processor("enrichment", Arc::new(|config: Value| -> Result<Box<dyn Processor>> {
+        let processor = EnrichmentProcessor::from_config(&config)?;
         Ok(Box::new(processor))
     }));
 }
