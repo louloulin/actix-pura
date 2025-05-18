@@ -13,10 +13,11 @@ use serde_json::{Value, json, Map};
 
 use crate::{
     error::{DataFlareError, Result},
-    message::DataRecord,
+    message::{DataRecord, DataRecordBatch},
     model::Schema,
     state::SourceState,
     connector::source::{SourceConnector, ExtractionMode},
+    connector::destination::DestinationConnector,
 };
 
 /// CSV 源连接器
@@ -405,6 +406,247 @@ impl CsvDestinationConnector {
             file_opened: false,
             records_written: 0,
         }
+    }
+}
+
+#[async_trait]
+impl DestinationConnector for CsvDestinationConnector {
+    fn configure(&mut self, config: &Value) -> Result<()> {
+        self.config = config.clone();
+
+        // 获取文件路径
+        if let Some(file_path) = config.get("file_path").and_then(|p| p.as_str()) {
+            self.file_path = Some(PathBuf::from(file_path));
+        }
+
+        // 获取分隔符
+        if let Some(delimiter) = config.get("delimiter").and_then(|d| d.as_str()) {
+            if !delimiter.is_empty() {
+                self.delimiter = delimiter.chars().next().unwrap_or(',');
+            }
+        }
+
+        // 获取是否写入标题行
+        if let Some(write_header) = config.get("write_header").and_then(|w| w.as_bool()) {
+            self.write_header = write_header;
+        }
+
+        // 获取列名
+        if let Some(columns) = config.get("columns").and_then(|c| c.as_array()) {
+            self.columns = columns.iter()
+                .filter_map(|c| c.as_str())
+                .map(|s| s.to_string())
+                .collect();
+        }
+
+        Ok(())
+    }
+
+    async fn check_connection(&self) -> Result<bool> {
+        // 检查文件路径是否有效
+        if let Some(file_path) = &self.file_path {
+            // 检查目录是否存在或可创建
+            if let Some(parent) = file_path.parent() {
+                if !parent.exists() {
+                    // 尝试创建目录
+                    match std::fs::create_dir_all(parent) {
+                        Ok(_) => {
+                            // 创建成功后删除，只是测试权限
+                            let _ = std::fs::remove_dir(parent);
+                            Ok(true)
+                        },
+                        Err(_) => Ok(false),
+                    }
+                } else {
+                    // 目录存在，检查是否可写
+                    Ok(true)
+                }
+            } else {
+                // 没有父目录，检查当前目录是否可写
+                Ok(true)
+            }
+        } else {
+            // 没有配置文件路径
+            Ok(false)
+        }
+    }
+
+    async fn prepare_schema(&self, _schema: &Schema) -> Result<()> {
+        // CSV 不需要预先创建模式
+        Ok(())
+    }
+
+    async fn write_batch(&mut self, batch: &DataRecordBatch, mode: crate::connector::destination::WriteMode) -> Result<crate::connector::destination::WriteStats> {
+        let start = std::time::Instant::now();
+        let file_path = self.file_path.as_ref().ok_or_else(|| {
+            DataFlareError::Config("No se ha configurado la ruta del archivo CSV".to_string())
+        })?;
+
+        // 创建目录（如果不存在）
+        if let Some(parent) = file_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                DataFlareError::Io(e)
+            })?;
+        }
+
+        // 根据写入模式决定如何打开文件
+        let file = match mode {
+            crate::connector::destination::WriteMode::Append => {
+                // 追加模式
+                if !self.file_opened {
+                    let file = if Path::new(file_path).exists() {
+                        std::fs::OpenOptions::new()
+                            .write(true)
+                            .append(true)
+                            .open(file_path)
+                    } else {
+                        std::fs::OpenOptions::new()
+                            .write(true)
+                            .create(true)
+                            .open(file_path)
+                    }.map_err(|e| DataFlareError::Io(e))?;
+
+                    self.file_opened = true;
+                    file
+                } else {
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .append(true)
+                        .open(file_path)
+                        .map_err(|e| DataFlareError::Io(e))?
+                }
+            },
+            crate::connector::destination::WriteMode::Overwrite => {
+                // 覆盖模式
+                let file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(file_path)
+                    .map_err(|e| DataFlareError::Io(e))?;
+
+                self.file_opened = true;
+                self.records_written = 0; // 重置记录计数
+                file
+            },
+            _ => {
+                // 其他模式不支持
+                return Err(DataFlareError::Config(format!(
+                    "Modo de escritura no soportado para CSV: {:?}", mode
+                )));
+            }
+        };
+
+        // 创建 CSV writer
+        let mut writer = csv::WriterBuilder::new()
+            .delimiter(self.delimiter as u8)
+            .from_writer(file);
+
+        // 如果是第一次写入且需要写入标题行
+        if self.records_written == 0 && self.write_header {
+            // 如果没有指定列名，从第一条记录中获取
+            if self.columns.is_empty() && !batch.records.is_empty() {
+                if let Value::Object(obj) = &batch.records[0].data {
+                    self.columns = obj.keys().cloned().collect();
+                }
+            }
+
+            // 写入标题行
+            if !self.columns.is_empty() {
+                writer.write_record(&self.columns).map_err(|e| {
+                    DataFlareError::Csv(format!("Error al escribir encabezados CSV: {}", e))
+                })?;
+            }
+        }
+
+        // 写入记录
+        let mut records_written = 0;
+        let mut records_failed = 0;
+        let mut bytes_written = 0;
+
+        for record in &batch.records {
+            if let Value::Object(obj) = &record.data {
+                // 如果列名为空，使用所有字段
+                let columns = if self.columns.is_empty() {
+                    obj.keys().cloned().collect::<Vec<_>>()
+                } else {
+                    self.columns.clone()
+                };
+
+                // 创建记录
+                let record_values: Vec<String> = columns.iter()
+                    .map(|col| {
+                        match obj.get(col) {
+                            Some(Value::String(s)) => s.clone(),
+                            Some(Value::Number(n)) => n.to_string(),
+                            Some(Value::Bool(b)) => b.to_string(),
+                            Some(Value::Null) => String::new(),
+                            Some(v) => v.to_string(),
+                            None => String::new(),
+                        }
+                    })
+                    .collect();
+
+                // 写入记录
+                match writer.write_record(&record_values) {
+                    Ok(_) => {
+                        records_written += 1;
+                        // 估算写入的字节数
+                        bytes_written += record_values.iter().map(|s| s.len() as u64).sum::<u64>();
+                    },
+                    Err(_) => {
+                        records_failed += 1;
+                    }
+                }
+            } else {
+                records_failed += 1;
+            }
+        }
+
+        // 刷新写入器
+        writer.flush().map_err(|e| {
+            DataFlareError::Io(e)
+        })?;
+
+        // 更新写入的记录数
+        self.records_written += records_written;
+
+        // 计算写入时间
+        let write_time_ms = start.elapsed().as_millis() as u64;
+
+        // 返回写入统计
+        Ok(crate::connector::destination::WriteStats {
+            records_written,
+            records_failed,
+            bytes_written,
+            write_time_ms,
+        })
+    }
+
+    async fn write_record(&mut self, record: &DataRecord, mode: crate::connector::destination::WriteMode) -> Result<crate::connector::destination::WriteStats> {
+        // 创建一个只包含单个记录的批次
+        let batch = DataRecordBatch::new(vec![record.clone()]);
+
+        // 使用 write_batch 实现
+        self.write_batch(&batch, mode).await
+    }
+
+    async fn commit(&mut self) -> Result<()> {
+        // CSV 不支持事务，无需特殊处理
+        Ok(())
+    }
+
+    async fn rollback(&mut self) -> Result<()> {
+        // CSV 不支持事务，无需特殊处理
+        Ok(())
+    }
+
+    fn get_supported_write_modes(&self) -> Vec<crate::connector::destination::WriteMode> {
+        // CSV 只支持追加和覆盖模式
+        vec![
+            crate::connector::destination::WriteMode::Append,
+            crate::connector::destination::WriteMode::Overwrite,
+        ]
     }
 }
 

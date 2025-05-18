@@ -98,6 +98,22 @@ pub enum DataFlareError {
     /// Error desconocido
     #[error("Error desconocido: {0}")]
     Unknown(String),
+
+    /// Error de consulta
+    #[error("Error de consulta: {0}")]
+    Query(String),
+
+    /// Error de campo
+    #[error("Error de campo: {0}")]
+    Field(String),
+
+    /// Error de procesamiento
+    #[error("Error de procesamiento: {0}")]
+    Processing(String),
+
+    /// Funcionalidad no implementada
+    #[error("No implementado: {0}")]
+    NotImplemented(String),
 }
 
 impl From<actix::MailboxError> for DataFlareError {

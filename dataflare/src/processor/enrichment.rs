@@ -105,40 +105,42 @@ impl EnrichmentProcessor {
     /// 设置嵌套值
     fn set_nested_value(obj: &mut Map<String, Value>, path: &str, value: Value) -> Result<()> {
         let parts: Vec<&str> = path.split('.').collect();
-        let mut current = obj;
 
-        for (i, part) in parts.iter().enumerate() {
-            if i == parts.len() - 1 {
-                // 最后一部分，设置值
-                current.insert(part.to_string(), value);
-                return Ok(());
-            }
-
-            // 确保路径中的对象存在
-            if !current.contains_key(*part) {
-                current.insert(part.to_string(), json!({}));
-            }
-
-            // 获取下一级对象
-            match current.get_mut(*part) {
-                Some(Value::Object(ref mut next_obj)) => {
-                    current = next_obj;
-                },
-                _ => {
-                    // 替换非对象值为对象
-                    let new_obj = json!({});
-                    current.insert(part.to_string(), new_obj);
-
-                    if let Some(Value::Object(ref mut next_obj)) = current.get_mut(*part) {
-                        current = next_obj;
-                    } else {
-                        return Err(DataFlareError::Config(format!("无法创建嵌套路径: {}", path)));
-                    }
-                }
-            }
+        // 如果只有一个部分，直接设置值
+        if parts.len() == 1 {
+            obj.insert(parts[0].to_string(), value);
+            return Ok(());
         }
 
-        Ok(())
+        // 递归设置嵌套值
+        Self::set_nested_value_recursive(obj, &parts, 0, value)
+    }
+
+    /// 递归设置嵌套值
+    fn set_nested_value_recursive(obj: &mut Map<String, Value>, parts: &[&str], index: usize, value: Value) -> Result<()> {
+        let part = parts[index];
+
+        // 如果是最后一个部分，直接设置值
+        if index == parts.len() - 1 {
+            obj.insert(part.to_string(), value);
+            return Ok(());
+        }
+
+        // 确保当前部分是对象
+        if !obj.contains_key(part) {
+            obj.insert(part.to_string(), json!({}));
+        } else if !obj[part].is_object() {
+            // 如果存在但不是对象，替换为对象
+            obj.insert(part.to_string(), json!({}));
+        }
+
+        // 获取下一级对象并递归
+        if let Some(Value::Object(next_obj)) = obj.get_mut(part).map(|v| v) {
+            // 递归处理下一级
+            return Self::set_nested_value_recursive(next_obj, parts, index + 1, value);
+        } else {
+            return Err(DataFlareError::Config(format!("无法创建嵌套路径: {}", parts.join("."))));
+        }
     }
 
     /// 丰富记录
