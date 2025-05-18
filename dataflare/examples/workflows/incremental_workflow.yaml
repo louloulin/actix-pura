@@ -1,0 +1,140 @@
+# 增量工作流示例
+id: incremental-workflow
+name: Incremental Workflow
+description: 演示增量数据提取的工作流示例
+version: 1.0.0
+
+# 数据源配置
+sources:
+  # PostgreSQL 源 - 增量模式
+  postgres_users:
+    type: postgres
+    mode: incremental
+    config:
+      host: localhost
+      port: 5432
+      database: testdb
+      username: postgres
+      password: postgres
+      table: users
+      incremental:
+        cursor_field: updated_at
+        cursor_value: "2023-01-01T00:00:00Z"
+
+  # CSV 源 - 增量模式
+  csv_orders:
+    type: csv
+    mode: incremental
+    config:
+      file_path: /data/orders.csv
+      delimiter: ","
+      has_header: true
+      incremental:
+        cursor_field: row_number
+        cursor_value: "0"
+
+# 转换配置
+transformations:
+  # 用户数据映射
+  user_transform:
+    inputs:
+      - postgres_users
+    type: mapping
+    config:
+      mappings:
+        - source: id
+          destination: user.id
+        - source: name
+          destination: user.name
+        - source: email
+          destination: user.email
+          transform: lowercase
+        - source: created_at
+          destination: user.createdAt
+        - source: updated_at
+          destination: user.updatedAt
+
+  # 订单数据映射
+  order_transform:
+    inputs:
+      - csv_orders
+    type: mapping
+    config:
+      mappings:
+        - source: order_id
+          destination: order.id
+        - source: user_id
+          destination: order.userId
+        - source: amount
+          destination: order.amount
+        - source: order_date
+          destination: order.date
+
+  # 用户数据过滤
+  active_users:
+    inputs:
+      - user_transform
+    type: filter
+    config:
+      condition: "user.active == true"
+
+  # 订单数据聚合
+  order_aggregation:
+    inputs:
+      - order_transform
+    type: aggregate
+    config:
+      group_by:
+        - order.userId
+      aggregations:
+        - source: order.amount
+          destination: user.totalSpent
+          function: sum
+        - source: order.id
+          destination: user.orderCount
+          function: count
+      keep_original_fields: false
+
+  # 用户订单数据丰富
+  user_enrichment:
+    inputs:
+      - active_users
+      - order_aggregation
+    type: enrichment
+    config:
+      source_field: user.id
+      target_field: user.orders
+      lookup_key: user.userId
+      keep_original_fields: true
+
+# 目标配置
+destinations:
+  # 内存目标
+  memory_output:
+    inputs:
+      - user_enrichment
+    type: memory
+    config: {}
+
+  # CSV 目标
+  csv_output:
+    inputs:
+      - user_enrichment
+    type: csv
+    config:
+      file_path: /data/enriched_users.csv
+      delimiter: ","
+      write_header: true
+
+# 调度配置
+schedule:
+  type: cron
+  expression: "0 0 * * *"
+  timezone: UTC
+  start_date: "2023-01-01T00:00:00Z"
+
+# 元数据
+metadata:
+  owner: data-team
+  department: analytics
+  priority: high

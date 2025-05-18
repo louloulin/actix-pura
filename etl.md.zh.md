@@ -1604,6 +1604,92 @@ spec:
 
 我们已经实现了以下功能：
 
+### YAML 工作流解析器
+
+我们实现了完整的 YAML 工作流解析器，支持以下功能：
+
+1. **从 YAML 文件加载工作流定义**：
+   - 支持从文件系统加载 YAML 工作流定义
+   - 提供友好的错误消息，帮助用户调试 YAML 工作流定义
+
+2. **灵活的 YAML 格式支持**：
+   - 支持直接解析为 Workflow 结构
+   - 支持更灵活的 YamlWorkflowDefinition 格式
+   - 自动转换 YAML 值到 JSON 配置
+
+3. **完整的工作流验证**：
+   - 验证工作流结构和依赖关系
+   - 检测循环依赖
+   - 识别未使用的组件
+   - 生成工作流 DAG 图
+
+4. **命令行工具**：
+   - 提供命令行界面，用于验证和执行 YAML 工作流
+   - 支持生成 DOT 图，用于可视化工作流
+
+5. **示例工作流**：
+   - 提供简单、增量和 CDC 模式的示例 YAML 工作流
+   - 详细的文档和最佳实践指南
+
+使用示例：
+
+```rust
+// 从 YAML 文件加载工作流
+let workflow = YamlWorkflowParser::load_from_file("workflow.yaml")?;
+
+// 验证工作流
+let mut parser = WorkflowParser::new(workflow.clone());
+parser.parse()?;
+
+// 执行工作流
+let mut executor = WorkflowExecutor::new();
+executor.execute(&workflow).await?;
+```
+
+YAML 工作流示例：
+
+```yaml
+id: simple-workflow
+name: Simple Workflow
+description: 一个简单的数据集成工作流示例
+version: 1.0.0
+
+sources:
+  users:
+    type: postgres
+    mode: incremental
+    config:
+      host: localhost
+      port: 5432
+      database: testdb
+      table: users
+      incremental:
+        cursor_field: updated_at
+        cursor_value: "2023-01-01T00:00:00Z"
+
+transformations:
+  user_transform:
+    inputs:
+      - users
+    type: mapping
+    config:
+      mappings:
+        - source: name
+          destination: user.name
+        - source: email
+          destination: user.email
+
+destinations:
+  es_users:
+    inputs:
+      - user_transform
+    type: elasticsearch
+    config:
+      host: localhost
+      port: 9200
+      index: users
+```
+
 ### DataFlare 模块
 
 DataFlare 是一个基于 Actix actor 架构的数据集成框架，提供了以下功能：
@@ -1649,7 +1735,7 @@ DataFlare 是一个基于 Actix actor 架构的数据集成框架，提供了以
    - 工作流解析器：分析和验证工作流 ✅
    - 基于 DAG 的工作流执行 ✅
    - 工作流验证 ✅
-   - YAML 工作流定义解析 ⚠️ 部分实现
+   - YAML 工作流定义解析 ✅
 
 6. **状态管理**：
    - 源状态跟踪（SourceState） ✅

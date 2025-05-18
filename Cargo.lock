@@ -1352,6 +1352,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
+ "clap 4.5.35",
  "criterion",
  "csv",
  "env_logger",
