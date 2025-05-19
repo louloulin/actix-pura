@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use dataflare::{
     workflow::{YamlWorkflowParser, WorkflowParser, WorkflowExecutor},
     message::WorkflowProgress,
-    state::SourceState,
+    processor,
 };
 
 #[derive(Parser)]
@@ -55,13 +55,15 @@ enum Commands {
     ListConnectors,
 }
 
-#[actix::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 初始化 DataFlare
     dataflare::init(dataflare::DataFlareConfig::default())?;
 
     // 解析命令行参数
     let cli = Cli::parse();
+
+    // 使用 actix 系统
+    let system = actix::System::new();
 
     match cli.command {
         Commands::Validate { file, dot } => {
@@ -154,83 +156,88 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             println!("工作流已加载: {}", workflow.id);
 
-            // 创建工作流执行器
-            let mut executor = WorkflowExecutor::new()
-                .with_progress_callback(|progress: WorkflowProgress| {
-                    println!(
-                        "进度: 工作流={}, 阶段={:?}, 进度={:.2}, 消息={}",
-                        progress.workflow_id, progress.phase, progress.progress, progress.message
-                    );
-                });
+            // 在 tokio 运行时中执行工作流
+            rt.block_on(async {
+                // 创建工作流执行器
+                let mut executor = WorkflowExecutor::new()
+                    .with_progress_callback(|progress: WorkflowProgress| {
+                        println!(
+                            "进度: 工作流={}, 阶段={:?}, 进度={:.2}, 消息={}",
+                            progress.workflow_id, progress.phase, progress.progress, progress.message
+                        );
+                    });
 
-            // 加载状态（如果是增量模式）
-            if incremental {
-                if let Some(state_path) = state {
-                    // 尝试加载状态文件
-                    if state_path.exists() {
-                        println!("加载状态文件: {:?}", state_path);
-                        // 这里应该实现状态文件的加载逻辑
-                        // 例如：executor.load_state(&state_path)?;
-                    } else {
-                        println!("状态文件不存在，将创建新的状态文件");
+                // 加载状态（如果是增量模式）
+                if incremental {
+                    if let Some(ref state_path) = state {
+                        // 尝试加载状态文件
+                        if state_path.exists() {
+                            println!("加载状态文件: {:?}", state_path);
+                            // 这里应该实现状态文件的加载逻辑
+                            // 例如：executor.load_state(&state_path)?;
+                        } else {
+                            println!("状态文件不存在，将创建新的状态文件");
+                        }
                     }
                 }
-            }
 
-            // 初始化执行器
-            println!("初始化执行器...");
-            executor.initialize()?;
+                // 初始化执行器
+                println!("初始化执行器...");
+                executor.initialize()?;
 
-            // 准备工作流
-            println!("准备工作流...");
-            executor.prepare(&workflow)?;
+                // 准备工作流
+                println!("准备工作流...");
+                executor.prepare(&workflow)?;
 
-            // 执行工作流
-            println!("执行工作流...");
-            let start = Instant::now();
-            executor.execute(&workflow).await?;
-            let duration = start.elapsed();
+                // 执行工作流
+                println!("执行工作流...");
+                let start = Instant::now();
+                executor.execute(&workflow).await?;
+                let duration = start.elapsed();
 
-            println!("工作流执行完成! 耗时: {:?}", duration);
+                println!("工作流执行完成! 耗时: {:?}", duration);
 
-            // 保存状态（如果是增量模式）
-            if incremental {
-                if let Some(state_path) = state {
-                    println!("保存状态到: {:?}", state_path);
-                    // 这里应该实现状态保存逻辑
-                    // 例如：executor.save_state(&state_path)?;
+                // 保存状态（如果是增量模式）
+                if incremental {
+                    if let Some(ref state_path) = state {
+                        println!("保存状态到: {:?}", state_path);
+                        // 这里应该实现状态保存逻辑
+                        // 例如：executor.save_state(&state_path)?;
+                    }
                 }
-            }
 
-            // 完成执行器
-            println!("完成执行器...");
-            executor.finalize()?;
+                // 完成执行器
+                println!("完成执行器...");
+                executor.finalize()?;
+
+                Ok::<_, Box<dyn std::error::Error>>(())
+            })?;
         },
         Commands::Version => {
             println!("DataFlare 版本: {}", env!("CARGO_PKG_VERSION"));
-            println!("构建时间: {}", env!("CARGO_PKG_VERSION"));
+            println!("构建日期: {}", env!("CARGO_PKG_VERSION"));
             println!("Rust 版本: {}", rustc_version_runtime::version());
         },
         Commands::ListConnectors => {
             println!("支持的连接器:");
-            
+
             // 获取所有注册的源连接器
             println!("\n源连接器:");
             let source_connectors = dataflare::connector::registry::get_registered_source_connectors();
             for connector in source_connectors {
                 println!("  - {}", connector);
             }
-            
+
             // 获取所有注册的目标连接器
             println!("\n目标连接器:");
             let destination_connectors = dataflare::connector::registry::get_registered_destination_connectors();
             for connector in destination_connectors {
                 println!("  - {}", connector);
             }
-            
+
             // 获取所有注册的处理器
             println!("\n处理器:");
-            let processors = dataflare::processor::registry::get_registered_processors();
+            let processors = processor::registry::get_processor_names();
             for processor in processors {
                 println!("  - {}", processor);
             }

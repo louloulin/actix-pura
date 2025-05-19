@@ -6,13 +6,13 @@ use dataflare::{
 };
 use std::sync::{Arc, Mutex};
 
-#[actix::main]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Inicializar DataFlare
     dataflare::init(dataflare::DataFlareConfig::default())?;
-    
+
     println!("Creando flujo de trabajo...");
-    
+
     // Crear flujo de trabajo
     let workflow = WorkflowBuilder::new("simple-workflow", "Simple Workflow")
         .description("Un flujo de trabajo simple para demostrar DataFlare")
@@ -52,13 +52,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Destino en memoria
         .destination("memory_dest", "memory", vec!["email_filter"], serde_json::json!({}))
         .build()?;
-    
+
     println!("Flujo de trabajo creado: {}", workflow.id);
-    
+
     // Crear un contador de progreso compartido
     let progress_counter = Arc::new(Mutex::new(0));
     let progress_counter_clone = progress_counter.clone();
-    
+
     // Crear ejecutor de flujo de trabajo
     let mut executor = WorkflowExecutor::new()
         .with_progress_callback(move |progress: WorkflowProgress| {
@@ -66,29 +66,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "Progreso: Workflow={}, Fase={:?}, Progreso={:.2}, Mensaje={}",
                 progress.workflow_id, progress.phase, progress.progress, progress.message
             );
-            
+
             // Incrementar contador
             let mut counter = progress_counter_clone.lock().unwrap();
             *counter += 1;
         });
-    
+
     println!("Inicializando ejecutor...");
     executor.initialize()?;
-    
+
     println!("Preparando flujo de trabajo...");
     executor.prepare(&workflow)?;
-    
+
     println!("Ejecutando flujo de trabajo...");
     executor.execute(&workflow).await?;
-    
+
     // Verificar que se recibieron actualizaciones de progreso
     let counter = progress_counter.lock().unwrap();
     println!("Se recibieron {} actualizaciones de progreso", *counter);
-    
+
     println!("Finalizando ejecutor...");
     executor.finalize()?;
-    
+
     println!("¡Flujo de trabajo completado con éxito!");
-    
+
     Ok(())
 }

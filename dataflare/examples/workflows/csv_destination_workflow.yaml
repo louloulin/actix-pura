@@ -1,0 +1,72 @@
+# CSV 目标工作流示例
+id: csv-destination-workflow
+name: CSV 目标工作流
+description: 从内存数据源读取数据，进行转换，然后写入 CSV 文件
+version: 1.0.0
+
+# 数据源配置
+sources:
+  memory_source:
+    type: memory
+    config:
+      data:
+        - id: 1
+          name: 张三
+          email: zhangsan@example.com
+          age: 30
+        - id: 2
+          name: 李四
+          email: lisi@example.com
+          age: 25
+        - id: 3
+          name: 王五
+          email: wangwu@example.com
+          age: 35
+        - id: 4
+          name: 赵六
+          email: zhaoliu@example.com
+          age: 17
+        - id: 5
+          name: 钱七
+          email: qianqi@example.com
+          age: 42
+
+# 转换配置
+transformations:
+  filter_adults:
+    inputs:
+      - memory_source
+    type: filter
+    config:
+      condition: "age >= 18"
+
+  user_transform:
+    inputs:
+      - filter_adults
+    type: mapping
+    config:
+      mappings:
+        - source: name
+          destination: user_name
+        - source: email
+          destination: user_email
+          transform: lowercase
+        - source: age
+          destination: user_age
+
+# 目标配置
+destinations:
+  csv_output:
+    inputs:
+      - user_transform
+    type: csv
+    config:
+      file_path: "./dataflare/examples/data/output.csv"
+      delimiter: ","
+      write_header: true
+
+# 元数据
+metadata:
+  owner: admin
+  department: data
+  created: "2023-05-19"

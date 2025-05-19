@@ -1,0 +1,9 @@
+email_address,full_name,user_age,user_id
+zhangsan@example.com,张三,30,"""1"""
+lisi@example.com,李四,25,"""2"""
+wangwu@example.com,王五,35,"""3"""
+zhaoliu@example.com,赵六,17,"""4"""
+qianqi@example.com,钱七,42,"""5"""
+sunba@example.com,孙八,16,"""6"""
+zhoujiu@example.com,周九,28,"""7"""
+wushi@example.com,吴十,33,"""8"""

@@ -75,12 +75,7 @@ impl WorkflowExecutor {
 
     /// Inicializa el ejecutor
     pub fn initialize(&mut self) -> Result<()> {
-        // Crear sistema de actores si no existe
-        if self.system.is_none() {
-            let system = actix::System::new();
-            self.system = Some(system);
-        }
-
+        // No creamos un nuevo sistema de actores, usamos el existente
         // Crear actor supervisor
         let supervisor = SupervisorActor::new("supervisor");
         let supervisor_addr = supervisor.start();
