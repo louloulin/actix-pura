@@ -10,7 +10,7 @@ members = [
     "dataflare-runtime",
     "dataflare-connector",
     "dataflare-processor",
-    # "dataflare-plugin", # 暂时禁用，等待修复
+    "dataflare-plugin",
     "dataflare-state",
     "dataflare-edge",
     "dataflare-cloud",
@@ -39,7 +39,7 @@ dataflare-core = { path = "dataflare-core" }
 dataflare-runtime = { path = "dataflare-runtime" }
 dataflare-connector = { path = "dataflare-connector" }
 dataflare-processor = { path = "dataflare-processor" }
-# dataflare-plugin = { path = "dataflare-plugin" } # 暂时禁用，等待修复
+dataflare-plugin = { path = "dataflare-plugin" }
 dataflare-state = { path = "dataflare-state" }
 dataflare-edge = { path = "dataflare-edge" }
 dataflare-cloud = { path = "dataflare-cloud" }
