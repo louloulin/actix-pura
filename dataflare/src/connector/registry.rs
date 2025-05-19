@@ -94,6 +94,16 @@ pub fn get_connector_names<T: ?Sized + Any>() -> Vec<String> {
     registry.get_connector_names::<T>()
 }
 
+/// Obtiene los nombres de todos los conectores de origen registrados
+pub fn get_registered_source_connectors() -> Vec<String> {
+    get_connector_names::<dyn crate::connector::SourceConnector>()
+}
+
+/// Obtiene los nombres de todos los conectores de destino registrados
+pub fn get_registered_destination_connectors() -> Vec<String> {
+    get_connector_names::<dyn crate::connector::DestinationConnector>()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
