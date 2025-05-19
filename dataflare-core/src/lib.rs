@@ -13,6 +13,8 @@ pub mod model;
 pub mod config;
 pub mod utils;
 pub mod state;
+pub mod connector;
+pub mod processor;
 
 // Re-exports for convenience
 pub use error::{DataFlareError, Result};
@@ -20,6 +22,13 @@ pub use message::{DataRecord, DataRecordBatch};
 pub use model::{DataType, Field, Schema};
 pub use config::DataFlareConfig;
 pub use state::{SourceState, CheckpointState};
+pub use connector::{
+    SourceConnector, DestinationConnector,
+    ExtractionMode, WriteMode, WriteStats
+};
+pub use processor::{
+    Processor, ProcessorState, ProcessorType
+};
 
 /// Version of the DataFlare Core module
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

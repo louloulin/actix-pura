@@ -15,8 +15,10 @@ pub mod csv;
 pub mod hybrid;
 
 // Re-exports for convenience
-pub use source::SourceConnector;
-pub use destination::DestinationConnector;
+pub use dataflare_core::connector::{
+    SourceConnector, DestinationConnector,
+    ExtractionMode, WriteMode, WriteStats
+};
 pub use registry::{create_connector, get_connector, ConnectorRegistry, register_connector};
 
 use std::sync::Once;

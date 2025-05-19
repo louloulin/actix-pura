@@ -16,7 +16,7 @@ pub mod enrichment;
 pub mod join;
 
 // Re-exports for convenience
-pub use processor::Processor;
+pub use dataflare_core::processor::{Processor, ProcessorState, ProcessorType};
 pub use mapping::MappingProcessor;
 pub use filter::FilterProcessor;
 pub use aggregate::AggregateProcessor;

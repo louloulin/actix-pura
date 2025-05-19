@@ -30,17 +30,6 @@ pub use self::RuntimeMode;
 /// Version of the DataFlare Runtime module
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Runtime mode enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuntimeMode {
-    /// Standalone mode (single node)
-    Standalone,
-    /// Edge mode (optimized for resource-constrained environments)
-    Edge,
-    /// Cloud mode (distributed processing)
-    Cloud,
-}
-
 impl Default for RuntimeMode {
     fn default() -> Self {
         Self::Standalone

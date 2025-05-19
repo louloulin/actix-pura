@@ -28,7 +28,7 @@ pub struct EdgeRuntimeConfig {
     pub max_memory_mb: usize,
     /// Maximum CPU usage (0.0 - 1.0)
     pub max_cpu_usage: f32,
-    /// Whether to enable offline mode
+    /// Whether to run in offline mode
     pub offline_mode: bool,
     /// Sync interval in seconds
     pub sync_interval: u64,
@@ -37,10 +37,10 @@ pub struct EdgeRuntimeConfig {
 impl Default for EdgeRuntimeConfig {
     fn default() -> Self {
         Self {
-            max_memory_mb: 512,
-            max_cpu_usage: 0.7,
+            max_memory_mb: 256,
+            max_cpu_usage: 0.8,
             offline_mode: false,
-            sync_interval: 300,
+            sync_interval: 60,
         }
     }
 }
