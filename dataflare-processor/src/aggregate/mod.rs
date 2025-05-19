@@ -2,12 +2,11 @@
 //!
 //! 提供数据聚合功能，支持分组和聚合操作。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use async_trait::async_trait;
 use serde_json::{Value, json, Map};
-use log::{debug, error, info, warn};
 
-use crate::{
+use dataflare_core::{
     error::{DataFlareError, Result},
     message::{DataRecord, DataRecordBatch},
     processor::{Processor, ProcessorState},
@@ -62,13 +61,13 @@ impl AggregateFunction {
 pub struct AggregateConfig {
     /// 分组字段
     pub group_by: Vec<String>,
-    
+
     /// 聚合操作
     pub aggregations: Vec<AggregationOperation>,
-    
+
     /// 是否保留原始字段
     pub keep_original_fields: bool,
-    
+
     /// 窗口大小（可选）
     pub window_size: Option<usize>,
 }
@@ -78,10 +77,10 @@ pub struct AggregateConfig {
 pub struct AggregationOperation {
     /// 源字段
     pub source_field: String,
-    
+
     /// 目标字段
     pub destination_field: String,
-    
+
     /// 聚合函数
     pub function: AggregateFunction,
 }
@@ -90,13 +89,13 @@ pub struct AggregationOperation {
 pub struct AggregateProcessor {
     /// 配置
     config: AggregateConfig,
-    
+
     /// 处理器状态
     state: ProcessorState,
-    
+
     /// 聚合缓冲区
     buffer: HashMap<String, Vec<DataRecord>>,
-    
+
     /// 已处理记录计数
     processed_count: usize,
 }
@@ -106,12 +105,12 @@ impl AggregateProcessor {
     pub fn new(config: AggregateConfig) -> Self {
         Self {
             config,
-            state: ProcessorState::new(),
+            state: ProcessorState::new("aggregate"),
             buffer: HashMap::new(),
             processed_count: 0,
         }
     }
-    
+
     /// 从配置创建聚合处理器
     pub fn from_config(config: &Value) -> Result<Self> {
         // 解析分组字段
@@ -121,7 +120,7 @@ impl AggregateProcessor {
             .iter()
             .filter_map(|v| v.as_str().map(|s| s.to_string()))
             .collect::<Vec<_>>();
-        
+
         // 解析聚合操作
         let aggregations = config.get("aggregations")
             .and_then(|a| a.as_array())
@@ -131,17 +130,17 @@ impl AggregateProcessor {
                 let source = agg.get("source")
                     .and_then(|s| s.as_str())
                     .ok_or_else(|| DataFlareError::Config("Cada agregación requiere un campo 'source'".to_string()))?;
-                
+
                 let destination = agg.get("destination")
                     .and_then(|d| d.as_str())
                     .ok_or_else(|| DataFlareError::Config("Cada agregación requiere un campo 'destination'".to_string()))?;
-                
+
                 let function_str = agg.get("function")
                     .and_then(|f| f.as_str())
                     .ok_or_else(|| DataFlareError::Config("Cada agregación requiere un campo 'function'".to_string()))?;
-                
+
                 let function = AggregateFunction::from_str(function_str)?;
-                
+
                 Ok(AggregationOperation {
                     source_field: source.to_string(),
                     destination_field: destination.to_string(),
@@ -149,16 +148,16 @@ impl AggregateProcessor {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        
+
         // 解析其他选项
         let keep_original_fields = config.get("keep_original_fields")
             .and_then(|k| k.as_bool())
             .unwrap_or(false);
-        
+
         let window_size = config.get("window_size")
             .and_then(|w| w.as_u64())
             .map(|w| w as usize);
-        
+
         Ok(Self::new(AggregateConfig {
             group_by,
             aggregations,
@@ -166,28 +165,28 @@ impl AggregateProcessor {
             window_size,
         }))
     }
-    
+
     /// 获取记录的分组键
     fn get_group_key(&self, record: &DataRecord) -> Result<String> {
         if self.config.group_by.is_empty() {
             return Ok("_all_".to_string());
         }
-        
+
         let mut key_parts = Vec::with_capacity(self.config.group_by.len());
-        
+
         for field in &self.config.group_by {
             let value = self.get_field_value(record, field)?;
             key_parts.push(value.to_string());
         }
-        
+
         Ok(key_parts.join("::"))
     }
-    
+
     /// 获取字段值
     fn get_field_value(&self, record: &DataRecord, field: &str) -> Result<Value> {
         let parts = field.split('.').collect::<Vec<_>>();
         let mut current = &record.data;
-        
+
         for part in parts {
             current = match current {
                 Value::Object(obj) => obj.get(part).ok_or_else(|| {
@@ -196,18 +195,18 @@ impl AggregateProcessor {
                 _ => return Err(DataFlareError::Field(format!("No se puede acceder al campo {} en un valor no objeto", part))),
             };
         }
-        
+
         Ok(current.clone())
     }
-    
+
     /// 执行聚合操作
     fn aggregate_records(&self, records: &[DataRecord]) -> Result<DataRecord> {
         if records.is_empty() {
             return Err(DataFlareError::Processing("No hay registros para agregar".to_string()));
         }
-        
+
         let mut result = Map::new();
-        
+
         // 如果保留原始字段，使用第一条记录的字段
         if self.config.keep_original_fields {
             if let Value::Object(obj) = &records[0].data {
@@ -216,7 +215,7 @@ impl AggregateProcessor {
                 }
             }
         }
-        
+
         // 执行每个聚合操作
         for agg in &self.config.aggregations {
             let agg_value = match agg.function {
@@ -311,7 +310,7 @@ impl AggregateProcessor {
                     Value::Null
                 },
             };
-            
+
             // 设置目标字段
             let parts = agg.destination_field.split('.').collect::<Vec<_>>();
             if parts.len() == 1 {
@@ -324,11 +323,11 @@ impl AggregateProcessor {
                         current.insert(part.to_string(), agg_value);
                         break;
                     }
-                    
+
                     if !current.contains_key(*part) {
                         current.insert(part.to_string(), json!({}));
                     }
-                    
+
                     if let Some(Value::Object(ref mut obj)) = current.get_mut(*part) {
                         current = obj;
                     } else {
@@ -337,14 +336,14 @@ impl AggregateProcessor {
                 }
             }
         }
-        
+
         // 添加分组字段
         for (i, field) in self.config.group_by.iter().enumerate() {
             if let Ok(value) = self.get_field_value(&records[0], field) {
                 result.insert(format!("group_{}", i), value);
             }
         }
-        
+
         Ok(DataRecord::new(Value::Object(result)))
     }
 }
@@ -356,45 +355,71 @@ impl Processor for AggregateProcessor {
         self.config = new_processor.config;
         Ok(())
     }
-    
-    async fn process_record(&mut self, record: &DataRecord, _state: Option<ProcessorState>) -> Result<Vec<DataRecord>> {
+
+    async fn process_record(&mut self, record: &DataRecord) -> Result<DataRecord> {
         // 获取记录的分组键
         let group_key = self.get_group_key(record)?;
-        
+
         // 将记录添加到缓冲区
         self.buffer.entry(group_key).or_default().push(record.clone());
         self.processed_count += 1;
-        
+
         // 如果有窗口大小限制，检查是否需要输出
         if let Some(window_size) = self.config.window_size {
             if self.processed_count >= window_size {
                 return self.flush_buffer().await;
             }
         }
-        
-        // 默认不输出任何记录，等待批处理
-        Ok(vec![])
+
+        // 默认返回原始记录，实际聚合在批处理中完成
+        Ok(record.clone())
     }
-    
-    async fn process_batch(&mut self, batch: &DataRecordBatch, state: Option<ProcessorState>) -> Result<DataRecordBatch> {
+
+    async fn process_batch(&mut self, batch: &DataRecordBatch) -> Result<DataRecordBatch> {
         // 处理每条记录
         for record in &batch.records {
-            self.process_record(record, state.clone()).await?;
+            // 获取记录的分组键
+            let group_key = self.get_group_key(record)?;
+
+            // 将记录添加到缓冲区
+            if let Some(group) = self.buffer.get_mut(&group_key) {
+                group.push(record.clone());
+            } else {
+                self.buffer.insert(group_key, vec![record.clone()]);
+            }
+
+            self.processed_count += 1;
         }
-        
+
         // 刷新缓冲区并创建新批次
-        let records = self.flush_buffer().await?;
-        let mut new_batch = DataRecordBatch::new(records);
+        // 刷新缓冲区并获取聚合结果
+        let aggregated_record = self.flush_buffer().await?;
+        let mut new_batch = DataRecordBatch::new(vec![aggregated_record]);
         new_batch.schema = batch.schema.clone();
         new_batch.metadata = batch.metadata.clone();
-        
+
         Ok(new_batch)
     }
-    
-    fn get_state(&self) -> Result<ProcessorState> {
-        Ok(self.state.clone())
+
+    fn get_state(&self) -> ProcessorState {
+        self.state.clone()
     }
-    
+
+    fn get_input_schema(&self) -> Option<dataflare_core::model::Schema> {
+        None
+    }
+
+    fn get_output_schema(&self) -> Option<dataflare_core::model::Schema> {
+        None
+    }
+
+    async fn initialize(&mut self) -> Result<()> {
+        // 初始化处理器
+        self.buffer.clear();
+        self.processed_count = 0;
+        Ok(())
+    }
+
     async fn finalize(&mut self) -> Result<()> {
         // 确保所有缓冲的记录都被处理
         self.flush_buffer().await?;
@@ -404,13 +429,16 @@ impl Processor for AggregateProcessor {
 
 impl AggregateProcessor {
     /// 刷新缓冲区，执行聚合并返回结果
-    async fn flush_buffer(&mut self) -> Result<Vec<DataRecord>> {
+    async fn flush_buffer(&mut self) -> Result<DataRecord> {
         if self.buffer.is_empty() {
-            return Ok(vec![]);
+            // 如果缓冲区为空，返回空记录
+            // 创建一个空记录
+            let empty_data = serde_json::json!({});
+            return Ok(DataRecord::new(empty_data));
         }
-        
+
         let mut results = Vec::with_capacity(self.buffer.len());
-        
+
         // 对每个分组执行聚合
         for (_key, records) in std::mem::take(&mut self.buffer) {
             if !records.is_empty() {
@@ -418,10 +446,27 @@ impl AggregateProcessor {
                 results.push(aggregated);
             }
         }
-        
+
         // 重置计数器
         self.processed_count = 0;
-        
-        Ok(results)
+
+        // 如果有多个结果，合并它们
+        if results.len() > 1 {
+            // 创建一个包含所有聚合结果的记录
+            let mut combined_data = serde_json::Map::new();
+            for (i, record) in results.iter().enumerate() {
+                if let serde_json::Value::Object(map) = &record.data {
+                    combined_data.insert(format!("group_{}", i), serde_json::Value::Object(map.clone()));
+                }
+            }
+            Ok(DataRecord::new(serde_json::Value::Object(combined_data)))
+        } else if results.len() == 1 {
+            // 只有一个结果，直接返回
+            Ok(results.remove(0))
+        } else {
+            // 没有结果，返回空记录
+            let empty_data = serde_json::json!({});
+            Ok(DataRecord::new(empty_data))
+        }
     }
 }

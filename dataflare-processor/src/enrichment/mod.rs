@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use serde_json::{Value, json, Map};
 
-use crate::{
+use dataflare_core::{
     error::{DataFlareError, Result},
     message::{DataRecord, DataRecordBatch},
     processor::{Processor, ProcessorState},
@@ -37,7 +37,7 @@ impl EnrichmentProcessor {
     pub fn new() -> Self {
         Self {
             config: None,
-            state: ProcessorState::new(),
+            state: ProcessorState::new("enrichment"),
             lookup_table: HashMap::new(),
             lookup_key: String::new(),
             target_field: String::new(),
@@ -228,18 +228,18 @@ impl Processor for EnrichmentProcessor {
         Ok(())
     }
 
-    async fn process_record(&mut self, record: &DataRecord, _state: Option<ProcessorState>) -> Result<Vec<DataRecord>> {
+    async fn process_record(&mut self, record: &DataRecord) -> Result<DataRecord> {
         let enriched_record = self.enrich_record(record)?;
-        Ok(vec![enriched_record])
+        Ok(enriched_record)
     }
 
-    async fn process_batch(&mut self, batch: &DataRecordBatch, state: Option<ProcessorState>) -> Result<DataRecordBatch> {
+    async fn process_batch(&mut self, batch: &DataRecordBatch) -> Result<DataRecordBatch> {
         let mut processed_records = Vec::with_capacity(batch.records.len());
 
         // 处理每条记录
         for record in &batch.records {
-            let mut new_records = self.process_record(record, state.clone()).await?;
-            processed_records.append(&mut new_records);
+            let new_record = self.process_record(record).await?;
+            processed_records.push(new_record);
         }
 
         // 创建包含处理后记录的新批次
@@ -250,8 +250,26 @@ impl Processor for EnrichmentProcessor {
         Ok(new_batch)
     }
 
-    fn get_state(&self) -> Result<ProcessorState> {
-        Ok(self.state.clone())
+    fn get_state(&self) -> ProcessorState {
+        self.state.clone()
+    }
+
+    fn get_input_schema(&self) -> Option<dataflare_core::model::Schema> {
+        None
+    }
+
+    fn get_output_schema(&self) -> Option<dataflare_core::model::Schema> {
+        None
+    }
+
+    async fn initialize(&mut self) -> Result<()> {
+        // 初始化处理器
+        Ok(())
+    }
+
+    async fn finalize(&mut self) -> Result<()> {
+        // 清理资源
+        Ok(())
     }
 }
 

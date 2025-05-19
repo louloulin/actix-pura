@@ -7,10 +7,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use futures::Stream;
 use serde_json::Value;
 
-use crate::{
+use dataflare_core::{
     error::{DataFlareError, Result},
     message::DataRecord,
-    connector::source::ExtractionMode,
+    connector::ExtractionMode,
 };
 
 /// 混合模式状态

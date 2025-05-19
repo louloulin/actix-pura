@@ -55,7 +55,7 @@ pub trait SourceConnector: Send + Sync + 'static {
 /// Registra los conectores de fuente predeterminados
 pub fn register_default_sources() {
     // Registrar conector de memoria
-    crate::connector::register_connector::<dyn SourceConnector>(
+    crate::registry::register_connector::<dyn SourceConnector>(
         "memory",
         Arc::new(|config: Value| -> Result<Box<dyn SourceConnector>> {
             Ok(Box::new(MemorySourceConnector::new(config)))
@@ -82,7 +82,7 @@ impl MemorySourceConnector {
             config,
             data: Vec::new(),
             schema: Schema::new(),
-            state: SourceState::new(),
+            state: SourceState::new("memory"),
         }
     }
 }

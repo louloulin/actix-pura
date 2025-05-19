@@ -4,9 +4,9 @@
 
 use std::collections::HashMap;
 use async_trait::async_trait;
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 
-use crate::{
+use dataflare_core::{
     error::{DataFlareError, Result},
     message::{DataRecord, DataRecordBatch},
     processor::{Processor, ProcessorState},

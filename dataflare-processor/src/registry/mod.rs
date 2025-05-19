@@ -5,9 +5,11 @@
 use std::sync::Arc;
 use serde_json::Value;
 
-use dataflare_core::error::Result;
-use crate::{
+use dataflare_core::{
+    error::Result,
     processor::Processor,
+};
+use crate::{
     mapping::MappingProcessor,
     filter::FilterProcessor,
     aggregate::AggregateProcessor,

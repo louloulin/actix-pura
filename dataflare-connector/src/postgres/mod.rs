@@ -42,7 +42,7 @@ impl PostgresSourceConnector {
         Self {
             config,
             client: None,
-            state: SourceState::new(),
+            state: SourceState::new("postgres"),
             schema: Schema::new(),
             extraction_mode: ExtractionMode::Full,
         }

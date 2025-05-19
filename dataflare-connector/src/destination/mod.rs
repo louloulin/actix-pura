@@ -71,7 +71,7 @@ pub trait DestinationConnector: Send + Sync + 'static {
 /// Registra los conectores de destino predeterminados
 pub fn register_default_destinations() {
     // Registrar conector de memoria
-    crate::connector::register_connector::<dyn DestinationConnector>(
+    crate::registry::register_connector::<dyn DestinationConnector>(
         "memory",
         Arc::new(|config: Value| -> Result<Box<dyn DestinationConnector>> {
             Ok(Box::new(MemoryDestinationConnector::new(config)))

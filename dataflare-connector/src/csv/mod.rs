@@ -51,7 +51,7 @@ impl CsvSourceConnector {
     pub fn new(config: Value) -> Self {
         Self {
             config,
-            state: SourceState::new(),
+            state: SourceState::new("csv"),
             schema: Schema::new(),
             extraction_mode: ExtractionMode::Full,
             file_path: None,
@@ -207,25 +207,24 @@ impl SourceConnector for CsvSourceConnector {
         }
 
         // 配置初始状态
-        let mut state = SourceState::new()
-            .with_source_name("csv")
-            .with_extraction_mode(match self.extraction_mode {
-                ExtractionMode::Full => "full",
-                ExtractionMode::Incremental => "incremental",
-                _ => "full",
-            });
+        let mut state = SourceState::new("csv");
+        state.add_data("extraction_mode", match self.extraction_mode {
+            ExtractionMode::Full => "full",
+            ExtractionMode::Incremental => "incremental",
+            _ => "full",
+        });
 
         // 对于增量模式，配置游标
         if self.extraction_mode == ExtractionMode::Incremental {
             if let Some(incremental) = config.get("incremental") {
                 // 使用行号作为游标
-                state = state.with_cursor_field("row_number");
+                state.add_data("cursor_field", "row_number");
 
                 // 如果有初始游标值，设置它
                 if let Some(cursor_value) = incremental.get("cursor_value").and_then(|c| c.as_str()) {
-                    state = state.with_cursor_value(cursor_value);
+                    state.add_data("cursor_value", cursor_value);
                 } else {
-                    state = state.with_cursor_value("0"); // 默认从第一行开始
+                    state.add_data("cursor_value", "0"); // 默认从第一行开始
                 }
             }
         }
@@ -306,8 +305,8 @@ impl SourceConnector for CsvSourceConnector {
             },
             ExtractionMode::Incremental => {
                 // 增量模式：从上次处理的行继续
-                let start_row = current_state.cursor_value
-                    .as_deref()
+                let start_row = current_state.data.get("cursor_value")
+                    .and_then(|v| v.as_str())
                     .and_then(|v| v.parse::<usize>().ok())
                     .unwrap_or(0);
 

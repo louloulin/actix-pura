@@ -8,79 +8,16 @@
 // pub mod join;
 // pub mod registry;
 
-use std::collections::HashMap;
-use async_trait::async_trait;
 use serde_json::Value;
 
 use dataflare_core::{
     error::Result,
     message::{DataRecord, DataRecordBatch},
+    model::Schema,
 };
 
-/// 处理器状态
-#[derive(Debug, Clone)]
-pub struct ProcessorState {
-    /// 状态数据
-    pub data: Value,
-    /// 元数据
-    pub metadata: HashMap<String, String>,
-}
-
-impl ProcessorState {
-    /// 创建新的处理器状态
-    pub fn new() -> Self {
-        Self {
-            data: Value::Null,
-            metadata: HashMap::new(),
-        }
-    }
-
-    /// 创建带数据的状态
-    pub fn with_data(data: Value) -> Self {
-        Self {
-            data,
-            metadata: HashMap::new(),
-        }
-    }
-
-    /// 添加元数据
-    pub fn with_metadata<K: Into<String>, V: Into<String>>(mut self, key: K, value: V) -> Self {
-        self.metadata.insert(key.into(), value.into());
-        self
-    }
-}
-
-impl Default for ProcessorState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// 数据处理器接口
-#[async_trait]
-pub trait Processor: Send + Sync + 'static {
-    /// 配置处理器
-    fn configure(&mut self, config: &Value) -> Result<()>;
-
-    /// 处理单条记录
-    async fn process_record(&mut self, record: &DataRecord, state: Option<ProcessorState>) -> Result<Vec<DataRecord>>;
-
-    /// 处理记录批次
-    async fn process_batch(&mut self, batch: &DataRecordBatch, state: Option<ProcessorState>) -> Result<DataRecordBatch>;
-
-    /// 获取处理器状态
-    fn get_state(&self) -> Result<ProcessorState>;
-
-    /// 初始化处理器
-    async fn initialize(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    /// 结束处理器
-    async fn finalize(&mut self) -> Result<()> {
-        Ok(())
-    }
-}
+// 使用 dataflare-core 中的 ProcessorState 和 Processor
+pub use dataflare_core::processor::{ProcessorState, Processor};
 
 /// 映射处理器
 pub struct MappingProcessor {

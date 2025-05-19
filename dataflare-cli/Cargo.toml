@@ -7,9 +7,25 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/actix/actix"
 
 [dependencies]
-dataflare = { path = "../dataflare" }
+# Core DataFlare components
+dataflare-core = { path = "../dataflare-core" }
+dataflare-runtime = { path = "../dataflare-runtime", features = ["full"] }
+dataflare-connector = { path = "../dataflare-connector" }
+dataflare-processor = { path = "../dataflare-processor" }
+dataflare-plugin = { path = "../dataflare-plugin" }
+dataflare-state = { path = "../dataflare-state" }
+
+# Optional components
+dataflare-edge = { path = "../dataflare-edge", optional = true }
+dataflare-cloud = { path = "../dataflare-cloud", optional = true }
+
+# Actix dependencies
 actix = { path = "../actix" }
 actix-rt = "2.9.0"
+actix-broker = { path = "../actix-broker" }
+actix-cluster = { path = "../actix-cluster", optional = true }
+
+# Other dependencies
 tokio = { version = "1.35.1", features = ["full"] }
 futures = "0.3.30"
 clap = { version = "4.4.11", features = ["derive"] }
@@ -20,6 +36,7 @@ thiserror = "1.0.56"
 anyhow = "1.0.93"
 log = "0.4.20"
 env_logger = "0.10.1"
+async-trait = "0.1.77"
 
 [[bin]]
 name = "dataflare"

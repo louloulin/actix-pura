@@ -4,10 +4,11 @@
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use serde_json::Value;
 
 use dataflare_core::error::{DataFlareError, Result};
+use dataflare_core::connector::{SourceConnector, DestinationConnector};
 
 /// Tipo de fábrica de conectores
 pub type ConnectorFactory<T> = Arc<dyn Fn(Value) -> Result<Box<T>> + Send + Sync>;
@@ -96,12 +97,12 @@ pub fn get_connector_names<T: ?Sized + Any>() -> Vec<String> {
 
 /// Obtiene los nombres de todos los conectores de origen registrados
 pub fn get_registered_source_connectors() -> Vec<String> {
-    get_connector_names::<dyn crate::connector::SourceConnector>()
+    get_connector_names::<dyn SourceConnector>()
 }
 
 /// Obtiene los nombres de todos los conectores de destino registrados
 pub fn get_registered_destination_connectors() -> Vec<String> {
-    get_connector_names::<dyn crate::connector::DestinationConnector>()
+    get_connector_names::<dyn DestinationConnector>()
 }
 
 #[cfg(test)]
