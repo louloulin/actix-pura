@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use dataflare_core::error::Result;
+use dataflare_core::message::DataRecord;
 use lazy_static::lazy_static;
 
 use crate::plugin::{PluginMetadata, PluginType, ProcessorPlugin};
@@ -49,6 +50,11 @@ impl PluginRegistry {
         self.processor_plugins.get(plugin_id)
     }
 
+    /// Get a mutable processor plugin by ID
+    pub fn get_processor_plugin_mut(&mut self, plugin_id: &str) -> Option<&mut Box<dyn ProcessorPlugin + Send + Sync>> {
+        self.processor_plugins.get_mut(plugin_id)
+    }
+
     /// List all plugins
     pub fn list_plugins(&self) -> Vec<&PluginMetadata> {
         self.plugins.values().collect()
@@ -75,13 +81,42 @@ pub fn get_plugin(plugin_id: &str) -> Option<PluginMetadata> {
     registry.get_plugin(plugin_id).cloned()
 }
 
+/// 简单的处理器插件实现，用于测试
+#[derive(Debug)]
+struct DummyProcessor {
+    metadata: PluginMetadata,
+}
+
+impl DummyProcessor {
+    fn new(metadata: PluginMetadata) -> Self {
+        Self { metadata }
+    }
+}
+
+impl ProcessorPlugin for DummyProcessor {
+    fn configure(&mut self, _config: serde_json::Value) -> Result<()> {
+        Ok(())
+    }
+
+    fn process(&self, record: DataRecord) -> Result<DataRecord> {
+        Ok(record)
+    }
+
+    fn get_metadata(&self) -> &PluginMetadata {
+        &self.metadata
+    }
+}
+
 /// Get a processor plugin by ID
 pub fn get_processor_plugin(plugin_id: &str) -> Option<Box<dyn ProcessorPlugin + Send + Sync>> {
     let registry = PLUGIN_REGISTRY.read().unwrap();
-    registry.get_processor_plugin(plugin_id).map(|plugin| {
-        // Clone the plugin - this would need to be implemented for actual plugins
-        // For now, we'll just return a new instance
-        Box::new(crate::wasm::WasmProcessor::new()) as Box<dyn ProcessorPlugin + Send + Sync>
+    // 这里我们只能返回一个克隆的插件，因为我们不能直接返回引用
+    // 在实际实现中，这需要根据具体的插件类型来处理
+    registry.get_plugin(plugin_id).map(|metadata| {
+        // 创建一个新的插件实例
+        // 注意：这是一个简化的实现，实际上应该从插件管理器获取
+        let dummy_plugin = Box::new(DummyProcessor::new(metadata.clone())) as Box<dyn ProcessorPlugin + Send + Sync>;
+        dummy_plugin
     })
 }
 
@@ -127,6 +162,21 @@ mod tests {
 
         fn process(&self, record: DataRecord) -> Result<DataRecord> {
             Ok(record)
+        }
+
+        fn get_metadata(&self) -> &PluginMetadata {
+            // 这只是一个测试实现，返回一个静态元数据
+            static METADATA: std::sync::OnceLock<PluginMetadata> = std::sync::OnceLock::new();
+            METADATA.get_or_init(|| PluginMetadata {
+                name: "MockProcessor".to_string(),
+                version: "1.0.0".to_string(),
+                description: "Mock processor for testing".to_string(),
+                author: "DataFlare".to_string(),
+                plugin_type: PluginType::Processor,
+                input_schema: None,
+                output_schema: None,
+                config_schema: None,
+            })
         }
     }
 

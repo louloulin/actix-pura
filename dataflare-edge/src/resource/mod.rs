@@ -40,7 +40,7 @@ impl ResourceMonitor {
         self.running.store(true, Ordering::SeqCst);
 
         // Start monitoring in a separate thread
-        let running = self.running.clone();
+        let running = Arc::new(AtomicBool::new(self.running.load(Ordering::SeqCst)));
         let max_memory_mb = self.max_memory_mb;
         let max_cpu_usage = self.max_cpu_usage;
 

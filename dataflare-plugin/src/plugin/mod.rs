@@ -3,8 +3,6 @@
 //! 本模块定义了插件系统的接口和功能，支持 WebAssembly (WASM) 插件。
 //! 插件系统允许用户扩展框架的功能，包括自定义数据处理器和连接器。
 
-mod wasm;
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -14,10 +12,10 @@ use serde::{Serialize, Deserialize};
 use serde_json::{json, Value};
 use wasmtime::{Engine, Module, Store, Instance, InstancePre, Linker, Caller, Val};
 
-use crate::error::{DataFlareError, Result};
-use crate::message::DataRecord;
+use dataflare_core::error::{DataFlareError, Result};
+use dataflare_core::message::DataRecord;
 
-pub use self::wasm::{WasmMemory, WasmProcessor, create_example_wasm_module};
+use crate::wasm::{WasmMemory, WasmProcessor, create_example_wasm_module};
 
 /// 插件类型
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,6 +101,17 @@ pub struct Plugin {
     pub(crate) state: PluginState,
 }
 
+impl std::fmt::Debug for Plugin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Plugin")
+            .field("id", &self.id)
+            .field("metadata", &self.metadata)
+            .field("config", &self.config)
+            .field("state", &"<PluginState>")
+            .finish()
+    }
+}
+
 /// 插件状态
 #[derive(Clone)]
 pub struct PluginState {
@@ -129,7 +138,7 @@ pub fn init_plugin_system(plugin_dir: PathBuf) -> Result<()> {
 }
 
 /// 处理器插件接口
-pub trait ProcessorPlugin: Send + Sync {
+pub trait ProcessorPlugin: Send + Sync + std::fmt::Debug {
     /// 配置插件
     fn configure(&mut self, config: Value) -> Result<()>;
 
@@ -137,7 +146,7 @@ pub trait ProcessorPlugin: Send + Sync {
     fn process(&self, record: DataRecord) -> Result<DataRecord>;
 
     /// 获取元数据
-    fn get_metadata(&self) -> PluginMetadata;
+    fn get_metadata(&self) -> &PluginMetadata;
 }
 
 /// 插件管理器

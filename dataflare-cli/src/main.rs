@@ -5,11 +5,11 @@
 use std::path::PathBuf;
 use std::time::Instant;
 use clap::{Parser, Subcommand};
-use dataflare::{
-    workflow::{YamlWorkflowParser, WorkflowParser, WorkflowExecutor},
-    message::WorkflowProgress,
-    processor,
-};
+use dataflare::init;
+use dataflare_runtime::workflow::{YamlWorkflowParser, WorkflowParser, WorkflowExecutor};
+use dataflare_core::message::WorkflowProgress;
+use dataflare_core::DataFlareConfig;
+use dataflare_processor as processor;
 
 #[derive(Parser)]
 #[command(name = "dataflare")]
@@ -57,7 +57,7 @@ enum Commands {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 初始化 DataFlare
-    dataflare::init(dataflare::DataFlareConfig::default())?;
+    dataflare_core::init(dataflare_core::DataFlareConfig::default())?;
 
     // 解析命令行参数
     let cli = Cli::parse();
@@ -69,10 +69,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match &cli.command {
         Commands::Validate { file, dot } => {
             println!("验证工作流: {:?}", file);
-            
+
             // 使用 YAML 解析器加载工作流
             let workflow = YamlWorkflowParser::load_from_file(file)?;
-            
+
             println!("工作流验证成功: {}", workflow.id);
             println!("名称: {}", workflow.name);
             println!("描述: {}", workflow.description.as_deref().unwrap_or("无"));
@@ -80,7 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("源数量: {}", workflow.sources.len());
             println!("转换数量: {}", workflow.transformations.len());
             println!("目标数量: {}", workflow.destinations.len());
-            
+
             if *dot {
                 // 生成 DOT 图
                 let dot_graph = workflow.to_dot_graph()?;
@@ -91,16 +91,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Commands::Execute { file, incremental, state } => {
             println!("执行工作流: {:?}", file);
-            
+
             // 使用 YAML 解析器加载工作流
             let workflow = YamlWorkflowParser::load_from_file(file)?;
-            
+
             // 创建工作流执行器
             let mut executor = WorkflowExecutor::new();
-            
+
             // 初始化执行器
             executor.initialize()?;
-            
+
             // 设置进度回调
             executor.set_progress_callback(Box::new(|progress| {
                 match progress {
@@ -133,17 +133,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     },
                 }
             }));
-            
+
             // 准备工作流
             executor.prepare(&workflow)?;
-            
+
             // 执行工作流
             let start = Instant::now();
             system.block_on(async {
                 executor.execute(&workflow).await
             })?;
             let duration = start.elapsed();
-            
+
             println!("工作流执行完成，耗时 {:.2} 秒", duration.as_secs_f64());
         },
         Commands::Version => {

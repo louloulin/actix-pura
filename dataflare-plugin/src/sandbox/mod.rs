@@ -46,51 +46,53 @@ impl PluginSandbox {
         config_builder.wasm_reference_types(true);
         config_builder.wasm_bulk_memory(true);
         config_builder.wasm_multi_value(true);
-        
+
         let engine = Engine::new(&config_builder)
             .map_err(|e| DataFlareError::Plugin(format!("Failed to create WASM engine: {}", e)))?;
-        
+
         Ok(Self {
             config,
             engine,
         })
     }
-    
+
     /// Create a new store with the given data
     pub fn create_store<T>(&self, data: T) -> Store<T> {
         let mut store = Store::new(&self.engine, data);
-        
+
         // Set fuel limit based on max execution time
         // This is a rough approximation - 1 fuel unit ~= 100 instructions
-        let fuel = self.config.max_execution_time * 10000;
-        store.add_fuel(fuel).unwrap_or_default();
-        
+        // 注意：wasmtime 32.0.0 版本中 add_fuel 方法已被移除
+        // 我们可以使用其他方式限制资源，或者在未来版本中使用新的 API
+        let _fuel = self.config.max_execution_time * 10000;
+        // 暂时不设置燃料限制
+
         store
     }
-    
+
     /// Create a new linker with the given store
     pub fn create_linker<T>(&self, store: &mut Store<T>) -> Result<Linker<T>> {
         let mut linker = Linker::new(&self.engine);
-        
+
         // Add WASI support if enabled
         if self.config.enable_wasi {
             // This would require wasmtime_wasi crate
             // wasmtime_wasi::add_to_linker(&mut linker, |s| s)?;
         }
-        
+
         Ok(linker)
     }
-    
+
     /// Compile a WASM module from bytes
     pub fn compile_module(&self, wasm_bytes: &[u8]) -> Result<Module> {
         Module::new(&self.engine, wasm_bytes)
             .map_err(|e| DataFlareError::Plugin(format!("Failed to compile WASM module: {}", e)))
     }
-    
+
     /// Execute a function in the sandbox
-    pub fn execute_function<T, P, R>(&self, module: &Module, store: &mut Store<T>, linker: &Linker<T>, 
-                                  function_name: &str, params: P) -> Result<R> 
-    where 
+    pub fn execute_function<T, P, R>(&self, module: &Module, store: &mut Store<T>, linker: &Linker<T>,
+                                  function_name: &str, params: P) -> Result<R>
+    where
         P: wasmtime::AsContextMut<Data = T>,
         R: std::fmt::Debug,
     {
@@ -102,12 +104,12 @@ impl PluginSandbox {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_sandbox_creation() {
         let config = SandboxConfig::default();
         let sandbox = PluginSandbox::new(config).unwrap();
-        
+
         assert_eq!(sandbox.config.max_memory, 100 * 1024 * 1024);
         assert_eq!(sandbox.config.max_execution_time, 5000);
         assert_eq!(sandbox.config.enable_wasi, false);

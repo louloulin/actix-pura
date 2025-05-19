@@ -37,6 +37,7 @@ anyhow = "1.0.93"
 log = "0.4.20"
 env_logger = "0.10.1"
 async-trait = "0.1.77"
+dataflare = { version = "0.1.0", path = "../dataflare" }
 
 [[bin]]
 name = "dataflare"

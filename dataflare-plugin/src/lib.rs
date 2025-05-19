@@ -18,7 +18,7 @@ use dataflare_core::error::Result;
 // Re-exports for convenience
 pub use plugin::{PluginManager, PluginConfig, PluginMetadata, PluginType, ProcessorPlugin};
 pub use wasm::WasmProcessor;
-pub use registry::{register_plugin, get_plugin, PluginRegistry};
+pub use registry::{register_plugin, get_plugin, list_plugins};
 
 /// Version of the DataFlare Plugin module
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -26,8 +26,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Initialize the plugin system
 pub fn init_plugin_system(plugin_dir: PathBuf) -> Result<()> {
     log::info!("Initializing plugin system from directory: {:?}", plugin_dir);
-    // Implementation will be moved from the original code
-    Ok(())
+    plugin::init_plugin_system(plugin_dir)
 }
 
 #[cfg(test)]

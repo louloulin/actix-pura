@@ -6,8 +6,8 @@ use std::sync::Arc;
 use serde_json::Value;
 use wasmtime::{Memory, Store, Val};
 
-use crate::error::{DataFlareError, Result};
-use crate::message::DataRecord;
+use dataflare_core::error::{DataFlareError, Result};
+use dataflare_core::message::DataRecord;
 use crate::plugin::{Plugin, PluginMetadata, PluginState, ProcessorPlugin};
 
 /// WASM 内存接口
@@ -47,14 +47,32 @@ impl<'a> WasmMemory<'a> {
             .and_then(|v| v.as_str())
             .unwrap_or("alloc");
 
-        // TODO: 调用分配函数并写入字符串
+        // 获取实例
+        let instance = self.memory.data(&*self.store).len();
 
-        // 临时返回空指针
-        Ok((0, 0))
+        // 从预定义的内存位置开始分配
+        // 在实际实现中，应该调用 WASM 模块的分配函数
+        let ptr = 1024; // 从 1024 开始分配，这只是一个简单的实现
+        let len = string.len() as i32;
+
+        // 检查内存边界
+        if (ptr as usize + string.len()) > instance {
+            return Err(DataFlareError::Plugin("内存不足".to_string()));
+        }
+
+        // 写入字符串
+        let memory_data = self.memory.data_mut(&mut *self.store);
+        let start = ptr as usize;
+        let end = start + string.len();
+
+        memory_data[start..end].copy_from_slice(string.as_bytes());
+
+        Ok((ptr as i32, len))
     }
 }
 
 /// WASM 处理器插件
+#[derive(Debug)]
 pub struct WasmProcessor {
     /// 插件实例
     plugin: Arc<Plugin>,
@@ -206,8 +224,8 @@ impl ProcessorPlugin for WasmProcessor {
         Ok(processed_record)
     }
 
-    fn get_metadata(&self) -> PluginMetadata {
-        self.plugin.metadata.clone()
+    fn get_metadata(&self) -> &PluginMetadata {
+        &self.plugin.metadata
     }
 }
 
