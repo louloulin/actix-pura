@@ -6,7 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::{
+use dataflare_core::{
     error::Result,
     message::{DataRecord, DataRecordBatch},
     model::Schema,

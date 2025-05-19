@@ -35,7 +35,7 @@ impl FilterProcessor {
     /// Create a new filter processor from a JSON configuration
     pub fn from_json(config: Value) -> Result<Self> {
         let config: FilterProcessorConfig = serde_json::from_value(config)
-            .map_err(|e| DataFlareError::Configuration(format!("Invalid filter processor configuration: {}", e)))?;
+            .map_err(|e| DataFlareError::Config(format!("Invalid filter processor configuration: {}", e)))?;
         Ok(Self::new(config))
     }
 

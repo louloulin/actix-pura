@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use serde_json::Value;
 
-use crate::error::{DataFlareError, Result};
+use dataflare_core::error::{DataFlareError, Result};
 
 /// Tipo de fábrica de conectores
 pub type ConnectorFactory<T> = Arc<dyn Fn(Value) -> Result<Box<T>> + Send + Sync>;

@@ -61,7 +61,7 @@ impl CheckpointState {
             .map_err(|e| DataFlareError::Serialization(format!("Failed to serialize checkpoint: {}", e)))?;
 
         std::fs::write(path, json)
-            .map_err(|e| DataFlareError::IO(format!("Failed to write checkpoint to file: {}", e)))?;
+            .map_err(|e| DataFlareError::Io(e))?;
 
         Ok(())
     }
@@ -69,7 +69,7 @@ impl CheckpointState {
     /// Load a checkpoint from a file
     pub fn load_from_file(path: &PathBuf) -> Result<Self> {
         let json = std::fs::read_to_string(path)
-            .map_err(|e| DataFlareError::Io(format!("Failed to read checkpoint from file: {}", e)))?;
+            .map_err(|e| DataFlareError::Io(e))?;
 
         let checkpoint: Self = serde_json::from_str(&json)
             .map_err(|e| DataFlareError::Serialization(format!("Failed to deserialize checkpoint: {}", e)))?;

@@ -19,8 +19,7 @@ use crate::{
 pub fn register_default_processors() {
     // 注册映射处理器
     register_processor("mapping", Arc::new(|config: Value| -> Result<Box<dyn Processor>> {
-        let mut processor = MappingProcessor::new();
-        processor.configure(&config)?;
+        let processor = MappingProcessor::from_json(config)?;
         Ok(Box::new(processor))
     }));
 

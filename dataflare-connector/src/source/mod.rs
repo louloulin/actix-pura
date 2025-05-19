@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use futures::Stream;
 use serde_json::Value;
 
-use crate::{
+use dataflare_core::{
     error::Result,
     message::DataRecord,
     model::Schema,

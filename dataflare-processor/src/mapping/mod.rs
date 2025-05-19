@@ -47,7 +47,7 @@ impl MappingProcessor {
     /// Create a new mapping processor from a JSON configuration
     pub fn from_json(config: Value) -> Result<Self> {
         let config: MappingProcessorConfig = serde_json::from_value(config)
-            .map_err(|e| DataFlareError::Configuration(format!("Invalid mapping processor configuration: {}", e)))?;
+            .map_err(|e| DataFlareError::Config(format!("Invalid mapping processor configuration: {}", e)))?;
         Ok(Self::new(config))
     }
 
@@ -76,10 +76,18 @@ impl MappingProcessor {
             }
             "float" => {
                 if let Some(n) = value.as_f64() {
-                    Value::Number(serde_json::Number::from_f64(n).unwrap_or_default())
+                    if let Some(num) = serde_json::Number::from_f64(n) {
+                        Value::Number(num)
+                    } else {
+                        value.clone()
+                    }
                 } else if let Some(s) = value.as_str() {
                     if let Ok(n) = s.parse::<f64>() {
-                        Value::Number(serde_json::Number::from_f64(n).unwrap_or_default())
+                        if let Some(num) = serde_json::Number::from_f64(n) {
+                            Value::Number(num)
+                        } else {
+                            value.clone()
+                        }
                     } else {
                         value.clone()
                     }

@@ -10,13 +10,17 @@ use tokio_postgres::{NoTls, Row};
 use chrono::{DateTime, Utc};
 use log::{error, info};
 
-use crate::{
+use dataflare_core::{
     error::{DataFlareError, Result},
     message::DataRecord,
     model::Schema,
     state::SourceState,
-    connector::source::{SourceConnector, ExtractionMode},
+    model::Field,
+    model::DataType,
 };
+
+use crate::source::{SourceConnector, ExtractionMode};
+use crate::hybrid::HybridConfig;
 
 /// Conector de fuente PostgreSQL
 pub struct PostgresSourceConnector {
@@ -208,24 +212,23 @@ impl SourceConnector for PostgresSourceConnector {
         }
 
         // Configurar estado inicial
-        let mut state = SourceState::new()
-            .with_source_name("postgres")
-            .with_extraction_mode(match self.extraction_mode {
-                ExtractionMode::Full => "full",
-                ExtractionMode::Incremental => "incremental",
-                ExtractionMode::CDC => "cdc",
-                ExtractionMode::Hybrid => "hybrid",
-            });
+        let mut state = SourceState::new("postgres");
+        state.add_data("extraction_mode", match self.extraction_mode {
+            ExtractionMode::Full => "full",
+            ExtractionMode::Incremental => "incremental",
+            ExtractionMode::CDC => "cdc",
+            ExtractionMode::Hybrid => "hybrid",
+        });
 
         // Para modo incremental, configurar cursor
         if self.extraction_mode == ExtractionMode::Incremental {
             if let Some(incremental) = config.get("incremental") {
                 if let Some(cursor_field) = incremental.get("cursor_field").and_then(|c| c.as_str()) {
-                    state = state.with_cursor_field(cursor_field);
+                    state.add_data("cursor_field", cursor_field);
 
                     // Si hay un valor inicial del cursor, establecerlo
                     if let Some(cursor_value) = incremental.get("cursor_value").and_then(|c| c.as_str()) {
-                        state = state.with_cursor_value(cursor_value);
+                        state.add_data("cursor_value", cursor_value);
                     }
                 }
             }
@@ -235,11 +238,11 @@ impl SourceConnector for PostgresSourceConnector {
         if self.extraction_mode == ExtractionMode::CDC {
             if let Some(cdc) = config.get("cdc") {
                 if let Some(slot_name) = cdc.get("slot_name").and_then(|s| s.as_str()) {
-                    state = state.with_metadata("slot_name", slot_name);
+                    state.add_data("slot_name", slot_name);
                 }
 
                 if let Some(log_position) = cdc.get("log_position").and_then(|l| l.as_str()) {
-                    state = state.with_log_position(log_position);
+                    state.add_data("log_position", log_position);
                 }
             }
         }
@@ -351,7 +354,7 @@ impl SourceConnector for PostgresSourceConnector {
             ExtractionMode::Incremental => {
                 // 增量模式：根据游标读取数据
                 if let Some(source_state) = state {
-                    if let (Some(cursor_field), Some(cursor_value)) = (source_state.cursor_field, source_state.cursor_value) {
+                    if let (Some(cursor_field), Some(cursor_value)) = (source_state.data.get("cursor_field").and_then(|v| v.as_str()), source_state.data.get("cursor_value").and_then(|v| v.as_str())) {
                         let query = format!("SELECT * FROM {} WHERE {} > $1 ORDER BY {} ASC",
                             table, cursor_field, cursor_field);
                         client.query(&query, &[&cursor_value]).await
@@ -385,7 +388,7 @@ impl SourceConnector for PostgresSourceConnector {
             },
             ExtractionMode::Hybrid => {
                 // 混合模式：根据配置使用初始模式
-                if let Some(hybrid_config) = crate::connector::hybrid::HybridConfig::from_config(&self.config).ok() {
+                if let Some(hybrid_config) = HybridConfig::from_config(&self.config).ok() {
                     match hybrid_config.initial_mode {
                         ExtractionMode::Full => {
                             // 使用全量模式作为初始模式
@@ -472,8 +475,9 @@ impl SourceConnector for PostgresSourceConnector {
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| DataFlareError::Config("Se requiere cursor_value para el modo incremental".to_string()))?;
 
-                    let state = SourceState::new()
-                        .with_cursor(cursor_field, cursor_value);
+                    let mut state = SourceState::new("postgres");
+                    state.add_data("cursor_field", cursor_field);
+                    state.add_data("cursor_value", cursor_value);
 
                     Ok(state)
                 } else {
@@ -490,8 +494,9 @@ impl SourceConnector for PostgresSourceConnector {
                     // 使用当前时间作为初始值
                     let timestamp_value = Utc::now().to_rfc3339();
 
-                    let state = SourceState::new()
-                        .with_cursor(timestamp_field, timestamp_value);
+                    let mut state = SourceState::new("postgres");
+                    state.add_data("cursor_field", timestamp_field);
+                    state.add_data("cursor_value", timestamp_value);
 
                     Ok(state)
                 } else {
@@ -500,7 +505,7 @@ impl SourceConnector for PostgresSourceConnector {
             },
             _ => {
                 // 对于全量模式，返回空状态
-                Ok(SourceState::new())
+                Ok(SourceState::new("postgres"))
             }
         }
     }
@@ -551,7 +556,7 @@ impl SourceConnector for PostgresSourceConnector {
             ExtractionMode::Incremental => {
                 // 增量模式：根据游标计算记录
                 if let Some(source_state) = state {
-                    if let (Some(cursor_field), Some(cursor_value)) = (source_state.cursor_field.as_deref(), source_state.cursor_value.as_deref()) {
+                    if let (Some(cursor_field), Some(cursor_value)) = (source_state.data.get("cursor_field").and_then(|v| v.as_str()), source_state.data.get("cursor_value").and_then(|v| v.as_str())) {
                         let query = format!("SELECT COUNT(*) FROM {} WHERE {} > $1",
                             table, cursor_field);
                         let row = client.query_one(&query, &[&cursor_value]).await
@@ -589,7 +594,7 @@ impl SourceConnector for PostgresSourceConnector {
             },
             ExtractionMode::Hybrid => {
                 // 混合模式：根据配置使用初始模式
-                if let Some(hybrid_config) = crate::connector::hybrid::HybridConfig::from_config(&self.config).ok() {
+                if let Some(hybrid_config) = HybridConfig::from_config(&self.config).ok() {
                     match hybrid_config.initial_mode {
                         ExtractionMode::Full => {
                             // 使用全量模式作为初始模式
@@ -649,18 +654,18 @@ impl PostgresSourceConnector {
 
             // 将 PostgreSQL 数据类型转换为 DataFlare 数据类型
             let field_type = match data_type.as_str() {
-                "integer" | "smallint" | "bigint" => crate::model::DataType::Int64,
-                "numeric" | "decimal" | "real" | "double precision" => crate::model::DataType::Float64,
-                "character varying" | "varchar" | "text" | "char" | "character" => crate::model::DataType::String,
-                "boolean" => crate::model::DataType::Boolean,
-                "date" | "timestamp" | "timestamp without time zone" | "timestamp with time zone" => crate::model::DataType::Timestamp,
-                "json" | "jsonb" => crate::model::DataType::Object,
-                _ => crate::model::DataType::String, // 默认为字符串
+                "integer" | "smallint" | "bigint" => DataType::Int64,
+                "numeric" | "decimal" | "real" | "double precision" => DataType::Float64,
+                "character varying" | "varchar" | "text" | "char" | "character" => DataType::String,
+                "boolean" => DataType::Boolean,
+                "date" | "timestamp" | "timestamp without time zone" | "timestamp with time zone" => DataType::Timestamp,
+                "json" | "jsonb" => DataType::Object,
+                _ => DataType::String, // 默认为字符串
             };
 
             // 创建字段并添加到模式
             let nullable = is_nullable == "YES";
-            let field = crate::model::Field::new(column_name, field_type).nullable(nullable);
+            let field = Field::new(column_name, field_type).nullable(nullable);
             schema.add_field(field);
         }
 
@@ -694,11 +699,11 @@ impl PostgresSourceConnector {
                 let current_state = state.unwrap_or_else(|| self.state.clone());
 
                 // Obtener campo y valor del cursor
-                let cursor_field = current_state.cursor_field.as_deref().ok_or_else(|| {
+                let cursor_field = current_state.data.get("cursor_field").and_then(|v| v.as_str()).ok_or_else(|| {
                     DataFlareError::Config("Se requiere cursor_field para modo incremental".to_string())
                 })?;
 
-                let cursor_value = current_state.cursor_value.as_deref().unwrap_or("0");
+                let cursor_value = current_state.data.get("cursor_value").and_then(|v| v.as_str()).unwrap_or("0");
 
                 format!("SELECT * FROM {} WHERE {} > '{}' ORDER BY {} ASC",
                     table, cursor_field, cursor_value, cursor_field)
@@ -722,8 +727,8 @@ impl PostgresSourceConnector {
                     .unwrap_or("updated_at");
 
                 // 获取最后更新时间值
-                let last_timestamp = current_state.metadata.get("last_timestamp")
-                    .map(|s| s.as_str())
+                let last_timestamp = current_state.data.get("last_timestamp")
+                    .and_then(|v| v.as_str())
                     .unwrap_or("1970-01-01T00:00:00Z");
 
                 // 构建查询，获取自上次更新以来的所有更改
@@ -732,7 +737,7 @@ impl PostgresSourceConnector {
             },
             ExtractionMode::Hybrid => {
                 // 混合模式：使用 HybridStream 包装器
-                if let Some(hybrid_config) = crate::connector::hybrid::HybridConfig::from_config(&self.config).ok() {
+                if let Some(hybrid_config) = HybridConfig::from_config(&self.config).ok() {
                     // 克隆状态以避免移动问题
                     let state_clone = state.clone();
 
@@ -758,11 +763,11 @@ impl PostgresSourceConnector {
                             let current_state = state_clone.clone().unwrap_or_else(|| initial_connector.state.clone());
 
                             // 获取游标字段和值
-                            let cursor_field = current_state.cursor_field.as_deref().ok_or_else(|| {
+                            let cursor_field = current_state.data.get("cursor_field").and_then(|v| v.as_str()).ok_or_else(|| {
                                 DataFlareError::Config("Se requiere cursor_field para modo incremental".to_string())
                             })?;
 
-                            let cursor_value = current_state.cursor_value.as_deref().unwrap_or("0");
+                            let cursor_value = current_state.data.get("cursor_value").and_then(|v| v.as_str()).unwrap_or("0");
 
                             format!("SELECT * FROM {} WHERE {} > '{}' ORDER BY {} ASC",
                                 table, cursor_field, cursor_value, cursor_field)
@@ -803,11 +808,11 @@ impl PostgresSourceConnector {
                             let current_state = state.clone().unwrap_or_else(|| ongoing_connector.state.clone());
 
                             // 获取游标字段和值
-                            let cursor_field = current_state.cursor_field.as_deref().ok_or_else(|| {
+                            let cursor_field = current_state.data.get("cursor_field").and_then(|v| v.as_str()).ok_or_else(|| {
                                 DataFlareError::Config("Se requiere cursor_field para modo incremental".to_string())
                             })?;
 
-                            let cursor_value = current_state.cursor_value.as_deref().unwrap_or("0");
+                            let cursor_value = current_state.data.get("cursor_value").and_then(|v| v.as_str()).unwrap_or("0");
 
                             format!("SELECT * FROM {} WHERE {} > '{}' ORDER BY {} ASC",
                                 table, cursor_field, cursor_value, cursor_field)
@@ -823,8 +828,8 @@ impl PostgresSourceConnector {
                                 .unwrap_or("updated_at");
 
                             // 获取最后更新时间值
-                            let last_timestamp = current_state.metadata.get("last_timestamp")
-                                .map(|s| s.as_str())
+                            let last_timestamp = current_state.data.get("last_timestamp")
+                                .and_then(|v| v.as_str())
                                 .unwrap_or("1970-01-01T00:00:00Z");
 
                             // 构建查询，获取自上次更新以来的所有更改
@@ -849,7 +854,7 @@ impl PostgresSourceConnector {
                     let ongoing_stream = Box::new(futures::stream::iter(ongoing_records));
 
                     // 创建混合流
-                    let mut hybrid_stream = crate::connector::hybrid::HybridStream::new(initial_stream, hybrid_config);
+                    let mut hybrid_stream = crate::hybrid::HybridStream::new(initial_stream, hybrid_config);
                     hybrid_stream.set_ongoing_stream(ongoing_stream);
 
                     return Ok(Box::new(hybrid_stream));
@@ -945,7 +950,7 @@ impl Clone for PostgresSourceConnector {
 
 /// Registra el conector PostgreSQL
 pub fn register_postgres_connector() {
-    crate::connector::register_connector::<dyn SourceConnector>(
+    crate::registry::register_connector::<dyn SourceConnector>(
         "postgres",
         Arc::new(|config: Value| -> Result<Box<dyn SourceConnector>> {
             Ok(Box::new(PostgresSourceConnector::new(config)))

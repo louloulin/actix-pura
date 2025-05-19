@@ -11,13 +11,18 @@ use async_trait::async_trait;
 use futures::Stream;
 use serde_json::{Value, json, Map};
 
-use crate::{
+use dataflare_core::{
     error::{DataFlareError, Result},
     message::{DataRecord, DataRecordBatch},
     model::Schema,
     state::SourceState,
-    connector::source::{SourceConnector, ExtractionMode},
-    connector::destination::DestinationConnector,
+    model::Field,
+    model::DataType,
+};
+
+use crate::{
+    source::{SourceConnector, ExtractionMode},
+    destination::DestinationConnector,
     destination::{WriteMode, WriteStats},
 };
 
@@ -123,7 +128,7 @@ impl CsvSourceConnector {
         if !headers.is_empty() {
             for header in headers {
                 // 默认所有字段为字符串类型
-                let field = crate::model::Field::new(header, crate::model::DataType::String);
+                let field = Field::new(header, DataType::String);
                 schema.add_field(field);
             }
         } else {
@@ -149,7 +154,7 @@ impl CsvSourceConnector {
                 // 为每一列创建字段
                 for i in 0..record.len() {
                     let field_name = format!("column_{}", i);
-                    let field = crate::model::Field::new(field_name, crate::model::DataType::String);
+                    let field = Field::new(field_name, DataType::String);
                     schema.add_field(field);
                 }
             }
@@ -654,7 +659,7 @@ impl DestinationConnector for CsvDestinationConnector {
 /// 注册 CSV 连接器
 pub fn register_csv_connectors() {
     // 注册 CSV 源连接器
-    crate::connector::register_connector::<dyn SourceConnector>(
+    crate::registry::register_connector::<dyn SourceConnector>(
         "csv",
         Arc::new(|config: Value| -> Result<Box<dyn SourceConnector>> {
             Ok(Box::new(CsvSourceConnector::new(config)))
@@ -662,9 +667,9 @@ pub fn register_csv_connectors() {
     );
 
     // 注册 CSV 目标连接器
-    crate::connector::register_connector::<dyn crate::connector::DestinationConnector>(
+    crate::registry::register_connector::<dyn DestinationConnector>(
         "csv",
-        Arc::new(|config: Value| -> Result<Box<dyn crate::connector::DestinationConnector>> {
+        Arc::new(|config: Value| -> Result<Box<dyn DestinationConnector>> {
             Ok(Box::new(CsvDestinationConnector::new(config)))
         }),
     );
