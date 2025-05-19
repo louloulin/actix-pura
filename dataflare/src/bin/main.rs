@@ -5,11 +5,13 @@
 use std::path::PathBuf;
 use std::time::Instant;
 use clap::{Parser, Subcommand};
-use dataflare::{
+use dataflare_runtime::{
     workflow::{YamlWorkflowParser, WorkflowParser, WorkflowExecutor},
-    message::WorkflowProgress,
-    processor,
 };
+use dataflare_core::message::WorkflowProgress;
+use dataflare_connector::registry;
+use dataflare_processor::registry as processor_registry;
+use dataflare;
 
 #[derive(Parser)]
 #[command(name = "dataflare")]
@@ -156,8 +158,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             println!("工作流已加载: {}", workflow.id);
 
-            // 在 tokio 运行时中执行工作流
-            rt.block_on(async {
+            // 在 actix 运行时中执行工作流
+            let system = actix::System::new();
+            system.block_on(async {
                 // 创建工作流执行器
                 let mut executor = WorkflowExecutor::new()
                     .with_progress_callback(|progress: WorkflowProgress| {
@@ -223,21 +226,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // 获取所有注册的源连接器
             println!("\n源连接器:");
-            let source_connectors = dataflare::connector::registry::get_registered_source_connectors();
+            let source_connectors = registry::get_registered_source_connectors();
             for connector in source_connectors {
                 println!("  - {}", connector);
             }
 
             // 获取所有注册的目标连接器
             println!("\n目标连接器:");
-            let destination_connectors = dataflare::connector::registry::get_registered_destination_connectors();
+            let destination_connectors = registry::get_registered_destination_connectors();
             for connector in destination_connectors {
                 println!("  - {}", connector);
             }
 
             // 获取所有注册的处理器
             println!("\n处理器:");
-            let processors = processor::registry::get_processor_names();
+            let processors = processor_registry::get_processor_names();
             for processor in processors {
                 println!("  - {}", processor);
             }
