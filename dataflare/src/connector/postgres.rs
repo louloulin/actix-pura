@@ -384,8 +384,41 @@ impl SourceConnector for PostgresSourceConnector {
                 return Err(DataFlareError::NotImplemented("El modo CDC no está completamente implementado".to_string()));
             },
             ExtractionMode::Hybrid => {
-                // Hybrid 模式：暂不支持
-                return Err(DataFlareError::NotImplemented("El modo Hybrid no está implementado".to_string()));
+                // 混合模式：根据配置使用初始模式
+                if let Some(hybrid_config) = crate::connector::hybrid::HybridConfig::from_config(&self.config).ok() {
+                    match hybrid_config.initial_mode {
+                        ExtractionMode::Full => {
+                            // 使用全量模式作为初始模式
+                            let query = format!("SELECT * FROM {}", table);
+                            client.query(&query, &[]).await
+                                .map_err(|e| DataFlareError::Query(format!("Error al ejecutar consulta: {}", e)))?
+                        },
+                        ExtractionMode::Incremental => {
+                            // 使用增量模式作为初始模式
+                            if let Some(incremental) = self.config.get("incremental") {
+                                let cursor_field = incremental.get("cursor_field")
+                                    .and_then(|v| v.as_str())
+                                    .ok_or_else(|| DataFlareError::Config("Se requiere cursor_field para el modo incremental".to_string()))?;
+
+                                let cursor_value = incremental.get("cursor_value")
+                                    .and_then(|v| v.as_str())
+                                    .ok_or_else(|| DataFlareError::Config("Se requiere cursor_value para el modo incremental".to_string()))?;
+
+                                let query = format!("SELECT * FROM {} WHERE {} > $1 ORDER BY {} ASC",
+                                    table, cursor_field, cursor_field);
+                                client.query(&query, &[&cursor_value]).await
+                                    .map_err(|e| DataFlareError::Query(format!("Error al ejecutar consulta: {}", e)))?
+                            } else {
+                                return Err(DataFlareError::Config("Se requiere configuración 'incremental' para el modo incremental".to_string()));
+                            }
+                        },
+                        _ => {
+                            return Err(DataFlareError::Config("Modo inicial no soportado para modo híbrido".to_string()));
+                        }
+                    }
+                } else {
+                    return Err(DataFlareError::Config("Configuración híbrida inválida".to_string()));
+                }
             },
         };
 
@@ -478,6 +511,7 @@ impl SourceConnector for PostgresSourceConnector {
             match mode {
                 "incremental" => ExtractionMode::Incremental,
                 "cdc" => ExtractionMode::CDC,
+                "hybrid" => ExtractionMode::Hybrid,
                 _ => ExtractionMode::Full,
             }
         } else {
@@ -554,8 +588,46 @@ impl SourceConnector for PostgresSourceConnector {
                 0
             },
             ExtractionMode::Hybrid => {
-                // Hybrid 模式：暂不支持
-                return Err(DataFlareError::NotImplemented("El modo Hybrid no está implementado".to_string()));
+                // 混合模式：根据配置使用初始模式
+                if let Some(hybrid_config) = crate::connector::hybrid::HybridConfig::from_config(&self.config).ok() {
+                    match hybrid_config.initial_mode {
+                        ExtractionMode::Full => {
+                            // 使用全量模式作为初始模式
+                            let query = format!("SELECT COUNT(*) FROM {}", table);
+                            let row = client.query_one(&query, &[]).await
+                                .map_err(|e| DataFlareError::Query(format!("Error al ejecutar consulta de conteo: {}", e)))?;
+                            let count: i64 = row.get(0);
+                            count as u64
+                        },
+                        ExtractionMode::Incremental => {
+                            // 使用增量模式作为初始模式
+                            if let Some(incremental) = self.config.get("incremental") {
+                                let cursor_field = incremental.get("cursor_field")
+                                    .and_then(|v| v.as_str())
+                                    .ok_or_else(|| DataFlareError::Config("Se requiere cursor_field para el modo incremental".to_string()))?;
+
+                                let cursor_value = incremental.get("cursor_value")
+                                    .and_then(|v| v.as_str())
+                                    .ok_or_else(|| DataFlareError::Config("Se requiere cursor_value para el modo incremental".to_string()))?;
+
+                                let query = format!("SELECT COUNT(*) FROM {} WHERE {} > $1",
+                                    table, cursor_field);
+                                let row = client.query_one(&query, &[&cursor_value]).await
+                                    .map_err(|e| DataFlareError::Query(format!("Error al ejecutar consulta de conteo: {}", e)))?;
+                                let count: i64 = row.get(0);
+                                count as u64
+                            } else {
+                                return Err(DataFlareError::Config("Se requiere configuración 'incremental' para el modo incremental".to_string()));
+                            }
+                        },
+                        _ => {
+                            // 对于其他模式，返回 0
+                            0
+                        }
+                    }
+                } else {
+                    return Err(DataFlareError::Config("Configuración híbrida inválida".to_string()));
+                }
             },
         };
 
@@ -659,7 +731,131 @@ impl PostgresSourceConnector {
                     table, timestamp_field, last_timestamp)
             },
             ExtractionMode::Hybrid => {
-                return Err(DataFlareError::NotImplemented("Modo Hybrid no implementado".to_string()));
+                // 混合模式：使用 HybridStream 包装器
+                if let Some(hybrid_config) = crate::connector::hybrid::HybridConfig::from_config(&self.config).ok() {
+                    // 克隆状态以避免移动问题
+                    let state_clone = state.clone();
+
+                    // 创建初始流
+                    let mut initial_connector = self.clone();
+                    initial_connector.extraction_mode = hybrid_config.initial_mode.clone();
+
+                    // 根据初始模式构建查询
+                    let client = initial_connector.client.as_ref().ok_or_else(|| {
+                        DataFlareError::Connection("No hay conexión a PostgreSQL".to_string())
+                    })?;
+
+                    let table = initial_connector.config.get("table").and_then(|t| t.as_str()).ok_or_else(|| {
+                        DataFlareError::Config("Se requiere el parámetro 'table'".to_string())
+                    })?;
+
+                    let query = match initial_connector.extraction_mode {
+                        ExtractionMode::Full => {
+                            format!("SELECT * FROM {}", table)
+                        },
+                        ExtractionMode::Incremental => {
+                            // 使用提供的状态或当前状态
+                            let current_state = state_clone.clone().unwrap_or_else(|| initial_connector.state.clone());
+
+                            // 获取游标字段和值
+                            let cursor_field = current_state.cursor_field.as_deref().ok_or_else(|| {
+                                DataFlareError::Config("Se requiere cursor_field para modo incremental".to_string())
+                            })?;
+
+                            let cursor_value = current_state.cursor_value.as_deref().unwrap_or("0");
+
+                            format!("SELECT * FROM {} WHERE {} > '{}' ORDER BY {} ASC",
+                                table, cursor_field, cursor_value, cursor_field)
+                        },
+                        _ => {
+                            return Err(DataFlareError::Config("Modo no soportado para flujo inicial".to_string()));
+                        }
+                    };
+
+                    // 执行查询
+                    let rows = client.query(&query, &[]).await
+                        .map_err(|e| DataFlareError::Query(format!("Error al ejecutar consulta: {}", e)))?;
+
+                    // 转换行为记录
+                    let initial_records = rows.into_iter()
+                        .map(|row| initial_connector.row_to_record(row))
+                        .collect::<Vec<_>>();
+
+                    // 创建初始流
+                    let initial_stream = Box::new(futures::stream::iter(initial_records));
+
+                    // 创建持续流（如果需要）
+                    let mut ongoing_connector = self.clone();
+                    ongoing_connector.extraction_mode = hybrid_config.ongoing_mode.clone();
+
+                    // 根据持续模式构建查询
+                    let client = ongoing_connector.client.as_ref().ok_or_else(|| {
+                        DataFlareError::Connection("No hay conexión a PostgreSQL".to_string())
+                    })?;
+
+                    let table = ongoing_connector.config.get("table").and_then(|t| t.as_str()).ok_or_else(|| {
+                        DataFlareError::Config("Se requiere el parámetro 'table'".to_string())
+                    })?;
+
+                    let query = match ongoing_connector.extraction_mode {
+                        ExtractionMode::Incremental => {
+                            // 使用提供的状态或当前状态
+                            let current_state = state.clone().unwrap_or_else(|| ongoing_connector.state.clone());
+
+                            // 获取游标字段和值
+                            let cursor_field = current_state.cursor_field.as_deref().ok_or_else(|| {
+                                DataFlareError::Config("Se requiere cursor_field para modo incremental".to_string())
+                            })?;
+
+                            let cursor_value = current_state.cursor_value.as_deref().unwrap_or("0");
+
+                            format!("SELECT * FROM {} WHERE {} > '{}' ORDER BY {} ASC",
+                                table, cursor_field, cursor_value, cursor_field)
+                        },
+                        ExtractionMode::CDC => {
+                            // 使用提供的状态或当前状态
+                            let current_state = state.clone().unwrap_or_else(|| ongoing_connector.state.clone());
+
+                            // 获取最后更新时间字段
+                            let timestamp_field = ongoing_connector.config.get("cdc")
+                                .and_then(|c| c.get("timestamp_field"))
+                                .and_then(|t| t.as_str())
+                                .unwrap_or("updated_at");
+
+                            // 获取最后更新时间值
+                            let last_timestamp = current_state.metadata.get("last_timestamp")
+                                .map(|s| s.as_str())
+                                .unwrap_or("1970-01-01T00:00:00Z");
+
+                            // 构建查询，获取自上次更新以来的所有更改
+                            format!("SELECT *, 'UPDATE' as cdc_operation FROM {} WHERE {} > '{}'",
+                                table, timestamp_field, last_timestamp)
+                        },
+                        _ => {
+                            return Err(DataFlareError::Config("Modo no soportado para flujo continuo".to_string()));
+                        }
+                    };
+
+                    // 执行查询
+                    let rows = client.query(&query, &[]).await
+                        .map_err(|e| DataFlareError::Query(format!("Error al ejecutar consulta: {}", e)))?;
+
+                    // 转换行为记录
+                    let ongoing_records = rows.into_iter()
+                        .map(|row| ongoing_connector.row_to_record(row))
+                        .collect::<Vec<_>>();
+
+                    // 创建持续流
+                    let ongoing_stream = Box::new(futures::stream::iter(ongoing_records));
+
+                    // 创建混合流
+                    let mut hybrid_stream = crate::connector::hybrid::HybridStream::new(initial_stream, hybrid_config);
+                    hybrid_stream.set_ongoing_stream(ongoing_stream);
+
+                    return Ok(Box::new(hybrid_stream));
+                } else {
+                    return Err(DataFlareError::Config("Configuración híbrida inválida".to_string()));
+                }
             }
         };
 

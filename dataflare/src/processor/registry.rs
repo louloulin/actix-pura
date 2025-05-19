@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::{
     error::Result,
-    processor::{Processor, MappingProcessor, FilterProcessor, AggregateProcessor, EnrichmentProcessor},
+    processor::{Processor, MappingProcessor, FilterProcessor, AggregateProcessor, EnrichmentProcessor, join::JoinProcessor},
 };
 
 /// 注册默认处理器
@@ -35,6 +35,16 @@ pub fn register_default_processors() {
     // 注册丰富处理器
     register_processor("enrichment", Arc::new(|config: Value| -> Result<Box<dyn Processor>> {
         let processor = EnrichmentProcessor::from_config(&config)?;
+        Ok(Box::new(processor))
+    }));
+
+    // 注册连接处理器
+    register_processor("join", Arc::new(|config: Value| -> Result<Box<dyn Processor>> {
+        let name = config.get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("join")
+            .to_string();
+        let processor = JoinProcessor::from_config(name, &config)?;
         Ok(Box::new(processor))
     }));
 }
@@ -104,6 +114,7 @@ mod tests {
         assert!(names.contains(&"mapping".to_string()));
         assert!(names.contains(&"filter".to_string()));
         assert!(names.contains(&"aggregate".to_string()));
+        assert!(names.contains(&"join".to_string()));
 
         // 创建映射处理器
         let config = serde_json::json!({
@@ -140,6 +151,19 @@ mod tests {
         });
 
         let processor = create_processor("aggregate", config);
+        assert!(processor.is_ok());
+
+        // 创建连接处理器
+        let config = serde_json::json!({
+            "name": "test_join",
+            "left_key": "id",
+            "right_key": "user_id",
+            "join_type": "inner",
+            "left_prefix": "order",
+            "right_prefix": "user"
+        });
+
+        let processor = create_processor("join", config);
         assert!(processor.is_ok());
     }
 }

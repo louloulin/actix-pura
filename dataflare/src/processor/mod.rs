@@ -4,6 +4,7 @@
 
 pub mod aggregate;
 pub mod enrichment;
+pub mod join;
 pub mod registry;
 
 use std::collections::HashMap;

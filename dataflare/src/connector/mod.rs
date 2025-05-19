@@ -7,6 +7,7 @@ pub mod destination;
 pub mod registry;
 pub mod postgres;
 pub mod csv;
+pub mod hybrid;
 
 pub use source::SourceConnector;
 pub use destination::DestinationConnector;
