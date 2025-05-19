@@ -5,12 +5,10 @@
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
-use crate::{
-    error::Result,
-    workflow::{
-        Workflow, SourceConfig, TransformationConfig, DestinationConfig,
-        ScheduleConfig, ScheduleType,
-    },
+use dataflare_core::error::Result;
+use crate::workflow::{
+    Workflow, SourceConfig, TransformationConfig, DestinationConfig,
+    ScheduleConfig, ScheduleType,
 };
 
 /// Constructor de flujo de trabajo
@@ -26,33 +24,33 @@ impl WorkflowBuilder {
             workflow: Workflow::new(id, name),
         }
     }
-    
+
     /// Establece la descripción del flujo de trabajo
     pub fn description<S: Into<String>>(mut self, description: S) -> Self {
         self.workflow = self.workflow.with_description(description);
         self
     }
-    
+
     /// Establece la versión del flujo de trabajo
     pub fn version<S: Into<String>>(mut self, version: S) -> Self {
         self.workflow = self.workflow.with_version(version);
         self
     }
-    
+
     /// Agrega una fuente al flujo de trabajo
     pub fn source<S: Into<String>>(mut self, id: S, r#type: S, config: Value) -> Self {
         let source_config = SourceConfig::new(r#type, config);
         self.workflow.add_source(id, source_config);
         self
     }
-    
+
     /// Agrega una fuente con modo al flujo de trabajo
     pub fn source_with_mode<S: Into<String>>(mut self, id: S, r#type: S, mode: S, config: Value) -> Self {
         let source_config = SourceConfig::new(r#type, config).with_mode(mode);
         self.workflow.add_source(id, source_config);
         self
     }
-    
+
     /// Agrega una transformación al flujo de trabajo
     pub fn transformation<S: Into<String>, I: IntoIterator<Item = S>>(
         mut self,
@@ -68,7 +66,7 @@ impl WorkflowBuilder {
         self.workflow.add_transformation(id, transform_config);
         self
     }
-    
+
     /// Agrega un destino al flujo de trabajo
     pub fn destination<S: Into<String>, I: IntoIterator<Item = S>>(
         mut self,
@@ -84,7 +82,7 @@ impl WorkflowBuilder {
         self.workflow.add_destination(id, dest_config);
         self
     }
-    
+
     /// Establece una programación cron
     pub fn cron_schedule<S: Into<String>>(mut self, expression: S, timezone: Option<S>) -> Self {
         let mut schedule = ScheduleConfig::new(ScheduleType::Cron, expression.into());
@@ -94,14 +92,14 @@ impl WorkflowBuilder {
         self.workflow = self.workflow.with_schedule(schedule);
         self
     }
-    
+
     /// Establece una programación de intervalo
     pub fn interval_schedule<S: Into<String>>(mut self, expression: S) -> Self {
         let schedule = ScheduleConfig::new(ScheduleType::Interval, expression.into());
         self.workflow = self.workflow.with_schedule(schedule);
         self
     }
-    
+
     /// Establece una programación de ejecución única
     pub fn once_schedule(mut self, datetime: DateTime<Utc>) -> Self {
         let mut schedule = ScheduleConfig::new(ScheduleType::Once, datetime.to_rfc3339());
@@ -109,18 +107,18 @@ impl WorkflowBuilder {
         self.workflow = self.workflow.with_schedule(schedule);
         self
     }
-    
+
     /// Agrega un metadato al flujo de trabajo
     pub fn metadata<K: Into<String>, V: Into<String>>(mut self, key: K, value: V) -> Self {
         self.workflow.add_metadata(key, value);
         self
     }
-    
+
     /// Construye el flujo de trabajo
     pub fn build(self) -> Result<Workflow> {
         // Validar el flujo de trabajo
         self.workflow.validate()?;
-        
+
         Ok(self.workflow)
     }
 }
@@ -128,7 +126,7 @@ impl WorkflowBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_workflow_builder() {
         let workflow = WorkflowBuilder::new("test-workflow", "Test Workflow")
@@ -174,46 +172,46 @@ mod tests {
             .metadata("owner", "test-user")
             .build()
             .unwrap();
-        
+
         assert_eq!(workflow.id, "test-workflow");
         assert_eq!(workflow.name, "Test Workflow");
         assert_eq!(workflow.description, Some("A test workflow".to_string()));
         assert_eq!(workflow.version, "1.0.0");
-        
+
         assert_eq!(workflow.sources.len(), 2);
         assert!(workflow.sources.contains_key("users"));
         assert!(workflow.sources.contains_key("orders"));
-        
+
         assert_eq!(workflow.transformations.len(), 3);
         assert!(workflow.transformations.contains_key("user_transform"));
         assert!(workflow.transformations.contains_key("order_transform"));
         assert!(workflow.transformations.contains_key("join"));
-        
+
         assert_eq!(workflow.destinations.len(), 1);
         assert!(workflow.destinations.contains_key("es_users"));
-        
+
         assert!(workflow.schedule.is_some());
         let schedule = workflow.schedule.unwrap();
         assert_eq!(schedule.r#type, ScheduleType::Cron);
         assert_eq!(schedule.expression, "0 0 * * *");
         assert_eq!(schedule.timezone, Some("UTC".to_string()));
-        
+
         assert_eq!(workflow.metadata.get("owner"), Some(&"test-user".to_string()));
     }
-    
+
     #[test]
     fn test_invalid_workflow() {
         // Flujo de trabajo sin fuentes
         let result = WorkflowBuilder::new("test", "Test")
             .build();
         assert!(result.is_err());
-        
+
         // Flujo de trabajo sin destinos
         let result = WorkflowBuilder::new("test", "Test")
             .source("source", "memory", serde_json::json!({}))
             .build();
         assert!(result.is_err());
-        
+
         // Flujo de trabajo con entrada inválida
         let result = WorkflowBuilder::new("test", "Test")
             .source("source", "memory", serde_json::json!({}))

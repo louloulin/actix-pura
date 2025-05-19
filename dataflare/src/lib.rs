@@ -46,19 +46,21 @@ pub use dataflare_processor::{
     aggregate::AggregateProcessor,
     enrichment::EnrichmentProcessor,
     join::JoinProcessor,
-    registry::{register_processor, get_processor, ProcessorRegistry, register_default_processors},
+    registry::{register_processor, register_default_processors},
 };
 
 // Re-exports from plugin crate
-pub use dataflare_plugin::{
-    plugin::{PluginManager, PluginConfig, PluginMetadata, PluginType, ProcessorPlugin},
-    wasm::WasmProcessor,
-    registry::{register_plugin, get_plugin, PluginRegistry},
-};
+// 暂时禁用，等待修复
+// pub use dataflare_plugin::{
+//     plugin::{PluginManager, PluginConfig, PluginMetadata, PluginType, ProcessorPlugin},
+//     wasm::WasmProcessor,
+//     registry::{register_plugin, get_plugin, PluginRegistry},
+// };
 
 // Re-exports from state crate
 pub use dataflare_state::{
-    state::{SourceState, StateManager},
+    state::SourceState,
+    StateManager,
     checkpoint::CheckpointState,
     storage::StateStorage,
 };
@@ -117,7 +119,8 @@ pub fn init(config: DataFlareConfig) -> Result<()> {
     dataflare_processor::register_default_processors();
 
     // Initialize plugin system
-    dataflare_plugin::init_plugin_system(config.plugin_dir)?;
+    // 暂时禁用，等待修复
+    // dataflare_plugin::init_plugin_system(config.plugin_dir)?;
 
     // Initialize edge components if enabled
     #[cfg(feature = "edge")]

@@ -1522,7 +1522,6 @@ dependencies = [
  "dataflare-connector",
  "dataflare-core",
  "dataflare-edge",
- "dataflare-plugin",
  "dataflare-processor",
  "dataflare-runtime",
  "dataflare-state",
@@ -1743,6 +1742,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tokio-test",
+ "uuid",
 ]
 
 [[package]]

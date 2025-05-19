@@ -236,7 +236,7 @@ impl DataFlareActor for SupervisorActor {
         Ok(())
     }
 
-    fn report_progress(&self, _workflow_id: &str, _phase: crate::message::WorkflowPhase, _progress: f64, _message: &str) {
+    fn report_progress(&self, _workflow_id: &str, _phase: dataflare_core::message::WorkflowPhase, _progress: f64, _message: &str) {
         // El supervisor no reporta progreso
     }
 }
@@ -384,7 +384,7 @@ mod tests {
             Ok(())
         }
 
-        fn report_progress(&self, _workflow_id: &str, _phase: crate::message::WorkflowPhase, _progress: f64, _message: &str) {
+        fn report_progress(&self, _workflow_id: &str, _phase: dataflare_core::message::WorkflowPhase, _progress: f64, _message: &str) {
             // No hace nada en la prueba
         }
     }

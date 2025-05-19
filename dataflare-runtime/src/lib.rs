@@ -13,7 +13,7 @@ pub mod executor;
 
 /// Runtime mode for DataFlare
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuntimeMode {
+pub enum RuntimeModeEnum {
     /// Standalone mode (single node)
     Standalone,
     /// Edge mode (runs on edge devices)
@@ -22,10 +22,13 @@ pub enum RuntimeMode {
     Cloud,
 }
 
+/// Re-export RuntimeMode type
+pub type RuntimeMode = RuntimeModeEnum;
+
 // Re-exports for convenience
 pub use workflow::{Workflow, WorkflowBuilder, WorkflowParser, YamlWorkflowParser};
 pub use executor::WorkflowExecutor;
-pub use self::RuntimeMode;
+// RuntimeMode is already exported as a type alias
 
 /// Version of the DataFlare Runtime module
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

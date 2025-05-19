@@ -46,7 +46,7 @@ impl MappingProcessor {
         Self {
             config: None,
             mappings: Vec::new(),
-            state: ProcessorState::new(),
+            state: ProcessorState::new("mapping"),
         }
     }
 

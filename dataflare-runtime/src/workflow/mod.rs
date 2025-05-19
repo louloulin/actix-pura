@@ -122,19 +122,19 @@ impl Workflow {
     pub fn validate(&self) -> Result<()> {
         // Validar que haya al menos una fuente
         if self.sources.is_empty() {
-            return Err(crate::error::DataFlareError::Validation("El flujo de trabajo debe tener al menos una fuente".to_string()));
+            return Err(dataflare_core::error::DataFlareError::Validation("El flujo de trabajo debe tener al menos una fuente".to_string()));
         }
 
         // Validar que haya al menos un destino
         if self.destinations.is_empty() {
-            return Err(crate::error::DataFlareError::Validation("El flujo de trabajo debe tener al menos un destino".to_string()));
+            return Err(dataflare_core::error::DataFlareError::Validation("El flujo de trabajo debe tener al menos un destino".to_string()));
         }
 
         // Validar que las transformaciones tengan entradas válidas
         for (id, transformation) in &self.transformations {
             for input in &transformation.inputs {
                 if !self.sources.contains_key(input) && !self.transformations.contains_key(input) {
-                    return Err(crate::error::DataFlareError::Validation(
+                    return Err(dataflare_core::error::DataFlareError::Validation(
                         format!("La transformación {} tiene una entrada inválida: {}", id, input)
                     ));
                 }
@@ -145,7 +145,7 @@ impl Workflow {
         for (id, destination) in &self.destinations {
             for input in &destination.inputs {
                 if !self.sources.contains_key(input) && !self.transformations.contains_key(input) {
-                    return Err(crate::error::DataFlareError::Validation(
+                    return Err(dataflare_core::error::DataFlareError::Validation(
                         format!("El destino {} tiene una entrada inválida: {}", id, input)
                     ));
                 }

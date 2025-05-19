@@ -11,13 +11,12 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value as YamlValue;
 use chrono::{DateTime, Utc};
+use uuid::Uuid;
 
-use crate::{
-    error::{DataFlareError, Result},
-    workflow::{
-        Workflow, SourceConfig, TransformationConfig, DestinationConfig,
-        ScheduleConfig, ScheduleType,
-    },
+use dataflare_core::error::{DataFlareError, Result};
+use crate::workflow::{
+    Workflow, SourceConfig, TransformationConfig, DestinationConfig,
+    ScheduleConfig, ScheduleType,
 };
 
 /// YAML 工作流解析器
@@ -109,7 +108,7 @@ impl YamlWorkflowParser {
     fn convert_definition_to_workflow(definition: YamlWorkflowDefinition) -> Result<Workflow> {
         // 创建基本工作流
         let mut workflow = Workflow::new(
-            definition.id.unwrap_or_else(|| format!("workflow-{}", uuid::Uuid::new_v4())),
+            definition.id.unwrap_or_else(|| format!("workflow-{}", Uuid::new_v4())),
             definition.name.unwrap_or_else(|| "Unnamed Workflow".to_string()),
         );
 

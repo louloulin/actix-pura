@@ -9,10 +9,8 @@ use petgraph::visit::EdgeRef;
 use petgraph::dot::{Dot, Config};
 use petgraph::algo::kosaraju_scc;
 
-use crate::{
-    error::{DataFlareError, Result},
-    workflow::Workflow,
-};
+use dataflare_core::error::{DataFlareError, Result};
+use crate::workflow::Workflow;
 
 /// Analizador de flujo de trabajo
 pub struct WorkflowParser {

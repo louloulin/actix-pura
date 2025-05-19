@@ -227,7 +227,7 @@ impl Handler<StartExtraction> for SourceActor {
 
             // Simulamos un lote de datos
             let records = (0..10).map(|i| {
-                crate::message::DataRecord::new(serde_json::json!({
+                dataflare_core::message::DataRecord::new(serde_json::json!({
                     "id": i,
                     "name": format!("Record {}", i),
                     "value": i * 10

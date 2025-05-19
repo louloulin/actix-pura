@@ -9,16 +9,22 @@ use log::{debug, error, info, warn};
 use futures::future::{self, Future, FutureExt};
 use serde_json::Value;
 
+use dataflare_core::{
+    error::{DataFlareError, Result},
+    message::WorkflowProgress,
+    processor::Processor,
+    state::SourceState,
+};
+use dataflare_connector::registry::create_connector;
+use dataflare_processor::{
+    mapping::MappingProcessor,
+    filter::FilterProcessor,
+};
 use crate::{
     actor::{
         SourceActor, ProcessorActor, DestinationActor, WorkflowActor, SupervisorActor,
         Initialize,
     },
-    connector::{SourceConnector, DestinationConnector},
-    error::{DataFlareError, Result},
-    message::WorkflowProgress,
-    processor::Processor,
-    state::SourceState,
     workflow::Workflow,
 };
 
@@ -92,10 +98,16 @@ impl WorkflowExecutor {
         // Crear actores de origen
         for (id, source_config) in &workflow.sources {
             // Crear conector
-            let connector = crate::connector::create_connector::<dyn SourceConnector>(
+            let connector_result = create_connector::<dyn dataflare_connector::source::SourceConnector>(
                 &source_config.r#type,
                 source_config.config.clone(),
-            )?;
+            );
+
+            // 处理错误并转换类型
+            let connector: Box<dyn dataflare_connector::source::SourceConnector> = match connector_result {
+                Ok(c) => c,
+                Err(e) => return Err(DataFlareError::Connection(format!("Error creating connector: {}", e))),
+            };
 
             // Crear actor
             let source_actor = SourceActor::new(id.clone(), connector);
@@ -116,8 +128,18 @@ impl WorkflowExecutor {
         for (id, transform_config) in &workflow.transformations {
             // Crear procesador según el tipo
             let processor: Box<dyn Processor> = match transform_config.r#type.as_str() {
-                "mapping" => Box::new(crate::processor::MappingProcessor::new()),
-                "filter" => Box::new(crate::processor::FilterProcessor::new()),
+                "mapping" => {
+                    let config = dataflare_processor::mapping::MappingProcessorConfig {
+                        mappings: Vec::new(),
+                    };
+                    Box::new(MappingProcessor::new(config))
+                },
+                "filter" => {
+                    let config = dataflare_processor::filter::FilterProcessorConfig {
+                        condition: "true".to_string(),
+                    };
+                    Box::new(FilterProcessor::new(config))
+                },
                 _ => return Err(DataFlareError::Config(format!(
                     "Tipo de procesador no soportado: {}", transform_config.r#type
                 ))),
@@ -141,10 +163,16 @@ impl WorkflowExecutor {
         // Crear actores de destino
         for (id, dest_config) in &workflow.destinations {
             // Crear conector
-            let connector = crate::connector::create_connector::<dyn DestinationConnector>(
+            let connector_result = create_connector::<dyn dataflare_connector::destination::DestinationConnector>(
                 &dest_config.r#type,
                 dest_config.config.clone(),
-            )?;
+            );
+
+            // 处理错误并转换类型
+            let connector: Box<dyn dataflare_connector::destination::DestinationConnector> = match connector_result {
+                Ok(c) => c,
+                Err(e) => return Err(DataFlareError::Connection(format!("Error creating connector: {}", e))),
+            };
 
             // Crear actor
             let dest_actor = DestinationActor::new(id.clone(), connector);
@@ -386,7 +414,7 @@ mod tests {
     #[test]
     fn test_workflow_executor_creation() {
         // Crear flujo de trabajo
-        let workflow = WorkflowBuilder::new("test-workflow", "Test Workflow")
+        let _workflow = WorkflowBuilder::new("test-workflow", "Test Workflow")
             .source("source", "memory", serde_json::json!({
                 "data": [
                     {"id": 1, "name": "Test 1"},
