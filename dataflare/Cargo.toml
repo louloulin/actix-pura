@@ -44,7 +44,7 @@ proptest = "1.4.0"
 mockall = "0.12.1"
 tokio-test = "0.4.3"
 
-# Comentamos los benchmarks por ahora
-# [[bench]]
-# name = "dataflare_benchmarks"
-# harness = false
+# Benchmarks
+[[bench]]
+name = "dataflare_benchmarks"
+harness = false
