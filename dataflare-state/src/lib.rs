@@ -10,11 +10,13 @@
 pub mod state;
 pub mod checkpoint;
 pub mod storage;
+pub mod manager;
 
 // Re-exports for convenience
-pub use state::{SourceState, StateManager};
+pub use state::SourceState;
 pub use checkpoint::CheckpointState;
-pub use storage::StateStorage;
+pub use storage::{StateStorage, StateStorageExt};
+pub use manager::StateManager;
 
 /// Version of the DataFlare State module
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 
-use crate::error::Result;
+use dataflare_core::error::{DataFlareError, Result};
 
 /// Flujo de trabajo de integración de datos
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,13 +158,13 @@ impl Workflow {
     /// Serializa el flujo de trabajo a YAML
     pub fn to_yaml(&self) -> Result<String> {
         serde_yaml::to_string(self)
-            .map_err(|e| crate::error::DataFlareError::Serialization(format!("Error al serializar flujo de trabajo a YAML: {}", e)))
+            .map_err(|e| DataFlareError::Serialization(format!("Error al serializar flujo de trabajo a YAML: {}", e)))
     }
 
     /// Deserializa el flujo de trabajo desde YAML
     pub fn from_yaml(yaml: &str) -> Result<Self> {
         serde_yaml::from_str(yaml)
-            .map_err(|e| crate::error::DataFlareError::Serialization(format!("Error al deserializar flujo de trabajo desde YAML: {}", e)))
+            .map_err(|e| DataFlareError::Serialization(format!("Error al deserializar flujo de trabajo desde YAML: {}", e)))
     }
 }
 

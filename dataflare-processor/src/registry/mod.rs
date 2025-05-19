@@ -5,9 +5,14 @@
 use std::sync::Arc;
 use serde_json::Value;
 
+use dataflare_core::error::Result;
 use crate::{
-    error::Result,
-    processor::{Processor, MappingProcessor, FilterProcessor, AggregateProcessor, EnrichmentProcessor, join::JoinProcessor},
+    processor::Processor,
+    mapping::MappingProcessor,
+    filter::FilterProcessor,
+    aggregate::AggregateProcessor,
+    enrichment::EnrichmentProcessor,
+    join::JoinProcessor,
 };
 
 /// 注册默认处理器
@@ -82,7 +87,7 @@ pub fn create_processor(name: &str, config: Value) -> Result<Box<dyn Processor>>
         }
     }
 
-    Err(crate::error::DataFlareError::Registry(format!("处理器未找到: {}", name)))
+    Err(dataflare_core::error::DataFlareError::Registry(format!("处理器未找到: {}", name)))
 }
 
 /// 获取所有注册的处理器名称

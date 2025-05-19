@@ -13,7 +13,7 @@ pub mod executor;
 
 // Re-exports for convenience
 pub use workflow::{Workflow, WorkflowBuilder, WorkflowParser, YamlWorkflowParser};
-pub use executor::{WorkflowExecutor, RuntimeMode};
+pub use executor::WorkflowExecutor;
 
 /// Version of the DataFlare Runtime module
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

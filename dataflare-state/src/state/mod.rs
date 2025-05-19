@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::error::{DataFlareError, Result};
+use dataflare_core::error::{DataFlareError, Result};
 
 /// Estado de una fuente de datos
 #[derive(Debug, Clone, Serialize, Deserialize)]

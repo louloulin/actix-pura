@@ -1623,13 +1623,16 @@ dependencies = [
  "lazy_static",
  "log",
  "mockall 0.12.1",
+ "num_cpus",
  "proptest",
  "serde",
  "serde_json",
+ "serde_yaml",
  "thiserror 1.0.69",
  "tokio",
  "tokio-test",
  "uuid",
+ "wasmtime",
 ]
 
 [[package]]
@@ -1722,6 +1725,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "serde_yaml",
  "thiserror 1.0.69",
  "tokio",
  "tokio-test",
@@ -1743,6 +1747,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tokio-test",

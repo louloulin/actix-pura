@@ -8,10 +8,11 @@ use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+use crate::state::{CheckpointState, SourceState};
+
 use crate::{
     error::Result,
     model::Schema,
-    state::{CheckpointState, SourceState},
 };
 
 /// Registro de datos individual

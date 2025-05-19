@@ -4,6 +4,8 @@
 
 use std::io;
 use thiserror::Error;
+
+#[cfg(feature = "wasm")]
 use wasmtime;
 
 /// Tipo de resultado para operaciones de DataFlare
@@ -129,9 +131,12 @@ impl From<actix::MailboxError> for DataFlareError {
 
 impl From<anyhow::Error> for DataFlareError {
     fn from(err: anyhow::Error) -> Self {
-        // 检查是否是 wasmtime::Error
-        if let Some(e) = err.downcast_ref::<wasmtime::Error>() {
-            return DataFlareError::Wasm(format!("{}", e));
+        #[cfg(feature = "wasm")]
+        {
+            // 检查是否是 wasmtime::Error
+            if let Some(e) = err.downcast_ref::<wasmtime::Error>() {
+                return DataFlareError::Wasm(format!("{}", e));
+            }
         }
         DataFlareError::Unknown(format!("{}", err))
     }

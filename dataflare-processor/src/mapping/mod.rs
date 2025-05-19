@@ -4,7 +4,7 @@
 
 use dataflare_core::{
     error::{DataFlareError, Result},
-    message::DataRecord,
+    message::{DataRecord, DataRecordBatch},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -115,8 +115,15 @@ impl MappingProcessor {
     }
 }
 
-impl Processor for MappingProcessor {
-    fn process(&self, record: DataRecord) -> Result<DataRecord> {
+#[async_trait::async_trait]
+impl crate::processor::Processor for MappingProcessor {
+    fn configure(&mut self, config: &Value) -> Result<()> {
+        self.config = serde_json::from_value(config.clone())
+            .map_err(|e| DataFlareError::Config(format!("Invalid mapping processor configuration: {}", e)))?;
+        Ok(())
+    }
+
+    async fn process_record(&mut self, record: &DataRecord, _state: Option<crate::processor::ProcessorState>) -> Result<Vec<DataRecord>> {
         let mut new_data = Map::new();
 
         // Apply mappings
@@ -132,13 +139,33 @@ impl Processor for MappingProcessor {
         }
 
         // Create new record with mapped data
-        Ok(DataRecord::new(Value::Object(new_data)))
+        let mut new_record = DataRecord::new(Value::Object(new_data));
+        new_record.metadata = record.metadata.clone();
+        new_record.created_at = record.created_at;
+        new_record.updated_at = record.updated_at;
+
+        Ok(vec![new_record])
     }
 
-    fn configure(&mut self, config: Value) -> Result<()> {
-        self.config = serde_json::from_value(config)
-            .map_err(|e| DataFlareError::Configuration(format!("Invalid mapping processor configuration: {}", e)))?;
-        Ok(())
+    async fn process_batch(&mut self, batch: &DataRecordBatch, state: Option<crate::processor::ProcessorState>) -> Result<DataRecordBatch> {
+        let mut processed_records = Vec::with_capacity(batch.records.len());
+
+        // Process each record
+        for record in &batch.records {
+            let mut new_records = self.process_record(record, state.clone()).await?;
+            processed_records.append(&mut new_records);
+        }
+
+        // Create new batch with processed records
+        let mut new_batch = DataRecordBatch::new(processed_records);
+        new_batch.schema = batch.schema.clone();
+        new_batch.metadata = batch.metadata.clone();
+
+        Ok(new_batch)
+    }
+
+    fn get_state(&self) -> Result<crate::processor::ProcessorState> {
+        Ok(crate::processor::ProcessorState::new())
     }
 }
 
@@ -152,6 +179,7 @@ impl fmt::Display for MappingProcessor {
 mod tests {
     use super::*;
     use serde_json::json;
+    use tokio_test::block_on;
 
     #[test]
     fn test_mapping_processor() {
@@ -174,7 +202,7 @@ mod tests {
                 },
             ],
         };
-        let processor = MappingProcessor::new(config);
+        let mut processor = MappingProcessor::new(config);
 
         let record = DataRecord::new(json!({
             "id": 1,
@@ -183,11 +211,13 @@ mod tests {
             "age": 25
         }));
 
-        let result = processor.process(record).unwrap();
-        
-        assert_eq!(result.data.get("user_id").unwrap().as_str().unwrap(), "1");
-        assert_eq!(result.data.get("full_name").unwrap().as_str().unwrap(), "John Doe");
-        assert_eq!(result.data.get("email_address").unwrap().as_str().unwrap(), "john.doe@example.com");
-        assert!(result.data.get("age").is_none());
+        let result = block_on(processor.process_record(&record, None)).unwrap();
+        assert_eq!(result.len(), 1);
+
+        let processed_record = &result[0];
+        assert_eq!(processed_record.data.get("user_id").unwrap().as_str().unwrap(), "1");
+        assert_eq!(processed_record.data.get("full_name").unwrap().as_str().unwrap(), "John Doe");
+        assert_eq!(processed_record.data.get("email_address").unwrap().as_str().unwrap(), "john.doe@example.com");
+        assert!(processed_record.data.get("age").is_none());
     }
 }

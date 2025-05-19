@@ -2,16 +2,17 @@
 //!
 //! 定义数据处理器接口和功能。
 
-pub mod aggregate;
-pub mod enrichment;
-pub mod join;
-pub mod registry;
+// 这些模块已经移动到 crate 根目录
+// pub mod aggregate;
+// pub mod enrichment;
+// pub mod join;
+// pub mod registry;
 
 use std::collections::HashMap;
 use async_trait::async_trait;
 use serde_json::Value;
 
-use crate::{
+use dataflare_core::{
     error::Result,
     message::{DataRecord, DataRecordBatch},
 };

@@ -22,7 +22,7 @@ pub use filter::FilterProcessor;
 pub use aggregate::AggregateProcessor;
 pub use enrichment::EnrichmentProcessor;
 pub use join::JoinProcessor;
-pub use registry::{register_processor, get_processor, ProcessorRegistry, register_default_processors};
+pub use registry::{register_processor, create_processor, get_processor_names, register_default_processors};
 
 /// Version of the DataFlare Processor module
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

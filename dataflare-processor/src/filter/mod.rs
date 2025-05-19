@@ -4,7 +4,7 @@
 
 use dataflare_core::{
     error::{DataFlareError, Result},
-    message::DataRecord,
+    message::{DataRecord, DataRecordBatch},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -135,20 +135,40 @@ impl FilterProcessor {
     }
 }
 
-impl Processor for FilterProcessor {
-    fn process(&self, record: DataRecord) -> Result<DataRecord> {
-        if self.evaluate_condition(&record)? {
-            Ok(record)
+#[async_trait::async_trait]
+impl crate::processor::Processor for FilterProcessor {
+    fn configure(&mut self, config: &Value) -> Result<()> {
+        self.config = serde_json::from_value(config.clone())
+            .map_err(|e| DataFlareError::Config(format!("Invalid filter processor configuration: {}", e)))?;
+        Ok(())
+    }
+
+    async fn process_record(&mut self, record: &DataRecord, _state: Option<crate::processor::ProcessorState>) -> Result<Vec<DataRecord>> {
+        if self.evaluate_condition(record)? {
+            Ok(vec![record.clone()])
         } else {
-            // Return an error to indicate that the record should be filtered out
-            Err(DataFlareError::Filtered("Record filtered out".to_string()))
+            // Filter out the record by returning an empty vector
+            Ok(vec![])
         }
     }
 
-    fn configure(&mut self, config: Value) -> Result<()> {
-        self.config = serde_json::from_value(config)
-            .map_err(|e| DataFlareError::Configuration(format!("Invalid filter processor configuration: {}", e)))?;
-        Ok(())
+    async fn process_batch(&mut self, batch: &DataRecordBatch, state: Option<crate::processor::ProcessorState>) -> Result<DataRecordBatch> {
+        let mut processed_records = Vec::new();
+
+        for record in &batch.records {
+            let mut results = self.process_record(record, state.clone()).await?;
+            processed_records.append(&mut results);
+        }
+
+        let mut new_batch = DataRecordBatch::new(processed_records);
+        new_batch.schema = batch.schema.clone();
+        new_batch.metadata = batch.metadata.clone();
+
+        Ok(new_batch)
+    }
+
+    fn get_state(&self) -> Result<crate::processor::ProcessorState> {
+        Ok(crate::processor::ProcessorState::new())
     }
 }
 
@@ -162,13 +182,14 @@ impl fmt::Display for FilterProcessor {
 mod tests {
     use super::*;
     use serde_json::json;
+    use tokio_test::block_on;
 
     #[test]
     fn test_filter_processor() {
         let config = FilterProcessorConfig {
             condition: "age >= 18".to_string(),
         };
-        let processor = FilterProcessor::new(config);
+        let mut processor = FilterProcessor::new(config);
 
         // Test with a record that should pass the filter
         let record = DataRecord::new(json!({
@@ -176,8 +197,11 @@ mod tests {
             "name": "John Doe",
             "age": 25
         }));
-        let result = processor.process(record);
+
+        let result = block_on(processor.process_record(&record, None));
         assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 1);
 
         // Test with a record that should be filtered out
         let record = DataRecord::new(json!({
@@ -185,11 +209,10 @@ mod tests {
             "name": "Jane Doe",
             "age": 16
         }));
-        let result = processor.process(record);
-        assert!(result.is_err());
-        match result {
-            Err(DataFlareError::Filtered(_)) => (),
-            _ => panic!("Expected Filtered error"),
-        }
+
+        let result = block_on(processor.process_record(&record, None));
+        assert!(result.is_ok());
+        let records = result.unwrap();
+        assert_eq!(records.len(), 0); // Empty vector means filtered out
     }
 }
