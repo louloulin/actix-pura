@@ -1552,7 +1552,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap 4.5.38",
- "dataflare",
  "dataflare-cloud",
  "dataflare-connector",
  "dataflare-core",

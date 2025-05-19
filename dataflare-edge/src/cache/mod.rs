@@ -3,8 +3,8 @@
 //! This module provides functionality for caching data in offline mode.
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
-use dataflare_core::error::Result;
+use std::sync::{RwLock};
+use dataflare_core::error::{Result, DataFlareError};
 use serde::{de::DeserializeOwned, Serialize};
 
 /// Offline cache for storing data in memory
@@ -23,7 +23,8 @@ impl OfflineCache {
 
     /// Put an item in the cache
     pub fn put<T: Serialize>(&self, key: &str, value: &T) -> Result<()> {
-        let serialized = bincode::serialize(value)?;
+        let serialized = bincode::serialize(value)
+            .map_err(|e| DataFlareError::Serialization(format!("Bincode error: {}", e)))?;
         let mut cache = self.cache.write().unwrap();
         cache.insert(key.to_string(), serialized);
         Ok(())
@@ -34,7 +35,8 @@ impl OfflineCache {
         let cache = self.cache.read().unwrap();
 
         if let Some(serialized) = cache.get(key) {
-            let value: T = bincode::deserialize(serialized)?;
+            let value: T = bincode::deserialize(serialized)
+                .map_err(|e| DataFlareError::Serialization(format!("Bincode error: {}", e)))?;
             Ok(Some(value))
         } else {
             Ok(None)

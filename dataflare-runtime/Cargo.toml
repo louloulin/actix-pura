@@ -28,10 +28,12 @@ dataflare-connector = { path = "../dataflare-connector", optional = true }
 dataflare-processor = { path = "../dataflare-processor", optional = true }
 
 [features]
-default = []
+default = ["with-connectors", "with-processors"]
 with-connectors = ["dataflare-connector"]
 with-processors = ["dataflare-processor"]
 full = ["with-connectors", "with-processors"]
+dataflare-connector = ["dep:dataflare-connector"]
+dataflare-processor = ["dep:dataflare-processor"]
 
 [dev-dependencies]
 criterion = "0.5.1"

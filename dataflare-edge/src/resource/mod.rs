@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use rand::Rng;
+use std::cell::UnsafeCell;
 
 /// Resource monitor for tracking system resource usage
 pub struct ResourceMonitor {
@@ -17,7 +17,7 @@ pub struct ResourceMonitor {
     /// Whether the monitor is running
     running: AtomicBool,
     /// Monitor thread handle
-    monitor_thread: Option<thread::JoinHandle<()>>,
+    monitor_thread: UnsafeCell<Option<thread::JoinHandle<()>>>,
 }
 
 impl ResourceMonitor {
@@ -27,7 +27,7 @@ impl ResourceMonitor {
             max_memory_mb,
             max_cpu_usage,
             running: AtomicBool::new(false),
-            monitor_thread: None,
+            monitor_thread: UnsafeCell::new(None),
         }
     }
 
@@ -64,8 +64,9 @@ impl ResourceMonitor {
         });
 
         // Store thread handle
-        let mut_self = unsafe { &mut *(self as *const Self as *mut Self) };
-        mut_self.monitor_thread = Some(handle);
+        unsafe {
+            *self.monitor_thread.get() = Some(handle);
+        }
     }
 
     /// Stop monitoring resources
@@ -77,26 +78,25 @@ impl ResourceMonitor {
         self.running.store(false, Ordering::SeqCst);
 
         // Wait for monitor thread to finish
-        let mut_self = unsafe { &mut *(self as *const Self as *mut Self) };
-        if let Some(handle) = mut_self.monitor_thread.take() {
-            let _ = handle.join();
+        unsafe {
+            if let Some(handle) = (*self.monitor_thread.get()).take() {
+                let _ = handle.join();
+            }
         }
     }
 
     /// Get current memory usage in MB
     pub fn get_memory_usage() -> usize {
         // This is a placeholder - actual implementation would depend on the platform
-        // For now, just return a random value for testing
-        let mut rng = rand::thread_rng();
-        rand::Rng::gen_range(&mut rng, 100..500)
+        // For now, just return a fixed value for testing
+        200
     }
 
     /// Get current CPU usage (0.0 - 1.0)
     pub fn get_cpu_usage() -> f32 {
         // This is a placeholder - actual implementation would depend on the platform
-        // For now, just return a random value for testing
-        let mut rng = rand::thread_rng();
-        rand::Rng::gen_range(&mut rng, 0.1..0.9)
+        // For now, just return a fixed value for testing
+        0.5
     }
 
     /// Get the number of available CPU cores

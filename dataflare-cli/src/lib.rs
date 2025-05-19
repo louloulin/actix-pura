@@ -31,24 +31,24 @@ pub enum Commands {
         /// Project name
         #[clap(long, short)]
         name: Option<String>,
-        
+
         /// Project directory
         #[clap(long, short)]
         dir: Option<PathBuf>,
     },
-    
+
     /// Run a workflow
     #[clap(name = "run")]
     Run {
         /// Workflow file path
         #[clap(long, short)]
         workflow: PathBuf,
-        
+
         /// Runtime mode (standalone, edge, cloud)
         #[clap(long, short, default_value = "standalone")]
         mode: String,
     },
-    
+
     /// Validate a workflow
     #[clap(name = "validate")]
     Validate {
@@ -56,15 +56,15 @@ pub enum Commands {
         #[clap(long, short)]
         workflow: PathBuf,
     },
-    
+
     /// List available connectors
     #[clap(name = "connectors")]
     Connectors,
-    
+
     /// List available processors
     #[clap(name = "processors")]
     Processors,
-    
+
     /// Manage plugins
     #[clap(name = "plugins")]
     Plugins {
@@ -80,14 +80,14 @@ pub enum PluginCommands {
     /// List installed plugins
     #[clap(name = "list")]
     List,
-    
+
     /// Install a plugin
     #[clap(name = "install")]
     Install {
         /// Plugin path or URL
         path: String,
     },
-    
+
     /// Remove a plugin
     #[clap(name = "remove")]
     Remove {
@@ -99,45 +99,45 @@ pub enum PluginCommands {
 /// Run the CLI application
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    
+
     match cli.command {
         Commands::Init { name, dir } => {
             println!("Initializing project: {:?} in {:?}", name, dir);
             // TODO: Implement project initialization
         }
-        
+
         Commands::Run { workflow, mode } => {
             println!("Running workflow: {:?} in {} mode", workflow, mode);
             // TODO: Implement workflow execution
         }
-        
+
         Commands::Validate { workflow } => {
             println!("Validating workflow: {:?}", workflow);
             // TODO: Implement workflow validation
         }
-        
+
         Commands::Connectors => {
             println!("Available connectors:");
             // TODO: Implement connector listing
         }
-        
+
         Commands::Processors => {
             println!("Available processors:");
             // TODO: Implement processor listing
         }
-        
+
         Commands::Plugins { command } => {
             match command {
                 PluginCommands::List => {
                     println!("Installed plugins:");
                     // TODO: Implement plugin listing
                 }
-                
+
                 PluginCommands::Install { path } => {
                     println!("Installing plugin from: {}", path);
                     // TODO: Implement plugin installation
                 }
-                
+
                 PluginCommands::Remove { id } => {
                     println!("Removing plugin: {}", id);
                     // TODO: Implement plugin removal
@@ -145,14 +145,45 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-    
+
+    Ok(())
+}
+
+/// List source connectors
+pub fn list_source_connectors() -> Vec<String> {
+    // For now, return a static list
+    vec![
+        "postgres".to_string(),
+        "mysql".to_string(),
+        "csv".to_string(),
+        "json".to_string(),
+    ]
+}
+
+/// List destination connectors
+pub fn list_destination_connectors() -> Vec<String> {
+    // For now, return a static list
+    vec![
+        "postgres".to_string(),
+        "mysql".to_string(),
+        "csv".to_string(),
+        "json".to_string(),
+    ]
+}
+
+/// Initialize DataFlare
+pub fn init() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize logging
+    env_logger::init();
+
+    // Return success
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_version() {
         assert!(!VERSION.is_empty());

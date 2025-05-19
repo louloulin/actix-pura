@@ -2,6 +2,8 @@
 //!
 //! Define los mensajes que se intercambian entre los actores del sistema.
 
+pub mod progress;
+
 use std::collections::HashMap;
 use actix::prelude::*;
 use serde::{Deserialize, Serialize};
