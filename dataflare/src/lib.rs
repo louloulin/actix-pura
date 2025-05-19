@@ -37,7 +37,7 @@ pub use crate::{
     error::{DataFlareError, Result},
     message::{DataRecord, DataRecordBatch},
     model::{DataType, Field, Schema},
-    plugin::PluginManager,
+    plugin::{PluginManager, PluginConfig, PluginMetadata, PluginType, ProcessorPlugin, WasmProcessor},
     processor::{Processor, AggregateProcessor, EnrichmentProcessor, FilterProcessor, MappingProcessor, registry::register_default_processors},
     registry::ConnectorRegistry,
     state::{CheckpointState, SourceState},

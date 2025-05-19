@@ -4,6 +4,7 @@
 
 use std::io;
 use thiserror::Error;
+use wasmtime;
 
 /// Tipo de resultado para operaciones de DataFlare
 pub type Result<T> = std::result::Result<T, DataFlareError>;
@@ -46,6 +47,10 @@ pub enum DataFlareError {
     /// Error de plugin
     #[error("Error de plugin: {0}")]
     Plugin(String),
+
+    /// Error de WASM
+    #[error("Error de WASM: {0}")]
+    Wasm(String),
 
     /// Error de actor
     #[error("Error de actor: {0}")]
@@ -124,6 +129,10 @@ impl From<actix::MailboxError> for DataFlareError {
 
 impl From<anyhow::Error> for DataFlareError {
     fn from(err: anyhow::Error) -> Self {
+        // 检查是否是 wasmtime::Error
+        if let Some(e) = err.downcast_ref::<wasmtime::Error>() {
+            return DataFlareError::Wasm(format!("{}", e));
+        }
         DataFlareError::Unknown(format!("{}", err))
     }
 }

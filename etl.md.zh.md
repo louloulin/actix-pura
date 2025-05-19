@@ -1853,7 +1853,7 @@ DataFlare 是一个基于 Actix actor 架构的数据集成框架，提供了以
    - 增量模式（Incremental Mode）：基于时间戳或序列ID的增量读取 ✅
    - CDC模式（Change Data Capture）：捕获数据变更事件 ✅
    - 流式模式（Streaming Mode）：持续读取流数据 ⚠️ 部分实现
-   - 混合模式（Hybrid Mode）：组合多种提取策略 ❌
+   - 混合模式（Hybrid Mode）：组合多种提取策略 ✅
 
 3. **连接器系统**：
    - 标准化连接器接口（SourceConnector、DestinationConnector） ✅
@@ -1870,7 +1870,7 @@ DataFlare 是一个基于 Actix actor 架构的数据集成框架，提供了以
    - 过滤处理器：基于条件过滤数据 ✅
    - 聚合处理器 ✅
    - 丰富处理器 ✅
-   - 连接处理器 ❌
+   - 连接处理器 ✅
    - 窗口处理器 ❌
 
 5. **工作流管理**：
@@ -1910,6 +1910,223 @@ DataFlare 是一个基于 Actix actor 架构的数据集成框架，提供了以
    - CDC 工作流示例 ✅
    - API 文档 ✅
    - 单元测试 ✅
+
+### 混合模式 (Hybrid Mode) 实现
+
+混合模式是一种强大的数据提取策略，它结合了全量、增量和 CDC 等多种提取模式的优势。这种模式特别适用于需要初始全量加载后进行持续增量或 CDC 更新的场景。
+
+#### 混合模式特性
+
+1. **灵活的转换条件**：
+   - 完成后转换：在初始流完成后自动转换到持续流
+   - 时间戳转换：在处理到特定时间戳后转换
+   - 记录计数转换：在处理特定数量的记录后转换
+   - 手动转换：由外部触发转换
+   - 永不转换：仅使用初始流
+
+2. **状态管理**：
+   - 跟踪初始流完成状态
+   - 记录当前处理的时间戳
+   - 维护处理的记录计数
+   - 支持状态持久化和恢复
+
+3. **流控制**：
+   - 平滑从初始流转换到持续流
+   - 处理流转换期间的背压
+   - 确保数据一致性和完整性
+
+#### 混合模式使用示例
+
+```rust
+// 创建混合配置
+let config = HybridConfig {
+    initial_mode: ExtractionMode::Full,
+    ongoing_mode: ExtractionMode::CDC,
+    transition_after: TransitionCondition::Completion,
+    state: HybridState::Initial,
+};
+
+// 创建初始流和持续流
+let initial_stream = postgres_connector.extract_full().await?;
+let ongoing_stream = postgres_connector.extract_cdc().await?;
+
+// 创建混合流
+let mut hybrid_stream = HybridStream::new(initial_stream, config);
+hybrid_stream.set_ongoing_stream(ongoing_stream);
+
+// 处理混合流
+while let Some(record) = hybrid_stream.next().await {
+    // 处理记录
+    process_record(record?).await?;
+}
+```
+
+YAML 工作流定义示例：
+
+```yaml
+sources:
+  customer_data:
+    type: postgres
+    mode: hybrid
+    config:
+      host: ${DB_HOST}
+      port: 5432
+      database: production
+      username: ${DB_USER}
+      password: ${DB_PASSWORD}
+      schema: public
+      table: customers
+
+      # 混合模式配置
+      hybrid:
+        initial_mode: full
+        ongoing_mode: cdc
+        transition_after: completion
+
+      # CDC 配置
+      cdc:
+        slot_name: etl_replication_slot
+        publication_name: etl_publication
+```
+
+#### 混合模式最佳实践
+
+1. **选择合适的转换条件**：
+   - 对于大型数据集，考虑使用时间戳或记录计数转换
+   - 对于小型数据集，使用完成后转换通常是最简单的选择
+
+2. **资源管理**：
+   - 初始全量提取可能需要大量资源，确保系统有足够的内存和处理能力
+   - 考虑在非高峰时段进行初始提取
+
+3. **错误处理**：
+   - 实现健壮的错误处理和重试机制
+   - 确保在转换期间的错误不会导致数据丢失
+
+4. **监控和日志**：
+   - 记录模式转换事件
+   - 监控初始和持续流的性能指标
+   - 跟踪处理的记录数量和进度
+
+### 连接处理器 (JoinProcessor) 实现
+
+连接处理器允许将来自不同源的数据记录连接在一起，类似于 SQL 中的 JOIN 操作。这对于数据丰富和关联分析非常有用。
+
+#### 连接处理器特性
+
+1. **支持多种连接类型**：
+   - 内连接 (Inner Join)：只返回两侧都匹配的记录
+   - 左连接 (Left Join)：返回左侧所有记录，右侧不匹配则为空
+   - 右连接 (Right Join)：返回右侧所有记录，左侧不匹配则为空
+   - 全连接 (Full Join)：返回两侧所有记录，不匹配则对应侧为空
+
+2. **灵活的键匹配**：
+   - 支持基于单个字段的连接
+   - 支持嵌套字段路径
+   - 支持自定义键提取函数
+
+3. **结果格式控制**：
+   - 支持字段前缀，避免名称冲突
+   - 智能字段合并策略
+   - 保留原始记录的元数据
+
+4. **性能优化**：
+   - 高效的内存中哈希表实现
+   - 流式处理大数据集
+   - 智能缓存策略
+
+#### 连接处理器使用示例
+
+```rust
+// 创建连接处理器
+let join_processor = JoinProcessor::new(
+    "customer_order_join",
+    "customer_id",
+    "customer_id",
+    JoinType::Left,
+    Some("customer".to_string()),
+    Some("order".to_string()),
+);
+
+// 处理左侧记录
+let customer = DataRecord::new(serde_json::json!({
+    "customer_id": 1,
+    "name": "Alice",
+    "email": "alice@example.com"
+}));
+join_processor.process_left(customer).await?;
+
+// 处理右侧记录
+let order = DataRecord::new(serde_json::json!({
+    "order_id": 101,
+    "customer_id": 1,
+    "amount": 99.99
+}));
+let results = join_processor.process_right(order).await?;
+
+// 结果将包含连接后的记录
+// {
+//   "customer.customer_id": 1,
+//   "customer.name": "Alice",
+//   "customer.email": "alice@example.com",
+//   "order.order_id": 101,
+//   "order.customer_id": 1,
+//   "order.amount": 99.99
+// }
+```
+
+YAML 工作流定义示例：
+
+```yaml
+transformations:
+  customer_order_join:
+    inputs:
+      - customers
+      - orders
+    type: join
+    config:
+      join_type: left
+      left_key: customer_id
+      right_key: customer_id
+      left_prefix: customer
+      right_prefix: order
+
+  # 使用连接结果进行进一步处理
+  calculate_metrics:
+    inputs:
+      - customer_order_join
+    type: mapping
+    config:
+      mappings:
+        - source: "customer.name"
+          destination: "customer_name"
+        - source: "order.amount"
+          destination: "order_amount"
+        - source: "order.amount"
+          destination: "discounted_amount"
+          transform: "multiply(0.9)"
+```
+
+#### 连接处理器最佳实践
+
+1. **选择合适的连接类型**：
+   - 使用内连接获取完全匹配的记录
+   - 使用左连接或右连接保留一侧的所有记录
+   - 使用全连接获取所有可能的组合
+
+2. **内存管理**：
+   - 对于大数据集，考虑批处理或流式处理
+   - 监控内存使用情况，避免 OOM 错误
+
+3. **性能优化**：
+   - 尽可能在连接前过滤数据
+   - 使用索引键进行连接
+   - 考虑连接顺序（较小的数据集应该在左侧）
+
+4. **错误处理**：
+   - 实现健壮的错误处理和数据验证
+   - 处理键类型不匹配的情况
+   - 记录连接失败的记录
 
 ## 未来路线图与增强计划
 
