@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
 
-use crate::processor::Processor;
+use dataflare_core::processor::Processor;
 
 /// Configuration for the filter processor
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,28 +136,31 @@ impl FilterProcessor {
 }
 
 #[async_trait::async_trait]
-impl crate::processor::Processor for FilterProcessor {
+impl dataflare_core::processor::Processor for FilterProcessor {
     fn configure(&mut self, config: &Value) -> Result<()> {
         self.config = serde_json::from_value(config.clone())
             .map_err(|e| DataFlareError::Config(format!("Invalid filter processor configuration: {}", e)))?;
         Ok(())
     }
 
-    async fn process_record(&mut self, record: &DataRecord, _state: Option<crate::processor::ProcessorState>) -> Result<Vec<DataRecord>> {
+    async fn process_record(&mut self, record: &DataRecord) -> Result<DataRecord> {
         if self.evaluate_condition(record)? {
-            Ok(vec![record.clone()])
+            Ok(record.clone())
         } else {
-            // Filter out the record by returning an empty vector
-            Ok(vec![])
+            // Filter out the record by returning an empty record
+            Ok(DataRecord::new(serde_json::json!({})))
         }
     }
 
-    async fn process_batch(&mut self, batch: &DataRecordBatch, state: Option<crate::processor::ProcessorState>) -> Result<DataRecordBatch> {
+    async fn process_batch(&mut self, batch: &DataRecordBatch) -> Result<DataRecordBatch> {
         let mut processed_records = Vec::new();
 
         for record in &batch.records {
-            let mut results = self.process_record(record, state.clone()).await?;
-            processed_records.append(&mut results);
+            let result = self.process_record(record).await?;
+            // Only add non-empty records
+            if !result.data.is_null() && !result.data.as_object().map_or(true, |obj| obj.is_empty()) {
+                processed_records.push(result);
+            }
         }
 
         let mut new_batch = DataRecordBatch::new(processed_records);
@@ -167,8 +170,24 @@ impl crate::processor::Processor for FilterProcessor {
         Ok(new_batch)
     }
 
-    fn get_state(&self) -> Result<crate::processor::ProcessorState> {
-        Ok(crate::processor::ProcessorState::new())
+    fn get_state(&self) -> dataflare_core::processor::ProcessorState {
+        dataflare_core::processor::ProcessorState::new("filter")
+    }
+
+    fn get_input_schema(&self) -> Option<dataflare_core::model::Schema> {
+        None
+    }
+
+    fn get_output_schema(&self) -> Option<dataflare_core::model::Schema> {
+        None
+    }
+
+    async fn initialize(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn finalize(&mut self) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -198,10 +217,11 @@ mod tests {
             "age": 25
         }));
 
-        let result = block_on(processor.process_record(&record, None));
+        let result = block_on(processor.process_record(&record));
         assert!(result.is_ok());
-        let records = result.unwrap();
-        assert_eq!(records.len(), 1);
+        let record_result = result.unwrap();
+        // 检查记录是否非空（未被过滤）
+        assert!(!record_result.data.as_object().unwrap().is_empty());
 
         // Test with a record that should be filtered out
         let record = DataRecord::new(json!({
@@ -210,9 +230,10 @@ mod tests {
             "age": 16
         }));
 
-        let result = block_on(processor.process_record(&record, None));
+        let result = block_on(processor.process_record(&record));
         assert!(result.is_ok());
-        let records = result.unwrap();
-        assert_eq!(records.len(), 0); // Empty vector means filtered out
+        let record_result = result.unwrap();
+        // 检查记录是否为空（被过滤）
+        assert!(record_result.data.as_object().unwrap().is_empty()); // 空记录表示被过滤掉
     }
 }

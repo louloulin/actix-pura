@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::fmt;
 
-use crate::processor::Processor;
+use dataflare_core::processor::Processor;
 
 /// Field mapping configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,14 +124,14 @@ impl MappingProcessor {
 }
 
 #[async_trait::async_trait]
-impl crate::processor::Processor for MappingProcessor {
+impl dataflare_core::processor::Processor for MappingProcessor {
     fn configure(&mut self, config: &Value) -> Result<()> {
         self.config = serde_json::from_value(config.clone())
             .map_err(|e| DataFlareError::Config(format!("Invalid mapping processor configuration: {}", e)))?;
         Ok(())
     }
 
-    async fn process_record(&mut self, record: &DataRecord, _state: Option<crate::processor::ProcessorState>) -> Result<Vec<DataRecord>> {
+    async fn process_record(&mut self, record: &DataRecord) -> Result<DataRecord> {
         let mut new_data = Map::new();
 
         // Apply mappings
@@ -152,16 +152,16 @@ impl crate::processor::Processor for MappingProcessor {
         new_record.created_at = record.created_at;
         new_record.updated_at = record.updated_at;
 
-        Ok(vec![new_record])
+        Ok(new_record)
     }
 
-    async fn process_batch(&mut self, batch: &DataRecordBatch, state: Option<crate::processor::ProcessorState>) -> Result<DataRecordBatch> {
+    async fn process_batch(&mut self, batch: &DataRecordBatch) -> Result<DataRecordBatch> {
         let mut processed_records = Vec::with_capacity(batch.records.len());
 
         // Process each record
         for record in &batch.records {
-            let mut new_records = self.process_record(record, state.clone()).await?;
-            processed_records.append(&mut new_records);
+            let new_record = self.process_record(record).await?;
+            processed_records.push(new_record);
         }
 
         // Create new batch with processed records
@@ -172,8 +172,24 @@ impl crate::processor::Processor for MappingProcessor {
         Ok(new_batch)
     }
 
-    fn get_state(&self) -> Result<crate::processor::ProcessorState> {
-        Ok(crate::processor::ProcessorState::new())
+    fn get_state(&self) -> dataflare_core::processor::ProcessorState {
+        dataflare_core::processor::ProcessorState::new("mapping")
+    }
+
+    fn get_input_schema(&self) -> Option<dataflare_core::model::Schema> {
+        None
+    }
+
+    fn get_output_schema(&self) -> Option<dataflare_core::model::Schema> {
+        None
+    }
+
+    async fn initialize(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn finalize(&mut self) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -219,10 +235,7 @@ mod tests {
             "age": 25
         }));
 
-        let result = block_on(processor.process_record(&record, None)).unwrap();
-        assert_eq!(result.len(), 1);
-
-        let processed_record = &result[0];
+        let processed_record = block_on(processor.process_record(&record)).unwrap();
         assert_eq!(processed_record.data.get("user_id").unwrap().as_str().unwrap(), "1");
         assert_eq!(processed_record.data.get("full_name").unwrap().as_str().unwrap(), "John Doe");
         assert_eq!(processed_record.data.get("email_address").unwrap().as_str().unwrap(), "john.doe@example.com");

@@ -9,11 +9,11 @@
 // pub mod registry;
 
 use serde_json::Value;
+use async_trait::async_trait;
 
 use dataflare_core::{
     error::Result,
     message::{DataRecord, DataRecordBatch},
-    model::Schema,
 };
 
 // 使用 dataflare-core 中的 ProcessorState 和 Processor
@@ -129,7 +129,7 @@ impl Processor for MappingProcessor {
         Ok(())
     }
 
-    async fn process_record(&mut self, record: &DataRecord, _state: Option<ProcessorState>) -> Result<Vec<DataRecord>> {
+    async fn process_record(&mut self, record: &DataRecord) -> Result<DataRecord> {
         // 创建具有相同元数据的新记录
         let mut new_record = DataRecord::new(serde_json::json!({}));
         new_record.metadata = record.metadata.clone();
@@ -143,16 +143,16 @@ impl Processor for MappingProcessor {
             }
         }
 
-        Ok(vec![new_record])
+        Ok(new_record)
     }
 
-    async fn process_batch(&mut self, batch: &DataRecordBatch, state: Option<ProcessorState>) -> Result<DataRecordBatch> {
+    async fn process_batch(&mut self, batch: &DataRecordBatch) -> Result<DataRecordBatch> {
         let mut processed_records = Vec::with_capacity(batch.records.len());
 
         // 处理每条记录
         for record in &batch.records {
-            let mut new_records = self.process_record(record, state.clone()).await?;
-            processed_records.append(&mut new_records);
+            let new_record = self.process_record(record).await?;
+            processed_records.push(new_record);
         }
 
         // 创建包含处理后记录的新批次
@@ -163,8 +163,24 @@ impl Processor for MappingProcessor {
         Ok(new_batch)
     }
 
-    fn get_state(&self) -> Result<ProcessorState> {
-        Ok(self.state.clone())
+    fn get_state(&self) -> ProcessorState {
+        self.state.clone()
+    }
+
+    fn get_input_schema(&self) -> Option<dataflare_core::model::Schema> {
+        None
+    }
+
+    fn get_output_schema(&self) -> Option<dataflare_core::model::Schema> {
+        None
+    }
+
+    async fn initialize(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn finalize(&mut self) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -184,7 +200,7 @@ impl FilterProcessor {
         Self {
             config: None,
             condition: None,
-            state: ProcessorState::new(),
+            state: ProcessorState::new("filter"),
         }
     }
 
@@ -240,31 +256,35 @@ impl Processor for FilterProcessor {
         Ok(())
     }
 
-    async fn process_record(&mut self, record: &DataRecord, _state: Option<ProcessorState>) -> Result<Vec<DataRecord>> {
+    async fn process_record(&mut self, record: &DataRecord) -> Result<DataRecord> {
         // 如果没有条件，不做更改地传递记录
         if self.condition.is_none() {
-            return Ok(vec![record.clone()]);
+            return Ok(record.clone());
         }
 
         // 评估条件
         let condition = self.condition.as_ref().unwrap();
         let passes_filter = self.evaluate_condition(record, condition)?;
 
-        // 如果通过过滤器，包含记录；否则，排除它
+        // 如果通过过滤器，包含记录；否则返回空记录
         if passes_filter {
-            Ok(vec![record.clone()])
+            Ok(record.clone())
         } else {
-            Ok(vec![])
+            // 返回一个空记录，表示该记录被过滤掉
+            Ok(DataRecord::new(serde_json::json!({})))
         }
     }
 
-    async fn process_batch(&mut self, batch: &DataRecordBatch, state: Option<ProcessorState>) -> Result<DataRecordBatch> {
+    async fn process_batch(&mut self, batch: &DataRecordBatch) -> Result<DataRecordBatch> {
         let mut processed_records = Vec::new();
 
         // 处理每条记录
         for record in &batch.records {
-            let mut new_records = self.process_record(record, state.clone()).await?;
-            processed_records.append(&mut new_records);
+            let new_record = self.process_record(record).await?;
+            // 只添加非空记录
+            if !new_record.data.is_null() && !new_record.data.as_object().map_or(true, |obj| obj.is_empty()) {
+                processed_records.push(new_record);
+            }
         }
 
         // 创建包含处理后记录的新批次
@@ -275,14 +295,30 @@ impl Processor for FilterProcessor {
         Ok(new_batch)
     }
 
-    fn get_state(&self) -> Result<ProcessorState> {
-        Ok(self.state.clone())
+    fn get_state(&self) -> ProcessorState {
+        self.state.clone()
+    }
+
+    fn get_input_schema(&self) -> Option<dataflare_core::model::Schema> {
+        None
+    }
+
+    fn get_output_schema(&self) -> Option<dataflare_core::model::Schema> {
+        None
+    }
+
+    async fn initialize(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn finalize(&mut self) -> Result<()> {
+        Ok(())
     }
 }
 
 // 重新导出处理器
-pub use aggregate::AggregateProcessor;
-pub use enrichment::EnrichmentProcessor;
+pub use crate::aggregate::AggregateProcessor;
+pub use crate::enrichment::EnrichmentProcessor;
 
 #[cfg(test)]
 use mockall::mock;
@@ -294,9 +330,11 @@ mock! {
     #[async_trait]
     impl Processor for Processor {
         fn configure(&mut self, config: &Value) -> Result<()>;
-        async fn process_record(&mut self, record: &DataRecord, state: Option<ProcessorState>) -> Result<Vec<DataRecord>>;
-        async fn process_batch(&mut self, batch: &DataRecordBatch, state: Option<ProcessorState>) -> Result<DataRecordBatch>;
-        fn get_state(&self) -> Result<ProcessorState>;
+        async fn process_record(&mut self, record: &DataRecord) -> Result<DataRecord>;
+        async fn process_batch(&mut self, batch: &DataRecordBatch) -> Result<DataRecordBatch>;
+        fn get_state(&self) -> ProcessorState;
+        fn get_input_schema(&self) -> Option<dataflare_core::model::Schema>;
+        fn get_output_schema(&self) -> Option<dataflare_core::model::Schema>;
         async fn initialize(&mut self) -> Result<()>;
         async fn finalize(&mut self) -> Result<()>;
     }

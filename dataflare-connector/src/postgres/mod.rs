@@ -6,6 +6,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use serde_json::{Value, json};
+
+use crate::source::ExtractionMode;
 use tokio_postgres::{NoTls, Row};
 use chrono::{DateTime, Utc};
 use log::{error, info};
@@ -19,7 +21,7 @@ use dataflare_core::{
     model::DataType,
 };
 
-use crate::source::{SourceConnector, ExtractionMode};
+use crate::source::SourceConnector;
 use crate::hybrid::HybridConfig;
 
 /// Conector de fuente PostgreSQL
@@ -390,13 +392,13 @@ impl SourceConnector for PostgresSourceConnector {
                 // 混合模式：根据配置使用初始模式
                 if let Some(hybrid_config) = HybridConfig::from_config(&self.config).ok() {
                     match hybrid_config.initial_mode {
-                        ExtractionMode::Full => {
+                        dataflare_core::connector::ExtractionMode::Full => {
                             // 使用全量模式作为初始模式
                             let query = format!("SELECT * FROM {}", table);
                             client.query(&query, &[]).await
                                 .map_err(|e| DataFlareError::Query(format!("Error al ejecutar consulta: {}", e)))?
                         },
-                        ExtractionMode::Incremental => {
+                        dataflare_core::connector::ExtractionMode::Incremental => {
                             // 使用增量模式作为初始模式
                             if let Some(incremental) = self.config.get("incremental") {
                                 let cursor_field = incremental.get("cursor_field")
@@ -596,7 +598,7 @@ impl SourceConnector for PostgresSourceConnector {
                 // 混合模式：根据配置使用初始模式
                 if let Some(hybrid_config) = HybridConfig::from_config(&self.config).ok() {
                     match hybrid_config.initial_mode {
-                        ExtractionMode::Full => {
+                        dataflare_core::connector::ExtractionMode::Full => {
                             // 使用全量模式作为初始模式
                             let query = format!("SELECT COUNT(*) FROM {}", table);
                             let row = client.query_one(&query, &[]).await
@@ -604,7 +606,7 @@ impl SourceConnector for PostgresSourceConnector {
                             let count: i64 = row.get(0);
                             count as u64
                         },
-                        ExtractionMode::Incremental => {
+                        dataflare_core::connector::ExtractionMode::Incremental => {
                             // 使用增量模式作为初始模式
                             if let Some(incremental) = self.config.get("incremental") {
                                 let cursor_field = incremental.get("cursor_field")
@@ -743,7 +745,13 @@ impl PostgresSourceConnector {
 
                     // 创建初始流
                     let mut initial_connector = self.clone();
-                    initial_connector.extraction_mode = hybrid_config.initial_mode.clone();
+                    // 将 dataflare_core::ExtractionMode 转换为 source::ExtractionMode
+                initial_connector.extraction_mode = match hybrid_config.initial_mode {
+                    dataflare_core::connector::ExtractionMode::Full => ExtractionMode::Full,
+                    dataflare_core::connector::ExtractionMode::Incremental => ExtractionMode::Incremental,
+                    dataflare_core::connector::ExtractionMode::CDC => ExtractionMode::CDC,
+                    dataflare_core::connector::ExtractionMode::Hybrid => ExtractionMode::Hybrid,
+                };
 
                     // 根据初始模式构建查询
                     let client = initial_connector.client.as_ref().ok_or_else(|| {
@@ -791,7 +799,12 @@ impl PostgresSourceConnector {
 
                     // 创建持续流（如果需要）
                     let mut ongoing_connector = self.clone();
-                    ongoing_connector.extraction_mode = hybrid_config.ongoing_mode.clone();
+                    ongoing_connector.extraction_mode = match hybrid_config.ongoing_mode {
+                        dataflare_core::connector::ExtractionMode::Full => ExtractionMode::Full,
+                        dataflare_core::connector::ExtractionMode::Incremental => ExtractionMode::Incremental,
+                        dataflare_core::connector::ExtractionMode::CDC => ExtractionMode::CDC,
+                        dataflare_core::connector::ExtractionMode::Hybrid => ExtractionMode::Hybrid,
+                    };
 
                     // 根据持续模式构建查询
                     let client = ongoing_connector.client.as_ref().ok_or_else(|| {

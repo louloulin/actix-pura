@@ -173,22 +173,22 @@ impl JoinProcessor {
     }
 
     /// 处理右侧数据集的记录
-    fn process_right_record(&mut self, record: DataRecord) -> Result<Vec<DataRecord>> {
+    fn process_right_record(&mut self, record: DataRecord) -> Result<DataRecord> {
         // 获取连接键值
         let key = match self.get_key_value(&record, &self.right_key) {
             Some(k) => k,
-            None => return Ok(vec![]), // 如果没有连接键，则跳过
+            None => return Ok(DataRecord::new(serde_json::json!({}))), // 如果没有连接键，则返回空记录
         };
 
         // 将记录添加到缓存
         self.right_cache.entry(key).or_insert_with(Vec::new).push(record);
 
-        // 右侧记录不产生输出
-        Ok(vec![])
+        // 右侧记录不产生输出，返回空记录
+        Ok(DataRecord::new(serde_json::json!({})))
     }
 
     /// 处理左侧数据集的记录
-    fn process_left_record(&mut self, record: DataRecord) -> Result<Vec<DataRecord>> {
+    fn process_left_record(&mut self, record: DataRecord) -> Result<DataRecord> {
         // 获取连接键值
         let key = match self.get_key_value(&record, &self.left_key) {
             Some(k) => k,
@@ -196,9 +196,9 @@ impl JoinProcessor {
                 // 对于左连接和全连接，即使没有连接键，也需要保留左侧记录
                 if self.join_type == JoinType::Left || self.join_type == JoinType::Full {
                     let empty_right = self.create_empty_right_record();
-                    return Ok(vec![self.merge_records(&record, &empty_right)]);
+                    return Ok(self.merge_records(&record, &empty_right));
                 } else {
-                    return Ok(vec![]);
+                    return Ok(DataRecord::new(serde_json::json!({})));
                 }
             },
         };
@@ -206,18 +206,20 @@ impl JoinProcessor {
         // 查找匹配的右侧记录
         if let Some(right_records) = self.right_cache.get(&key) {
             // 有匹配的右侧记录，创建连接结果
-            let mut results = Vec::new();
-            for right_record in right_records {
-                results.push(self.merge_records(&record, right_record));
+            // 简化：只使用第一个匹配的右侧记录
+            if let Some(right_record) = right_records.first() {
+                Ok(self.merge_records(&record, right_record))
+            } else {
+                // 这种情况不应该发生，因为我们已经检查了 right_records 不为空
+                Ok(DataRecord::new(serde_json::json!({})))
             }
-            Ok(results)
         } else {
             // 没有匹配的右侧记录
             match self.join_type {
-                JoinType::Inner | JoinType::Right => Ok(vec![]),
+                JoinType::Inner | JoinType::Right => Ok(DataRecord::new(serde_json::json!({}))),
                 JoinType::Left | JoinType::Full => {
                     let empty_right = self.create_empty_right_record();
-                    Ok(vec![self.merge_records(&record, &empty_right)])
+                    Ok(self.merge_records(&record, &empty_right))
                 },
             }
         }
@@ -225,7 +227,7 @@ impl JoinProcessor {
 }
 
 #[async_trait]
-impl Processor for JoinProcessor {
+impl dataflare_core::processor::Processor for JoinProcessor {
     /// 配置处理器
     fn configure(&mut self, config: &Value) -> Result<()> {
         // 从配置中提取连接键
@@ -255,7 +257,7 @@ impl Processor for JoinProcessor {
     }
 
     /// 处理单条记录
-    async fn process_record(&mut self, record: &DataRecord, _state: Option<ProcessorState>) -> Result<Vec<DataRecord>> {
+    async fn process_record(&mut self, record: &DataRecord) -> Result<DataRecord> {
         // 检查记录是左侧还是右侧数据集
         if let Some(side) = record.metadata.get("join_side") {
             let side_str = side.as_str();
@@ -273,13 +275,16 @@ impl Processor for JoinProcessor {
     }
 
     /// 处理记录批次
-    async fn process_batch(&mut self, batch: &DataRecordBatch, state: Option<ProcessorState>) -> Result<DataRecordBatch> {
+    async fn process_batch(&mut self, batch: &DataRecordBatch) -> Result<DataRecordBatch> {
         let mut processed_records = Vec::new();
 
         // 处理每条记录
         for record in &batch.records {
-            let mut results = self.process_record(record, state.clone()).await?;
-            processed_records.append(&mut results);
+            let result = self.process_record(record).await?;
+            // 只添加非空记录
+            if !result.data.is_null() && !result.data.as_object().map_or(true, |obj| obj.is_empty()) {
+                processed_records.push(result);
+            }
         }
 
         // 创建新的批次
@@ -291,11 +296,20 @@ impl Processor for JoinProcessor {
     }
 
     /// 获取处理器状态
-    fn get_state(&self) -> Result<ProcessorState> {
+    fn get_state(&self) -> ProcessorState {
         // 创建包含右侧缓存大小的状态
-        let mut state = ProcessorState::new();
-        state.metadata.insert("right_cache_size".to_string(), self.right_cache.len().to_string());
-        Ok(state)
+        let mut state = ProcessorState::new("join");
+        // 将右侧缓存大小存储在 data 中
+        state.add_data("right_cache_size", self.right_cache.len().to_string());
+        state
+    }
+
+    fn get_input_schema(&self) -> Option<dataflare_core::model::Schema> {
+        None
+    }
+
+    fn get_output_schema(&self) -> Option<dataflare_core::model::Schema> {
+        None
     }
 
     /// 初始化处理器
