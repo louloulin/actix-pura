@@ -285,7 +285,7 @@ impl Handler<crate::actor::UnsubscribeFromProgress> for DestinationActor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dataflare_core::connector::MockDestinationConnector;
+    use dataflare_connector::destination::MockDestinationConnector;
 
     #[actix::test]
     async fn test_destination_actor_initialization() {

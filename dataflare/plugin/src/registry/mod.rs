@@ -34,7 +34,7 @@ impl PluginRegistry {
 
     /// Register a plugin
     pub fn register_plugin(&mut self, metadata: PluginMetadata, plugin: Box<dyn ProcessorPlugin + Send + Sync>) -> Result<()> {
-        let plugin_id = metadata.name.clone();
+        let plugin_id = format!("{}-{}", metadata.name.clone(), metadata.version.clone());
         self.plugins.insert(plugin_id.clone(), metadata);
         self.processor_plugins.insert(plugin_id, plugin);
         Ok(())
@@ -199,7 +199,7 @@ mod tests {
 
         registry.register_plugin(metadata.clone(), plugin).unwrap();
 
-        let plugin_id = "test-plugin";
+        let plugin_id = "Test Plugin-1.0.0";
         let retrieved_metadata = registry.get_plugin(plugin_id).unwrap();
         assert_eq!(retrieved_metadata.name, metadata.name);
 

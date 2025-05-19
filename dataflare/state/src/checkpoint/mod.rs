@@ -92,11 +92,12 @@ mod tests {
         assert!(checkpoint.source_states.is_empty());
         assert!(checkpoint.metadata.is_empty());
 
-        let source_state = super::super::state::SourceState::new();
+        let mut source_state = super::super::state::SourceState::new();
+        source_state.source_name = Some("test-source".to_string());
         checkpoint.add_source_state("test-source", source_state.clone());
 
         assert_eq!(checkpoint.source_states.len(), 1);
-        assert_eq!(checkpoint.get_source_state("test-source").unwrap().source_id, "test-source");
+        assert_eq!(checkpoint.get_source_state("test-source").unwrap().source_name, Some("test-source".to_string()));
 
         checkpoint.add_metadata("key", "value");
         assert_eq!(checkpoint.metadata.get("key").unwrap(), "value");

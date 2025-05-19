@@ -330,6 +330,7 @@ impl dataflare_core::processor::Processor for JoinProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[tokio::test]
     async fn test_join_processor_inner_join() {
@@ -358,7 +359,7 @@ mod tests {
 
         // 处理右侧记录
         processor.process_record(&user1).await.unwrap();
-        processor.process_record(&user2, None).await.unwrap();
+        processor.process_record(&user2).await.unwrap();
 
         // 创建左侧数据集记录
         let mut order1 = DataRecord::new(json!({
@@ -380,14 +381,14 @@ mod tests {
         order3.metadata.insert("join_side".to_string(), "left".into());
 
         // 处理左侧记录
-        let result1 = processor.process_record(&order1, None).await.unwrap();
-        let result2 = processor.process_record(&order2, None).await.unwrap();
-        let result3 = processor.process_record(&order3, None).await.unwrap();
+        let result1 = processor.process_record(&order1).await.unwrap();
+        let result2 = processor.process_record(&order2).await.unwrap();
+        let result3 = processor.process_record(&order3).await.unwrap();
 
         // 验证结果
-        assert_eq!(result1.len(), 1);
-        assert_eq!(result2.len(), 1);
-        assert_eq!(result3.len(), 0); // 没有匹配的右侧记录
+        assert_eq!(result1.data.as_object().unwrap().len(), 4);
+        assert_eq!(result2.data.as_object().unwrap().len(), 4);
+        assert_eq!(result3.data.as_object().unwrap().len(), 0); // 没有匹配的右侧记录
 
         // 打印结果以便调试
         println!("Result1: {:?}", result1);
@@ -395,49 +396,47 @@ mod tests {
         println!("Result3: {:?}", result3);
 
         // 验证连接结果
-        if !result1.is_empty() {
-            let joined1 = &result1[0];
-            println!("Joined1 data: {:?}", joined1.data);
+        if !result1.data.as_object().unwrap().is_empty() {
+            println!("Joined1 data: {:?}", result1.data);
 
             // 使用 get 方法获取值，避免使用 unwrap
-            if let Some(id) = joined1.data.get("order.id") {
+            if let Some(id) = result1.data.get("order.id") {
                 assert_eq!(id.as_i64().unwrap_or(0), 1);
-            } else if let Some(id) = joined1.data.get("id") {
+            } else if let Some(id) = result1.data.get("id") {
                 assert_eq!(id.as_i64().unwrap_or(0), 1);
             } else {
-                panic!("Expected joined1 to have an 'id' or 'order.id' field");
+                panic!("Expected result1 to have an 'id' or 'order.id' field");
             }
 
-            if let Some(name) = joined1.data.get("user.name") {
+            if let Some(name) = result1.data.get("user.name") {
                 assert_eq!(name.as_str().unwrap_or(""), "Alice");
-            } else if let Some(name) = joined1.data.get("name") {
+            } else if let Some(name) = result1.data.get("name") {
                 assert_eq!(name.as_str().unwrap_or(""), "Alice");
             } else {
-                panic!("Expected joined1 to have a 'name' or 'user.name' field");
+                panic!("Expected result1 to have a 'name' or 'user.name' field");
             }
         } else {
             panic!("Expected result1 to contain at least one record");
         }
 
-        if !result2.is_empty() {
-            let joined2 = &result2[0];
-            println!("Joined2 data: {:?}", joined2.data);
+        if !result2.data.as_object().unwrap().is_empty() {
+            println!("Joined2 data: {:?}", result2.data);
 
             // 使用 get 方法获取值，避免使用 unwrap
-            if let Some(id) = joined2.data.get("order.id") {
+            if let Some(id) = result2.data.get("order.id") {
                 assert_eq!(id.as_i64().unwrap_or(0), 2);
-            } else if let Some(id) = joined2.data.get("id") {
+            } else if let Some(id) = result2.data.get("id") {
                 assert_eq!(id.as_i64().unwrap_or(0), 2);
             } else {
-                panic!("Expected joined2 to have an 'id' or 'order.id' field");
+                panic!("Expected result2 to have an 'id' or 'order.id' field");
             }
 
-            if let Some(name) = joined2.data.get("user.name") {
+            if let Some(name) = result2.data.get("user.name") {
                 assert_eq!(name.as_str().unwrap_or(""), "Bob");
-            } else if let Some(name) = joined2.data.get("name") {
+            } else if let Some(name) = result2.data.get("name") {
                 assert_eq!(name.as_str().unwrap_or(""), "Bob");
             } else {
-                panic!("Expected joined2 to have a 'name' or 'user.name' field");
+                panic!("Expected result2 to have a 'name' or 'user.name' field");
             }
         } else {
             panic!("Expected result2 to contain at least one record");
