@@ -1,0 +1,27 @@
+[package]
+name = "dataflare-runtime"
+version = "0.1.0"
+edition = "2021"
+description = "Runtime engine for DataFlare data integration framework"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/actix/actix"
+
+[dependencies]
+dataflare-core = { path = "../dataflare-core" }
+actix = { path = "../actix" }
+actix-rt = "2.9.0"
+tokio = { version = "1.35.1", features = ["full"] }
+futures = "0.3.30"
+serde = { version = "1.0.193", features = ["derive"] }
+serde_json = "1.0.108"
+thiserror = "1.0.56"
+anyhow = "1.0.93"
+log = "0.4.20"
+async-trait = "0.1.77"
+petgraph = "0.6.4"
+
+[dev-dependencies]
+criterion = "0.5.1"
+proptest = "1.4.0"
+mockall = "0.12.1"
+tokio-test = "0.4.3"

@@ -1517,32 +1517,236 @@ dependencies = [
  "actix-rt",
  "anyhow",
  "async-trait",
- "chrono",
+ "criterion",
+ "dataflare-cloud",
+ "dataflare-connector",
+ "dataflare-core",
+ "dataflare-edge",
+ "dataflare-plugin",
+ "dataflare-processor",
+ "dataflare-runtime",
+ "dataflare-state",
+ "env_logger",
+ "futures",
+ "log",
+ "mockall 0.12.1",
+ "proptest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-test",
+]
+
+[[package]]
+name = "dataflare-cli"
+version = "0.1.0"
+dependencies = [
+ "actix",
+ "actix-rt",
+ "anyhow",
  "clap 4.5.35",
+ "dataflare",
+ "env_logger",
+ "futures",
+ "log",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
+name = "dataflare-cloud"
+version = "0.1.0"
+dependencies = [
+ "actix",
+ "actix-cluster",
+ "anyhow",
+ "async-trait",
+ "criterion",
+ "dataflare-connector",
+ "dataflare-core",
+ "dataflare-plugin",
+ "dataflare-processor",
+ "dataflare-runtime",
+ "dataflare-state",
+ "futures",
+ "log",
+ "mockall 0.12.1",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-test",
+]
+
+[[package]]
+name = "dataflare-connector"
+version = "0.1.0"
+dependencies = [
+ "actix",
+ "anyhow",
+ "async-trait",
+ "chrono",
  "criterion",
  "csv",
- "env_logger",
+ "dataflare-core",
  "futures",
  "lazy_static",
  "log",
  "mockall 0.12.1",
- "num_cpus",
- "petgraph",
  "proptest",
- "rustc_version_runtime",
  "serde",
- "serde_bytes",
  "serde_json",
- "serde_yaml",
- "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tokio-postgres",
  "tokio-test",
  "uuid",
+]
+
+[[package]]
+name = "dataflare-core"
+version = "0.1.0"
+dependencies = [
+ "actix",
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "criterion",
+ "env_logger",
+ "futures",
+ "lazy_static",
+ "log",
+ "mockall 0.12.1",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-test",
+ "uuid",
+]
+
+[[package]]
+name = "dataflare-edge"
+version = "0.1.0"
+dependencies = [
+ "actix",
+ "anyhow",
+ "async-trait",
+ "criterion",
+ "dataflare-connector",
+ "dataflare-core",
+ "dataflare-plugin",
+ "dataflare-processor",
+ "dataflare-runtime",
+ "dataflare-state",
+ "futures",
+ "log",
+ "mockall 0.12.1",
+ "num_cpus",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-test",
+]
+
+[[package]]
+name = "dataflare-plugin"
+version = "0.1.0"
+dependencies = [
+ "actix",
+ "anyhow",
+ "async-trait",
+ "criterion",
+ "dataflare-core",
+ "futures",
+ "log",
+ "mockall 0.12.1",
+ "proptest",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-test",
  "wasm-bindgen",
  "wasmtime",
  "wat",
+]
+
+[[package]]
+name = "dataflare-processor"
+version = "0.1.0"
+dependencies = [
+ "actix",
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "criterion",
+ "dataflare-core",
+ "futures",
+ "lazy_static",
+ "log",
+ "mockall 0.12.1",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-test",
+ "uuid",
+]
+
+[[package]]
+name = "dataflare-runtime"
+version = "0.1.0"
+dependencies = [
+ "actix",
+ "actix-rt",
+ "anyhow",
+ "async-trait",
+ "criterion",
+ "dataflare-core",
+ "futures",
+ "log",
+ "mockall 0.12.1",
+ "petgraph",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-test",
+]
+
+[[package]]
+name = "dataflare-state"
+version = "0.1.0"
+dependencies = [
+ "actix",
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "criterion",
+ "dataflare-core",
+ "futures",
+ "log",
+ "mockall 0.12.1",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-test",
+ "uuid",
 ]
 
 [[package]]
@@ -4522,16 +4726,6 @@ version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
- "semver",
-]
-
-[[package]]
-name = "rustc_version_runtime"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2dd18cd2bae1820af0b6ad5e54f4a51d0f3fcc53b05f845675074efcc7af071d"
-dependencies = [
- "rustc_version",
  "semver",
 ]
 

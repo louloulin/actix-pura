@@ -1,0 +1,26 @@
+[package]
+name = "dataflare-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Command-line interface for DataFlare data integration framework"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/actix/actix"
+
+[dependencies]
+dataflare = { path = "../dataflare" }
+actix = { path = "../actix" }
+actix-rt = "2.9.0"
+tokio = { version = "1.35.1", features = ["full"] }
+futures = "0.3.30"
+clap = { version = "4.4.11", features = ["derive"] }
+serde = { version = "1.0.193", features = ["derive"] }
+serde_json = "1.0.108"
+serde_yaml = "0.9.27"
+thiserror = "1.0.56"
+anyhow = "1.0.93"
+log = "0.4.20"
+env_logger = "0.10.1"
+
+[[bin]]
+name = "dataflare"
+path = "src/main.rs"

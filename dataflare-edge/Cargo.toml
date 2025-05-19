@@ -1,8 +1,8 @@
 [package]
-name = "dataflare"
+name = "dataflare-edge"
 version = "0.1.0"
 edition = "2021"
-description = "Data integration framework module for Actix"
+description = "Edge mode support for DataFlare data integration framework"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/actix/actix"
 
@@ -13,36 +13,19 @@ dataflare-connector = { path = "../dataflare-connector" }
 dataflare-processor = { path = "../dataflare-processor" }
 dataflare-plugin = { path = "../dataflare-plugin" }
 dataflare-state = { path = "../dataflare-state" }
-dataflare-edge = { path = "../dataflare-edge", optional = true }
-dataflare-cloud = { path = "../dataflare-cloud", optional = true }
 actix = { path = "../actix" }
-actix-broker = { path = "../actix-broker" }
-actix-cluster = { path = "../actix-cluster", optional = true }
-actix-rt = "2.9.0"
 tokio = { version = "1.35.1", features = ["full"] }
 futures = "0.3.30"
 serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"
-serde_yaml = "0.9.27"
 thiserror = "1.0.56"
 anyhow = "1.0.93"
 log = "0.4.20"
-env_logger = "0.10.1"
 async-trait = "0.1.77"
-
-[features]
-default = []
-edge = ["dataflare-edge"]
-cloud = ["dataflare-cloud", "actix-cluster"]
-full = ["edge", "cloud"]
+num_cpus = "1.16.0"
 
 [dev-dependencies]
 criterion = "0.5.1"
 proptest = "1.4.0"
 mockall = "0.12.1"
 tokio-test = "0.4.3"
-
-# Comentamos los benchmarks por ahora
-# [[bench]]
-# name = "dataflare_benchmarks"
-# harness = false

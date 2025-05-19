@@ -74,3 +74,8 @@
 6. 在文档中添加 DataFlare 功能的实现细节、使用示例和最佳实践
 
 请确保实现符合文档中定义的 DSL 规范，并支持全量、增量和 CDC 等多种数据采集模式。
+
+分析整个dataflare代码改造成模块化方式包在crates下，按照docs下的 @dataflare/docs/runtime_architecture.md 和 @dataflare/docs/runtime_implementation_plan.md改造，现有dataflare代码，通过命令mv现有代码到对应的crates下，实现后更新 @dataflare/docs/runtime_implementation_plan.md 标记实现的功能
+
+
+分析整个dataflare代码改造成模块化方式包在crates下，按照docs下的 @dataflare/docs/runtime_architecture.md 和 @dataflare/docs/runtime_implementation_plan.md改造，现有dataflare代码，通过命令mv现有代码到对应的crates下，实现后更新 @dataflare/docs/runtime_implementation_plan.md 标记实现的功能

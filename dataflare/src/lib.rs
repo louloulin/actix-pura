@@ -1,59 +1,97 @@
 //! # DataFlare
 //!
-//! DataFlare es un módulo de integración de datos para el framework Actix que proporciona
-//! capacidades ETL (Extract, Transform, Load) basadas en actores.
+//! DataFlare is a data integration framework for the Actix actor system that provides
+//! ETL (Extract, Transform, Load) capabilities.
 //!
-//! Este módulo implementa un sistema de flujo de datos distribuido que soporta:
-//! - Extracción de datos de múltiples fuentes
-//! - Transformación de datos mediante procesadores configurables
-//! - Carga de datos en diversos destinos
-//! - Soporte para modos de recolección completos, incrementales y CDC (Change Data Capture)
-//! - Arquitectura basada en actores para procesamiento distribuido
-//! - Integración con el sistema de plugins WASM
+//! This framework implements a distributed data flow system that supports:
+//! - Data extraction from multiple sources
+//! - Data transformation using configurable processors
+//! - Data loading to various destinations
+//! - Support for full, incremental, and CDC (Change Data Capture) collection modes
+//! - Actor-based architecture for distributed processing
+//! - Integration with WASM plugin system
+//! - Edge and cloud deployment modes
 
 #![warn(unsafe_code)]
 #![warn(missing_docs)]
 #![warn(rustdoc::missing_doc_code_examples)]
 
-pub mod actor;
-pub mod config;
-pub mod connector;
-pub mod error;
-pub mod message;
-pub mod model;
-pub mod plugin;
-pub mod processor;
-pub mod registry;
-pub mod schema;
-pub mod state;
-pub mod utils;
-pub mod workflow;
-
-// Re-exportaciones para facilitar el uso
-pub use crate::{
-    actor::{DestinationActor, ProcessorActor, SourceActor, WorkflowActor},
-    config::DataFlareConfig,
-    connector::{DestinationConnector, SourceConnector},
+// Re-exports from core crates
+pub use dataflare_core::{
     error::{DataFlareError, Result},
     message::{DataRecord, DataRecordBatch},
     model::{DataType, Field, Schema},
-    plugin::{PluginManager, PluginConfig, PluginMetadata, PluginType, ProcessorPlugin, WasmProcessor},
-    processor::{Processor, AggregateProcessor, EnrichmentProcessor, FilterProcessor, MappingProcessor, registry::register_default_processors},
-    registry::ConnectorRegistry,
-    state::{CheckpointState, SourceState},
-    workflow::{Workflow, WorkflowBuilder, WorkflowExecutor},
+    config::DataFlareConfig,
 };
 
-/// Versión del módulo DataFlare
+// Re-exports from runtime crate
+pub use dataflare_runtime::{
+    workflow::{Workflow, WorkflowBuilder, WorkflowParser, YamlWorkflowParser},
+    executor::WorkflowExecutor,
+    RuntimeMode,
+};
+
+// Re-exports from connector crate
+pub use dataflare_connector::{
+    source::SourceConnector,
+    destination::DestinationConnector,
+    registry::{create_connector, get_connector, ConnectorRegistry, register_connector},
+};
+
+// Re-exports from processor crate
+pub use dataflare_processor::{
+    processor::Processor,
+    mapping::MappingProcessor,
+    filter::FilterProcessor,
+    aggregate::AggregateProcessor,
+    enrichment::EnrichmentProcessor,
+    join::JoinProcessor,
+    registry::{register_processor, get_processor, ProcessorRegistry, register_default_processors},
+};
+
+// Re-exports from plugin crate
+pub use dataflare_plugin::{
+    plugin::{PluginManager, PluginConfig, PluginMetadata, PluginType, ProcessorPlugin},
+    wasm::WasmProcessor,
+    registry::{register_plugin, get_plugin, PluginRegistry},
+};
+
+// Re-exports from state crate
+pub use dataflare_state::{
+    state::{SourceState, StateManager},
+    checkpoint::CheckpointState,
+    storage::StateStorage,
+};
+
+// Conditional re-exports based on features
+#[cfg(feature = "edge")]
+pub use dataflare_edge::{
+    EdgeRuntimeConfig,
+    runtime::EdgeRuntime,
+    cache::OfflineCache,
+    sync::SyncManager,
+    resource::ResourceMonitor,
+};
+
+#[cfg(feature = "cloud")]
+pub use dataflare_cloud::{
+    CloudRuntimeConfig,
+    runtime::CloudRuntime,
+    cluster::ClusterManager,
+    scheduler::TaskScheduler,
+    coordinator::StateCoordinator,
+};
+
+/// Version of the DataFlare framework
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Inicializa el sistema DataFlare
+/// Initialize the DataFlare system
 ///
-/// Esta función configura el entorno necesario para ejecutar flujos de trabajo DataFlare,
-/// incluyendo el registro de conectores, la inicialización del sistema de plugins y
-/// la configuración del sistema de logging.
+/// This function configures the environment needed to run DataFlare workflows,
+/// including registering connectors, initializing the plugin system, and
+/// setting up the logging system.
 ///
-/// # Ejemplos
+/// # Examples
 ///
 /// ```no_run
 /// use dataflare::init;
@@ -63,39 +101,42 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ///     let config = dataflare::DataFlareConfig::default();
 ///     init(config).expect("Failed to initialize DataFlare");
 ///
-///     // Ahora puedes crear y ejecutar flujos de trabajo
+///     // Now you can create and execute workflows
 /// }
 /// ```
 pub fn init(config: DataFlareConfig) -> Result<()> {
-    // Inicializar el sistema de logging
+    // Initialize logging system
     if config.init_logging {
-        init_logging(config.log_level)?;
+        dataflare_core::init_logging(config.log_level)?;
     }
 
-    // Registrar conectores predeterminados
-    connector::register_default_connectors();
+    // Register default connectors
+    dataflare_connector::register_default_connectors();
 
-    // Registrar procesadores predeterminados
-    processor::registry::register_default_processors();
+    // Register default processors
+    dataflare_processor::register_default_processors();
 
-    // Inicializar el sistema de plugins
-    plugin::init_plugin_system(config.plugin_dir)?;
+    // Initialize plugin system
+    dataflare_plugin::init_plugin_system(config.plugin_dir)?;
 
-    Ok(())
-}
+    // Initialize edge components if enabled
+    #[cfg(feature = "edge")]
+    {
+        log::info!("Initializing Edge mode components");
+        // Edge-specific initialization
+    }
 
-/// Inicializa el sistema de logging
-fn init_logging(log_level: log::LevelFilter) -> Result<()> {
-    env_logger::Builder::new()
-        .filter_level(log_level)
-        .format_timestamp_millis()
-        .init();
+    // Initialize cloud components if enabled
+    #[cfg(feature = "cloud")]
+    {
+        log::info!("Initializing Cloud mode components");
+        // Cloud-specific initialization
+    }
 
     log::info!("DataFlare v{} initialized", VERSION);
     Ok(())
 }
 
-/// Módulo de pruebas
 #[cfg(test)]
 mod tests {
     use super::*;
