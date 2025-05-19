@@ -7,12 +7,13 @@ use actix::prelude::*;
 use log::{debug, error, info, warn};
 use chrono::Utc;
 
-use crate::{
-    actor::{DataFlareActor, Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus, SendBatch},
+use dataflare_core::{
     error::{DataFlareError, Result},
     message::{DataRecordBatch, ProcessBatch, WorkflowPhase, WorkflowProgress},
-    processor::Processor,
 };
+use dataflare_processor::processor::Processor;
+
+use crate::actor::{DataFlareActor, Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus, SendBatch};
 
 /// Actor que gestiona la transformación de datos
 pub struct ProcessorActor {

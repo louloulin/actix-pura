@@ -7,13 +7,14 @@ use actix::prelude::*;
 use log::{debug, error, info, warn};
 use chrono::Utc;
 
-use crate::{
-    actor::{DataFlareActor, Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus},
-    connector::SourceConnector,
+use dataflare_core::{
     error::{DataFlareError, Result},
     message::{DataRecordBatch, StartExtraction, WorkflowPhase, WorkflowProgress},
     state::SourceState,
 };
+use dataflare_connector::source::SourceConnector;
+
+use crate::actor::{DataFlareActor, Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus};
 
 /// Actor que gestiona la extracción de datos de una fuente
 pub struct SourceActor {

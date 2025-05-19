@@ -15,8 +15,8 @@ pub use workflow::WorkflowActor;
 pub use supervisor::SupervisorActor;
 
 use actix::prelude::*;
-use crate::error::Result;
-use crate::message::{DataRecordBatch, WorkflowProgress};
+use dataflare_core::error::Result;
+use dataflare_core::message::{DataRecordBatch, WorkflowProgress};
 
 /// Trait para actores de DataFlare
 pub trait DataFlareActor: Actor {
@@ -33,7 +33,7 @@ pub trait DataFlareActor: Actor {
     fn finalize(&mut self, ctx: &mut Self::Context) -> Result<()>;
 
     /// Reporta progreso
-    fn report_progress(&self, workflow_id: &str, phase: crate::message::WorkflowPhase, progress: f64, message: &str);
+    fn report_progress(&self, workflow_id: &str, phase: dataflare_core::message::WorkflowPhase, progress: f64, message: &str);
 }
 
 /// Mensaje para inicializar un actor
@@ -155,7 +155,7 @@ mod tests {
             Ok(())
         }
 
-        fn report_progress(&self, _workflow_id: &str, _phase: crate::message::WorkflowPhase, _progress: f64, _message: &str) {
+        fn report_progress(&self, _workflow_id: &str, _phase: dataflare_core::message::WorkflowPhase, _progress: f64, _message: &str) {
             // No hace nada en la prueba
         }
     }

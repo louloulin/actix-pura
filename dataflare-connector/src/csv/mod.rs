@@ -18,6 +18,7 @@ use crate::{
     state::SourceState,
     connector::source::{SourceConnector, ExtractionMode},
     connector::destination::DestinationConnector,
+    destination::{WriteMode, WriteStats},
 };
 
 /// CSV 源连接器
@@ -476,7 +477,7 @@ impl DestinationConnector for CsvDestinationConnector {
         Ok(())
     }
 
-    async fn write_batch(&mut self, batch: &DataRecordBatch, mode: crate::connector::destination::WriteMode) -> Result<crate::connector::destination::WriteStats> {
+    async fn write_batch(&mut self, batch: &DataRecordBatch, mode: WriteMode) -> Result<WriteStats> {
         let start = std::time::Instant::now();
         let file_path = self.file_path.as_ref().ok_or_else(|| {
             DataFlareError::Config("No se ha configurado la ruta del archivo CSV".to_string())
@@ -491,7 +492,7 @@ impl DestinationConnector for CsvDestinationConnector {
 
         // 根据写入模式决定如何打开文件
         let file = match mode {
-            crate::connector::destination::WriteMode::Append => {
+            WriteMode::Append => {
                 // 追加模式
                 if !self.file_opened {
                     let file = if Path::new(file_path).exists() {
@@ -516,7 +517,7 @@ impl DestinationConnector for CsvDestinationConnector {
                         .map_err(|e| DataFlareError::Io(e))?
                 }
             },
-            crate::connector::destination::WriteMode::Overwrite => {
+            WriteMode::Overwrite => {
                 // 覆盖模式
                 let file = std::fs::OpenOptions::new()
                     .write(true)
@@ -615,7 +616,7 @@ impl DestinationConnector for CsvDestinationConnector {
         let write_time_ms = start.elapsed().as_millis() as u64;
 
         // 返回写入统计
-        Ok(crate::connector::destination::WriteStats {
+        Ok(WriteStats {
             records_written,
             records_failed,
             bytes_written,
@@ -623,7 +624,7 @@ impl DestinationConnector for CsvDestinationConnector {
         })
     }
 
-    async fn write_record(&mut self, record: &DataRecord, mode: crate::connector::destination::WriteMode) -> Result<crate::connector::destination::WriteStats> {
+    async fn write_record(&mut self, record: &DataRecord, mode: WriteMode) -> Result<WriteStats> {
         // 创建一个只包含单个记录的批次
         let batch = DataRecordBatch::new(vec![record.clone()]);
 
@@ -641,11 +642,11 @@ impl DestinationConnector for CsvDestinationConnector {
         Ok(())
     }
 
-    fn get_supported_write_modes(&self) -> Vec<crate::connector::destination::WriteMode> {
+    fn get_supported_write_modes(&self) -> Vec<WriteMode> {
         // CSV 只支持追加和覆盖模式
         vec![
-            crate::connector::destination::WriteMode::Append,
-            crate::connector::destination::WriteMode::Overwrite,
+            WriteMode::Append,
+            WriteMode::Overwrite,
         ]
     }
 }

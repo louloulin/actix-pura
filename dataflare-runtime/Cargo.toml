@@ -20,6 +20,9 @@ anyhow = "1.0.93"
 log = "0.4.20"
 async-trait = "0.1.77"
 petgraph = "0.6.4"
+chrono = { version = "=0.4.39", features = ["serde"] }
+dataflare-connector = { path = "../dataflare-connector" }
+dataflare-processor = { path = "../dataflare-processor" }
 
 [dev-dependencies]
 criterion = "0.5.1"

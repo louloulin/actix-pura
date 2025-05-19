@@ -7,12 +7,13 @@ use actix::prelude::*;
 use log::{debug, error, info, warn};
 use chrono::Utc;
 
-use crate::{
-    actor::{DataFlareActor, Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus, SendBatch},
-    connector::DestinationConnector,
+use dataflare_core::{
     error::{DataFlareError, Result},
     message::{DataRecordBatch, LoadBatch, WorkflowPhase, WorkflowProgress},
 };
+use dataflare_connector::destination::DestinationConnector;
+
+use crate::actor::{DataFlareActor, Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus, SendBatch};
 
 /// Actor que gestiona la carga de datos en un destino
 pub struct DestinationActor {

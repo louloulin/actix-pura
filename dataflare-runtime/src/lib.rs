@@ -11,9 +11,21 @@ pub mod actor;
 pub mod workflow;
 pub mod executor;
 
+/// Runtime mode for DataFlare
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeMode {
+    /// Standalone mode (single node)
+    Standalone,
+    /// Edge mode (runs on edge devices)
+    Edge,
+    /// Cloud mode (runs in a distributed environment)
+    Cloud,
+}
+
 // Re-exports for convenience
 pub use workflow::{Workflow, WorkflowBuilder, WorkflowParser, YamlWorkflowParser};
 pub use executor::WorkflowExecutor;
+pub use self::RuntimeMode;
 
 /// Version of the DataFlare Runtime module
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

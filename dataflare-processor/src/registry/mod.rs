@@ -26,8 +26,7 @@ pub fn register_default_processors() {
 
     // 注册过滤处理器
     register_processor("filter", Arc::new(|config: Value| -> Result<Box<dyn Processor>> {
-        let mut processor = FilterProcessor::new();
-        processor.configure(&config)?;
+        let processor = FilterProcessor::from_json(config)?;
         Ok(Box::new(processor))
     }));
 

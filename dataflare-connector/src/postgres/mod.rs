@@ -8,7 +8,7 @@ use futures::{Stream, StreamExt};
 use serde_json::{Value, json};
 use tokio_postgres::{NoTls, Row};
 use chrono::{DateTime, Utc};
-use log::{debug, error, info, warn};
+use log::{error, info};
 
 use crate::{
     error::{DataFlareError, Result},

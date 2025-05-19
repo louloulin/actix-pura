@@ -7,14 +7,15 @@ use actix::prelude::*;
 use log::{debug, error, info, warn};
 use chrono::Utc;
 
-use crate::{
-    actor::{
-        DataFlareActor, Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus,
-        SubscribeToProgress, UnsubscribeFromProgress
-    },
+use dataflare_core::{
     error::{DataFlareError, Result},
     message::{StartExtraction, WorkflowPhase, WorkflowProgress},
     state::SourceState,
+};
+
+use crate::actor::{
+    DataFlareActor, Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus,
+    SubscribeToProgress, UnsubscribeFromProgress
 };
 
 /// Actor que gestiona la ejecución de flujos de trabajo

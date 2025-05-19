@@ -23,6 +23,7 @@ anyhow = "1.0.93"
 log = "0.4.20"
 async-trait = "0.1.77"
 num_cpus = "1.16.0"
+rand = "0.8.5"
 
 [dev-dependencies]
 criterion = "0.5.1"

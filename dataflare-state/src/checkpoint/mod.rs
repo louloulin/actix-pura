@@ -69,7 +69,7 @@ impl CheckpointState {
     /// Load a checkpoint from a file
     pub fn load_from_file(path: &PathBuf) -> Result<Self> {
         let json = std::fs::read_to_string(path)
-            .map_err(|e| DataFlareError::IO(format!("Failed to read checkpoint from file: {}", e)))?;
+            .map_err(|e| DataFlareError::Io(format!("Failed to read checkpoint from file: {}", e)))?;
 
         let checkpoint: Self = serde_json::from_str(&json)
             .map_err(|e| DataFlareError::Serialization(format!("Failed to deserialize checkpoint: {}", e)))?;
@@ -108,7 +108,7 @@ mod tests {
         let file_path = dir.path().join("checkpoint.json");
 
         let mut checkpoint = CheckpointState::new("test-workflow");
-        let source_state = super::super::state::SourceState::new("test-source");
+        let source_state = super::super::state::SourceState::new();
         checkpoint.add_source_state("test-source", source_state);
 
         checkpoint.save_to_file(&file_path).unwrap();

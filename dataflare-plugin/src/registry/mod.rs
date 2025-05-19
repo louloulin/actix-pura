@@ -33,7 +33,7 @@ impl PluginRegistry {
 
     /// Register a plugin
     pub fn register_plugin(&mut self, metadata: PluginMetadata, plugin: Box<dyn ProcessorPlugin + Send + Sync>) -> Result<()> {
-        let plugin_id = metadata.id.clone();
+        let plugin_id = metadata.name.clone();
         self.plugins.insert(plugin_id.clone(), metadata);
         self.processor_plugins.insert(plugin_id, plugin);
         Ok(())
@@ -133,26 +133,29 @@ mod tests {
     #[test]
     fn test_plugin_registry() {
         let mut registry = PluginRegistry::new();
-        
+
         let metadata = PluginMetadata {
-            id: "test-plugin".to_string(),
             name: "Test Plugin".to_string(),
             version: "1.0.0".to_string(),
+            description: "Test Plugin Description".to_string(),
             author: "Test Author".to_string(),
             plugin_type: PluginType::Processor,
+            input_schema: None,
+            output_schema: None,
+            config_schema: None,
         };
-        
+
         let plugin = Box::new(MockProcessorPlugin::new()) as Box<dyn ProcessorPlugin + Send + Sync>;
-        
+
         registry.register_plugin(metadata.clone(), plugin).unwrap();
-        
-        let retrieved_metadata = registry.get_plugin(&metadata.id).unwrap();
-        assert_eq!(retrieved_metadata.id, metadata.id);
+
+        let plugin_id = "test-plugin";
+        let retrieved_metadata = registry.get_plugin(plugin_id).unwrap();
         assert_eq!(retrieved_metadata.name, metadata.name);
-        
+
         let plugins = registry.list_plugins();
         assert_eq!(plugins.len(), 1);
-        
+
         let processor_plugins = registry.list_plugins_by_type(PluginType::Processor);
         assert_eq!(processor_plugins.len(), 1);
     }

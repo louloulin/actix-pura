@@ -13,7 +13,7 @@ use crate::actor::{
     DataFlareActor, Initialize, Finalize, GetStatus, ActorStatus
 };
 
-use crate::error::{DataFlareError, Result};
+use dataflare_core::error::{DataFlareError, Result};
 
 /// Tipo de actor supervisado
 #[derive(Clone)]
