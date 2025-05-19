@@ -4,7 +4,7 @@
 
 use serde_json::json;
 use dataflare::connector::csv::CsvSourceConnector;
-use dataflare::connector::SourceConnector;
+use dataflare::connector::source::SourceConnector;
 use dataflare::error::Result;
 use futures::StreamExt;
 

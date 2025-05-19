@@ -19,15 +19,16 @@ pub use dataflare_core::{
 
 // Re-exports from runtime crate
 pub use dataflare_runtime::{
-    workflow::{Workflow, WorkflowBuilder, WorkflowParser, YamlWorkflowParser},
+    workflow::{Workflow, WorkflowBuilder, WorkflowParser, YamlWorkflowParser, WorkflowTemplateManager, TemplateParameterValues},
     executor::WorkflowExecutor,
     RuntimeMode,
 };
+pub use dataflare_core::message::WorkflowProgress;
 
 // Re-exports from connector crate
 pub use dataflare_connector::{
     source::SourceConnector,
-    destination::DestinationConnector,
+    destination::{DestinationConnector, WriteMode},
     registry::{create_connector, get_connector, ConnectorRegistry, register_connector},
 };
 
@@ -45,7 +46,7 @@ pub use dataflare_processor::{
 // Re-exports from plugin crate
 pub use dataflare_plugin::{
     plugin::{PluginManager, PluginConfig, PluginMetadata, PluginType, ProcessorPlugin},
-    wasm::WasmProcessor,
+    wasm::{WasmProcessor, create_example_wasm_module},
     registry::{register_plugin, get_plugin, list_plugins},
 };
 
@@ -75,6 +76,69 @@ pub use dataflare_cloud::{
     scheduler::TaskScheduler,
     coordinator::StateCoordinator,
 };
+
+// Export modules for direct access
+/// Error types for DataFlare
+pub mod error {
+    pub use dataflare_core::error::*;
+}
+
+/// Message types for DataFlare
+pub mod message {
+    pub use dataflare_core::message::*;
+}
+
+/// Data model types for DataFlare
+pub mod model {
+    pub use dataflare_core::model::*;
+}
+
+/// Connector system for DataFlare
+pub mod connector {
+    pub use dataflare_connector::*;
+
+    /// Source connectors
+    pub mod source {
+        pub use dataflare_connector::source::*;
+    }
+
+    /// Destination connectors
+    pub mod destination {
+        pub use dataflare_connector::destination::*;
+    }
+
+    /// CSV connectors
+    pub mod csv {
+        pub use dataflare_connector::csv::*;
+    }
+
+    /// PostgreSQL connectors
+    pub mod postgres {
+        pub use dataflare_connector::postgres::*;
+    }
+}
+
+/// Data processors for DataFlare
+pub mod processor {
+    pub use dataflare_processor::*;
+}
+
+/// Workflow system for DataFlare
+pub mod workflow {
+    pub use dataflare_runtime::workflow::*;
+}
+
+/// Plugin system for DataFlare
+pub mod plugin {
+    pub use dataflare_plugin::registry::*;
+    pub use dataflare_plugin::plugin::*;
+    pub use dataflare_plugin::wasm::*;
+}
+
+/// State management for DataFlare
+pub mod state {
+    pub use dataflare_state::*;
+}
 
 /// Version of the DataFlare framework
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
