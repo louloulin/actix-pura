@@ -3,14 +3,7 @@
 //! DataFlare is a data integration framework for the Actix actor system that provides
 //! ETL (Extract, Transform, Load) capabilities.
 //!
-//! This framework implements a distributed data flow system that supports:
-//! - Data extraction from multiple sources
-//! - Data transformation using configurable processors
-//! - Data loading to various destinations
-//! - Support for full, incremental, and CDC (Change Data Capture) collection modes
-//! - Actor-based architecture for distributed processing
-//! - Integration with WASM plugin system
-//! - Edge and cloud deployment modes
+//! This is the main package that re-exports functionality from the modular crates.
 
 #![warn(unsafe_code)]
 #![warn(missing_docs)]
