@@ -7,14 +7,14 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/actix/actix"
 
 [dependencies]
-dataflare-core = { path = "../dataflare-core" }
-dataflare-runtime = { path = "../dataflare-runtime", features = ["full"] }
-dataflare-connector = { path = "../dataflare-connector" }
-dataflare-processor = { path = "../dataflare-processor" }
-dataflare-plugin = { path = "../dataflare-plugin" }
-dataflare-state = { path = "../dataflare-state" }
-dataflare-edge = { path = "../dataflare-edge", optional = true }
-dataflare-cloud = { path = "../dataflare-cloud", optional = true }
+dataflare-core = { path = "core" }
+dataflare-runtime = { path = "runtime", features = ["full"] }
+dataflare-connector = { path = "connector" }
+dataflare-processor = { path = "processor" }
+dataflare-plugin = { path = "plugin" }
+dataflare-state = { path = "state" }
+dataflare-edge = { path = "edge", optional = true }
+dataflare-cloud = { path = "cloud", optional = true }
 # 移除 dataflare-cli 依赖，避免循环依赖
 actix = { path = "../actix" }
 actix-broker = { path = "../actix-broker" }
@@ -50,3 +50,4 @@ tokio-test = "0.4.3"
 [[bench]]
 name = "dataflare_benchmarks"
 harness = false
+

@@ -92,7 +92,7 @@ mod tests {
         assert!(checkpoint.source_states.is_empty());
         assert!(checkpoint.metadata.is_empty());
 
-        let source_state = super::super::state::SourceState::new("test-source");
+        let source_state = super::super::state::SourceState::new();
         checkpoint.add_source_state("test-source", source_state.clone());
 
         assert_eq!(checkpoint.source_states.len(), 1);

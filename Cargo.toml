@@ -6,15 +6,15 @@ members = [
     "actix-derive",
     "actix-cluster",
     "dataflare",
-    "dataflare-core",
-    "dataflare-runtime",
-    "dataflare-connector",
-    "dataflare-processor",
-    "dataflare-plugin",
-    "dataflare-state",
-    "dataflare-edge",
-    "dataflare-cloud",
-    "dataflare-cli",
+    "dataflare/core",
+    "dataflare/runtime",
+    "dataflare/connector",
+    "dataflare/processor",
+    "dataflare/plugin",
+    "dataflare/state",
+    "dataflare/edge",
+    "dataflare/cloud",
+    "dataflare/cli",
     "examples/chat_system",
     "examples/task_processor",
     "examples/http_api",
@@ -35,15 +35,15 @@ actix-broker = { path = "actix-broker" }
 actix_derive = { path = "actix-derive" }
 actix-cluster = { path = "actix-cluster" }
 dataflare = { path = "dataflare" }
-dataflare-core = { path = "dataflare-core" }
-dataflare-runtime = { path = "dataflare-runtime" }
-dataflare-connector = { path = "dataflare-connector" }
-dataflare-processor = { path = "dataflare-processor" }
-dataflare-plugin = { path = "dataflare-plugin" }
-dataflare-state = { path = "dataflare-state" }
-dataflare-edge = { path = "dataflare-edge" }
-dataflare-cloud = { path = "dataflare-cloud" }
-dataflare-cli = { path = "dataflare-cli" }
+dataflare-core = { path = "dataflare/core" }
+dataflare-runtime = { path = "dataflare/runtime" }
+dataflare-connector = { path = "dataflare/connector" }
+dataflare-processor = { path = "dataflare/processor" }
+dataflare-plugin = { path = "dataflare/plugin" }
+dataflare-state = { path = "dataflare/state" }
+dataflare-edge = { path = "dataflare/edge" }
+dataflare-cloud = { path = "dataflare/cloud" }
+dataflare-cli = { path = "dataflare/cli" }
 
 [profile.release]
 lto = true

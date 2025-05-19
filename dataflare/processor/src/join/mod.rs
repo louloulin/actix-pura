@@ -357,7 +357,7 @@ mod tests {
         user2.metadata.insert("join_side".to_string(), "right".into());
 
         // 处理右侧记录
-        processor.process_record(&user1, None).await.unwrap();
+        processor.process_record(&user1).await.unwrap();
         processor.process_record(&user2, None).await.unwrap();
 
         // 创建左侧数据集记录

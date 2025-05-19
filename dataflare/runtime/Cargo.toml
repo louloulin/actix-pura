@@ -7,8 +7,8 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/actix/actix"
 
 [dependencies]
-dataflare-core = { path = "../dataflare-core" }
-actix = { path = "../actix" }
+dataflare-core = { path = "../core" }
+actix = { path = "../../actix" }
 actix-rt = "2.9.0"
 tokio = { version = "1.35.1", features = ["full"] }
 futures = "0.3.30"
@@ -24,8 +24,8 @@ chrono = { version = "=0.4.39", features = ["serde"] }
 uuid = { version = "1.6.1", features = ["v4", "serde"] }
 
 # Optional dependencies for specific features
-dataflare-connector = { path = "../dataflare-connector", optional = true }
-dataflare-processor = { path = "../dataflare-processor", optional = true }
+dataflare-connector = { path = "../connector", optional = true }
+dataflare-processor = { path = "../processor", optional = true }
 
 [features]
 default = ["with-connectors", "with-processors"]

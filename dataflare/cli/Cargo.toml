@@ -8,22 +8,22 @@ repository = "https://github.com/actix/actix"
 
 [dependencies]
 # Core DataFlare components
-dataflare-core = { path = "../dataflare-core" }
-dataflare-runtime = { path = "../dataflare-runtime", features = ["full"] }
-dataflare-connector = { path = "../dataflare-connector" }
-dataflare-processor = { path = "../dataflare-processor" }
-dataflare-plugin = { path = "../dataflare-plugin" }
-dataflare-state = { path = "../dataflare-state" }
+dataflare-core = { path = "../core" }
+dataflare-runtime = { path = "../runtime", features = ["full"] }
+dataflare-connector = { path = "../connector" }
+dataflare-processor = { path = "../processor" }
+dataflare-plugin = { path = "../plugin" }
+dataflare-state = { path = "../state" }
 
 # Optional components
-dataflare-edge = { path = "../dataflare-edge", optional = true }
-dataflare-cloud = { path = "../dataflare-cloud", optional = true }
+dataflare-edge = { path = "../edge", optional = true }
+dataflare-cloud = { path = "../cloud", optional = true }
 
 # Actix dependencies
-actix = { path = "../actix" }
+actix = { path = "../../actix" }
 actix-rt = "2.9.0"
-actix-broker = { path = "../actix-broker" }
-actix-cluster = { path = "../actix-cluster", optional = true }
+actix-broker = { path = "../../actix-broker" }
+actix-cluster = { path = "../../actix-cluster", optional = true }
 
 # Other dependencies
 tokio = { version = "1.35.1", features = ["full"] }
@@ -37,7 +37,7 @@ anyhow = "1.0.93"
 log = "0.4.20"
 env_logger = "0.10.1"
 async-trait = "0.1.77"
-# dataflare = { version = "0.1.0", path = "../dataflare" }
+# dataflare = { version = "0.1.0", path = "../" }
 
 [[bin]]
 name = "dataflare"

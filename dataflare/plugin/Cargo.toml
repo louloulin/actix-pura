@@ -7,8 +7,8 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/actix/actix"
 
 [dependencies]
-dataflare-core = { path = "../dataflare-core" }
-actix = { path = "../actix" }
+dataflare-core = { path = "../core" }
+actix = { path = "../../actix" }
 tokio = { version = "1.35.1", features = ["full"] }
 futures = "0.3.30"
 serde = { version = "1.0.193", features = ["derive"] }
