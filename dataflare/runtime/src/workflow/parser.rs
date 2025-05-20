@@ -5,9 +5,7 @@
 use std::collections::{HashMap, HashSet};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::algo::toposort;
-use petgraph::visit::EdgeRef;
 use petgraph::dot::{Dot, Config};
-use petgraph::algo::kosaraju_scc;
 
 use dataflare_core::error::{DataFlareError, Result};
 use crate::workflow::Workflow;

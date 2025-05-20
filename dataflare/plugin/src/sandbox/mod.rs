@@ -4,7 +4,6 @@
 
 use dataflare_core::error::{DataFlareError, Result};
 use wasmtime::{Engine, Linker, Module, Store};
-use std::sync::Arc;
 
 /// Plugin sandbox configuration
 #[derive(Debug, Clone)]
@@ -58,7 +57,7 @@ impl PluginSandbox {
 
     /// Create a new store with the given data
     pub fn create_store<T>(&self, data: T) -> Store<T> {
-        let mut store = Store::new(&self.engine, data);
+        let store = Store::new(&self.engine, data);
 
         // Set fuel limit based on max execution time
         // This is a rough approximation - 1 fuel unit ~= 100 instructions
@@ -72,7 +71,7 @@ impl PluginSandbox {
 
     /// Create a new linker with the given store
     pub fn create_linker<T>(&self, store: &mut Store<T>) -> Result<Linker<T>> {
-        let mut linker = Linker::new(&self.engine);
+        let linker = Linker::new(&self.engine);
 
         // Add WASI support if enabled
         if self.config.enable_wasi {

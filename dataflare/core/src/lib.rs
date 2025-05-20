@@ -15,6 +15,7 @@ pub mod utils;
 pub mod state;
 pub mod connector;
 pub mod processor;
+pub mod interface;
 
 // Re-exports for convenience
 pub use error::{DataFlareError, Result};
@@ -28,6 +29,12 @@ pub use connector::{
 };
 pub use processor::{
     Processor, ProcessorState, ProcessorType
+};
+
+// Interface re-exports
+pub use interface::{
+    DataProcessor, DataReader, DataWriter, DataTransformer,
+    Initializable, Configurable, Monitorable, Lifecycle, WorkflowComponent
 };
 
 /// Version of the DataFlare Core module

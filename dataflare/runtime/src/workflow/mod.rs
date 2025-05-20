@@ -1,18 +1,25 @@
-//! Módulo de flujo de trabajo para DataFlare
+//! # DataFlare Workflow Module
 //!
-//! Define las estructuras y funcionalidades para definir y ejecutar flujos de trabajo.
+//! This module defines the structures and functionality for defining and executing workflows.
+//! It provides both the original workflow implementation and a new, improved workflow engine
+//! that follows the dependency inversion principle and uses the new actor message system.
 
 mod builder;
 mod executor;
 mod parser;
 mod template;
 mod yaml_parser;
+mod engine;
 
 pub use builder::WorkflowBuilder;
 pub use executor::WorkflowExecutor;
 pub use parser::WorkflowParser;
 pub use template::{WorkflowTemplate, WorkflowTemplateManager, TemplateParameter, TemplateParameterValues};
 pub use yaml_parser::YamlWorkflowParser;
+
+// New workflow engine exports
+pub use engine::{WorkflowEngine, WorkflowDefinition, ComponentConfig, ExecutionMode, WorkflowStatus,
+    WorkflowStats, ComponentStats, WorkflowProgress, WorkflowOptions};
 
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};

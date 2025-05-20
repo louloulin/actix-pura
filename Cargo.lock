@@ -1621,6 +1621,7 @@ name = "dataflare"
 version = "0.1.0"
 dependencies = [
  "actix",
+ "chrono",
  "clap 4.5.38",
  "dataflare-cli",
  "dataflare-connector",
@@ -1630,10 +1631,13 @@ dependencies = [
  "dataflare-runtime",
  "dataflare-state",
  "env_logger 0.10.2",
+ "futures",
+ "futures-util",
  "log",
  "rustc_version_runtime",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 

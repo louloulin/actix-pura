@@ -9,8 +9,7 @@ use std::sync::{Arc, RwLock};
 
 use actix::prelude::*;
 use actix::dev::ToEnvelope;
-use actix::WeakAddr;
-use log::{debug, error, warn};
+use log::{debug, warn};
 use uuid::Uuid;
 
 use dataflare_core::error::{DataFlareError, Result};

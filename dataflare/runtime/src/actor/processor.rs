@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use actix::prelude::*;
-use log::{debug, error, info, warn};
+use log::{error, info};
 use chrono::Utc;
 
 use dataflare_core::{

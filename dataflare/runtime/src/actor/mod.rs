@@ -1,6 +1,8 @@
-//! Módulo de actores para DataFlare
+//! # DataFlare Actor System
 //!
-//! Define los actores que componen el sistema DataFlare.
+//! This module defines the actors that make up the DataFlare system.
+//! It provides a unified actor model for data processing, with support
+//! for message passing, supervision, and lifecycle management.
 
 mod source;
 mod processor;
@@ -10,15 +12,21 @@ pub mod supervisor;
 pub mod message_bus;
 pub mod router;
 pub mod pool;
+pub mod message_system;
 
 pub use source::SourceActor;
 pub use processor::ProcessorActor;
 pub use destination::DestinationActor;
 pub use workflow::WorkflowActor;
 pub use supervisor::SupervisorActor;
-pub use message_bus::{MessageBus, DataFlareMessage, ActorId, TraceInfo, MessageHandler};
-pub use router::{MessageRouter, RouterActor, RouterConfig, RouterStats, Tracer, RouteMessage, GetRouterStats, ResetRouterStats};
+pub use message_bus::{MessageBus, DataFlareMessage, ActorId as OldActorId, TraceInfo, MessageHandler as OldMessageHandler};
+pub use router::{MessageRouter as OldMessageRouter, RouterActor, RouterConfig, RouterStats, Tracer, RouteMessage, GetRouterStats, ResetRouterStats};
 pub use pool::{ActorPool, PoolBuilder, PoolConfig, PoolStrategy, StopWorker};
+
+// New message system exports
+pub use message_system::{ActorId, ActorRole, ActorStatus as NewActorStatus, MessageEnvelope, MessagePayload,
+    ActorCommand, ActorQuery, ActorResponse, ActorEvent, MessageResponse, MessageHandler, DataFlareActor as NewDataFlareActor,
+    ActorRegistry, MessageRouter};
 
 use actix::prelude::*;
 use dataflare_core::error::Result;

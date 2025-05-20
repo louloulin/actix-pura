@@ -3,20 +3,16 @@
 //! Proporciona funcionalidades para ejecutar flujos de trabajo.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use actix::prelude::*;
-use log::{debug, error, info, warn};
-use futures::future::{self, Future, FutureExt};
-use serde_json::Value;
-use chrono::Utc;
+use log::{debug, info, warn};
+use futures::future::{self, FutureExt};
 
 use dataflare_core::{
     error::{DataFlareError, Result},
-    message::{WorkflowProgress, WorkflowPhase},
+    message::WorkflowProgress,
     processor::Processor,
     state::SourceState,
 };
-use dataflare_connector::registry::create_connector;
 use dataflare_processor::{
     mapping::MappingProcessor,
     filter::FilterProcessor,

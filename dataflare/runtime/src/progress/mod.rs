@@ -6,9 +6,9 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
-use log::{debug, info, warn, error};
+use log::{debug, warn, error};
 use serde::{Serialize, Deserialize};
-use dataflare_core::message::{WorkflowProgress, WorkflowPhase};
+use dataflare_core::message::WorkflowProgress;
 use dataflare_core::error::{Result, DataFlareError};
 use actix::prelude::*;
 use reqwest;
@@ -16,10 +16,6 @@ use futures::channel::mpsc::{channel, Sender, Receiver};
 use futures::stream::Stream;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use futures::StreamExt;
-use std::time::Duration;
-use tokio::time::sleep;
-use chrono::Utc;
 use serde_json;
 
 /// Progress callback types supported by DataFlare

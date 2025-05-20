@@ -15,7 +15,7 @@ use wasmtime::{Engine, Module, Store, Instance, InstancePre, Linker, Caller, Val
 use dataflare_core::error::{DataFlareError, Result};
 use dataflare_core::message::DataRecord;
 
-use crate::wasm::{WasmMemory, WasmProcessor, create_example_wasm_module};
+use crate::wasm::WasmProcessor;
 
 /// 插件类型
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

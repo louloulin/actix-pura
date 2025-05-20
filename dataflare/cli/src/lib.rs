@@ -15,9 +15,8 @@ use std::time::Instant;
 use dataflare_connector::registry::{get_registered_source_connectors, get_registered_destination_connectors};
 use dataflare_processor::registry::get_processor_names;
 use dataflare_plugin::{
-    registry::{list_plugins, register_plugin, get_plugin}, 
-    plugin::{PluginManager, PluginConfig, PluginMetadata},
-    wasm::WasmProcessor
+    registry::list_plugins, 
+    plugin::{PluginManager, PluginMetadata}
 };
 use dataflare_runtime::{
     workflow::{YamlWorkflowParser}, 
@@ -25,7 +24,6 @@ use dataflare_runtime::{
     RuntimeMode
 };
 use dataflare_core::message::{WorkflowProgress, WorkflowPhase};
-use dataflare_core::error::Result as DataFlareResult;
 use serde_json;
 
 /// Version of the DataFlare CLI module

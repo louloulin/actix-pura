@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use actix::prelude::*;
-use log::{debug, error, info, warn};
+use log::{error, info};
 
 use dataflare_core::error::{DataFlareError, Result};
 
@@ -360,7 +360,7 @@ where
     }
     
     /// Build the actor pool
-    pub fn build(mut self) -> Result<(Arc<std::sync::Mutex<ActorPool<A>>>, Addr<PoolMonitor<A>>)> {
+    pub fn build(self) -> Result<(Arc<std::sync::Mutex<ActorPool<A>>>, Addr<PoolMonitor<A>>)> {
         let factory = self.factory.ok_or_else(|| {
             DataFlareError::Actor("Actor factory function not provided".to_string())
         })?;
