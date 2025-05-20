@@ -26,6 +26,7 @@ use dataflare_runtime::{
 };
 use dataflare_core::message::{WorkflowProgress, WorkflowPhase};
 use dataflare_core::error::Result as DataFlareResult;
+use serde_json;
 
 /// Version of the DataFlare CLI module
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -97,6 +98,13 @@ pub enum PluginCommands {
     /// List installed plugins
     #[clap(name = "list")]
     List,
+
+    /// Show detailed information about a plugin
+    #[clap(name = "info")]
+    Info {
+        /// Plugin ID
+        id: String,
+    },
 
     /// Install a plugin
     #[clap(name = "install")]
@@ -230,20 +238,24 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Plugins { command } => {
             match command {
                 PluginCommands::List => {
-                    println!("Installed plugins:");
                     let plugins = list_all_plugins();
-                    
-                    if plugins.is_empty() {
-                        println!("  No plugins installed");
-                    } else {
-                        for plugin in plugins {
-                            println!("  - {} (v{}): {}", 
-                                     plugin.name, 
-                                     plugin.version,
-                                     plugin.description);
+                    println!("{}", format_plugin_list(&plugins));
+                }
+
+                PluginCommands::Info { id } => {
+                    match get_plugin_details(&id) {
+                        Ok(Some(content)) => {
+                            println!("Plugin details for '{}':", id);
+                            println!("{}", content);
+                        },
+                        Ok(None) => {
+                            println!("Plugin '{}' not found", id);
+                        },
+                        Err(e) => {
+                            return Err(format!("Failed to get plugin details: {}", e).into());
                         }
                     }
-                }
+                },
 
                 PluginCommands::Install { path } => {
                     println!("Installing plugin from: {}", path);
@@ -598,6 +610,102 @@ pub fn list_all_plugins() -> Vec<dataflare_plugin::plugin::PluginMetadata> {
     list_plugins()
 }
 
+/// Get detailed plugin information
+pub fn get_plugin_details(plugin_id: &str) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    // Check if plugin directory exists
+    let plugins_dir = PathBuf::from("plugins");
+    if !plugins_dir.exists() {
+        return Ok(None);
+    }
+    
+    // Look for metadata file
+    let metadata_pattern = format!("{}.meta.json", plugin_id);
+    
+    for entry in fs::read_dir(plugins_dir)? {
+        if let Ok(entry) = entry {
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            if file_name.ends_with(".meta.json") && file_name.starts_with(plugin_id) {
+                // Read metadata file
+                let mut file = File::open(entry.path())?;
+                let mut content = String::new();
+                file.read_to_string(&mut content)?;
+                
+                return Ok(Some(content));
+            }
+        }
+    }
+    
+    Ok(None)
+}
+
+/// Format plugin list for display
+pub fn format_plugin_list(plugins: &[dataflare_plugin::plugin::PluginMetadata]) -> String {
+    if plugins.is_empty() {
+        return "No plugins installed".to_string();
+    }
+    
+    let mut result = String::new();
+    result.push_str("Installed plugins:\n");
+    
+    // Calculate column widths
+    let name_width = plugins.iter().map(|p| p.name.len()).max().unwrap_or(4).max(4);
+    let version_width = plugins.iter().map(|p| p.version.len()).max().unwrap_or(7).max(7);
+    let type_width = plugins.iter().map(|p| format!("{:?}", p.plugin_type).len()).max().unwrap_or(4).max(4);
+    
+    // Add header
+    result.push_str(&format!(
+        "┌{:─^width$}┬{:─^version_width$}┬{:─^type_width$}┬{:─^50}┐\n",
+        "", "", "", "",
+        width = name_width,
+        version_width = version_width,
+        type_width = type_width
+    ));
+    
+    result.push_str(&format!(
+        "│ {:width$} │ {:version_width$} │ {:type_width$} │ {:50} │\n",
+        "Name", "Version", "Type", "Description",
+        width = name_width,
+        version_width = version_width,
+        type_width = type_width
+    ));
+    
+    result.push_str(&format!(
+        "├{:─^width$}┼{:─^version_width$}┼{:─^type_width$}┼{:─^50}┤\n",
+        "", "", "", "",
+        width = name_width,
+        version_width = version_width,
+        type_width = type_width
+    ));
+    
+    // Add plugins
+    for plugin in plugins {
+        // Truncate description if too long
+        let description = if plugin.description.len() > 47 {
+            format!("{}...", &plugin.description[..47])
+        } else {
+            plugin.description.clone()
+        };
+        
+        result.push_str(&format!(
+            "│ {:width$} │ {:version_width$} │ {:type_width$} │ {:50} │\n",
+            plugin.name, plugin.version, format!("{:?}", plugin.plugin_type), description,
+            width = name_width,
+            version_width = version_width,
+            type_width = type_width
+        ));
+    }
+    
+    result.push_str(&format!(
+        "└{:─^width$}┴{:─^version_width$}┴{:─^type_width$}┴{:─^50}┘\n",
+        "", "", "", "",
+        width = name_width,
+        version_width = version_width,
+        type_width = type_width
+    ));
+    
+    result
+}
+
 /// Initialize DataFlare
 pub fn init() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
@@ -624,14 +732,14 @@ pub fn execute_workflow(workflow_path: &Path, mode: RuntimeMode) -> Result<(), B
     
     // Execute in the Actix system
     system.block_on(async {
-        // Create a workflow executor
-        // Note: Current API doesn't have a with_runtime_mode method
-        let mut executor = WorkflowExecutor::new();
+        // Create a workflow executor with the specified runtime mode
+        let mut executor = WorkflowExecutor::new()
+            .with_runtime_mode(mode);
         
-        // Set progress callback
-        executor = executor.with_progress_callback(Box::new(|progress| {
+        // Add progress callback using the new API
+        executor.add_progress_callback(|progress| {
             display_progress(progress);
-        }));
+        })?;
         
         // Initialize the executor
         if let Err(e) = executor.initialize() {
@@ -664,31 +772,67 @@ pub fn execute_workflow(workflow_path: &Path, mode: RuntimeMode) -> Result<(), B
 
 /// Display workflow progress
 fn display_progress(progress: WorkflowProgress) {
-    // Display progress messages for the workflow
     let workflow_id = &progress.workflow_id;
-    let message = &progress.message;
     
     match progress.phase {
         WorkflowPhase::Initializing => {
             println!("🚀 Initializing workflow: {}", workflow_id);
         }
         WorkflowPhase::Extracting => {
-            println!("📥 Extracting data: {} ({}%)", workflow_id, (progress.progress * 100.0) as u32);
+            let source_info = progress.source_id.as_deref().unwrap_or("");
+            let progress_percent = (progress.progress * 100.0) as u32;
+            let records = progress.records_processed.unwrap_or(0);
+            
+            if !source_info.is_empty() && records > 0 {
+                println!("📥 Extracting data from {}: {} ({}%, {} records)", source_info, workflow_id, progress_percent, records);
+            } else if !source_info.is_empty() {
+                println!("📥 Extracting data from {}: {} ({}%)", source_info, workflow_id, progress_percent);
+            } else {
+                println!("📥 Extracting data: {} ({}%)", workflow_id, progress_percent);
+            }
         }
         WorkflowPhase::Transforming => {
-            println!("⚙️ Transforming data: {} ({}%)", workflow_id, (progress.progress * 100.0) as u32);
+            let transform_info = progress.transformation_id.as_deref().unwrap_or("");
+            let progress_percent = (progress.progress * 100.0) as u32;
+            let records = progress.records_processed.unwrap_or(0);
+            
+            if !transform_info.is_empty() && records > 0 {
+                println!("⚙️ Transforming data with {}: {} ({}%, {} records)", transform_info, workflow_id, progress_percent, records);
+            } else if !transform_info.is_empty() {
+                println!("⚙️ Transforming data with {}: {} ({}%)", transform_info, workflow_id, progress_percent);
+            } else {
+                println!("⚙️ Transforming data: {} ({}%)", workflow_id, progress_percent);
+            }
         }
         WorkflowPhase::Loading => {
-            println!("📤 Loading data: {} ({}%)", workflow_id, (progress.progress * 100.0) as u32);
+            let dest_info = progress.destination_id.as_deref().unwrap_or("");
+            let progress_percent = (progress.progress * 100.0) as u32;
+            let records = progress.records_processed.unwrap_or(0);
+            
+            if !dest_info.is_empty() && records > 0 {
+                println!("📤 Loading data to {}: {} ({}%, {} records)", dest_info, workflow_id, progress_percent, records);
+            } else if !dest_info.is_empty() {
+                println!("📤 Loading data to {}: {} ({}%)", dest_info, workflow_id, progress_percent);
+            } else {
+                println!("📤 Loading data: {} ({}%)", workflow_id, progress_percent);
+            }
         }
         WorkflowPhase::Finalizing => {
             println!("📦 Finalizing workflow: {}", workflow_id);
         }
         WorkflowPhase::Completed => {
-            println!("✅ Workflow completed: {}", workflow_id);
+            if let Some(duration) = progress.duration_ms {
+                println!("✅ Workflow completed: {} (took {:.2} seconds)", workflow_id, duration as f64 / 1000.0);
+            } else {
+                println!("✅ Workflow completed: {}", workflow_id);
+            }
         }
         WorkflowPhase::Error => {
-            println!("❌ Workflow failed: {} - {}", workflow_id, message);
+            if let Some(error) = &progress.error {
+                println!("❌ Workflow failed: {} - {}", workflow_id, error);
+            } else {
+                println!("❌ Workflow failed: {} - {}", workflow_id, progress.message);
+            }
         }
     }
 }
@@ -709,7 +853,7 @@ pub fn install_plugin(path: &str) -> Result<PluginMetadata, Box<dyn std::error::
     
     // Create plugin manager with default plugin directory
     let plugin_dir = std::path::PathBuf::from("plugins");
-    let plugin_manager = PluginManager::new(plugin_dir);
+    let _plugin_manager = PluginManager::new(plugin_dir);
     
     // Load the plugin
     let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
@@ -718,17 +862,21 @@ pub fn install_plugin(path: &str) -> Result<PluginMetadata, Box<dyn std::error::
         // Load WASM plugin
         println!("Loading WASM plugin from: {}", path.display());
         
-        // Note: Based on errors, we need to adapt to the actual WasmProcessor API
-        // This is a simplified fallback implementation as the actual API is unclear
-        
-        // Create a plugin metadata from the file name
+        // Extract metadata from filename or try to parse from WASM binary
+        // Format: name-version.wasm
         let file_name = path.file_stem().unwrap_or_default().to_string_lossy();
-        let parts: Vec<&str> = file_name.split('-').collect();
+        let mut parts: Vec<&str> = file_name.split('-').collect();
         
+        // Ensure we have at least name and version
+        if parts.len() < 2 {
+            parts = vec!["unknown", "0.1.0"];
+        }
+        
+        // Create metadata
         let metadata = PluginMetadata {
-            name: parts.get(0).unwrap_or(&"unknown").to_string(),
-            version: parts.get(1).unwrap_or(&"0.1.0").to_string(),
-            description: "WASM plugin".to_string(),
+            name: parts[0].to_string(),
+            version: parts[1].to_string(),
+            description: format!("WASM plugin ({})", file_name),
             author: "Unknown".to_string(),
             plugin_type: dataflare_plugin::plugin::PluginType::Processor,
             input_schema: None,
@@ -736,38 +884,44 @@ pub fn install_plugin(path: &str) -> Result<PluginMetadata, Box<dyn std::error::
             config_schema: None,
         };
         
-        // Check if plugin with same ID already exists
-        let plugin_id = format!("{}-{}", metadata.name, metadata.version);
-        if get_plugin(&plugin_id).is_some() {
-            return Err(format!("Plugin with ID '{}' already exists", plugin_id).into());
-        }
-        
-        // Copy the plugin file to plugins directory
+        // Create plugins directory if it doesn't exist
         let plugins_dir = PathBuf::from("plugins");
         if !plugins_dir.exists() {
             fs::create_dir_all(&plugins_dir)?;
+            println!("Created plugins directory: {}", plugins_dir.display());
         }
+        
+        // Create metadata file
+        let metadata_path = plugins_dir.join(format!("{}-{}.meta.json", metadata.name, metadata.version));
+        let metadata_json = serde_json::to_string_pretty(&metadata)?;
+        let mut metadata_file = File::create(&metadata_path)?;
+        metadata_file.write_all(metadata_json.as_bytes())?;
+        println!("Created plugin metadata: {}", metadata_path.display());
         
         // Copy the plugin file to plugins directory
         let dest_path = plugins_dir.join(path.file_name().unwrap());
         fs::copy(path, &dest_path)?;
-        
         println!("Plugin file copied to: {}", dest_path.display());
+        
+        println!("Plugin '{}' v{} installed successfully.", metadata.name, metadata.version);
         println!("Note: The plugin will be loaded on restart");
         
         Ok(metadata)
     } else {
-        Err(format!("Unsupported plugin format: {}", path.display()).into())
+        Err(format!("Unsupported plugin format: {}. Only .wasm files are supported.", path.display()).into())
     }
 }
 
 /// Remove a plugin
 pub fn remove_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> {
-    // Check if plugin exists
-    let plugin = match get_plugin(plugin_id) {
-        Some(plugin) => plugin,
-        None => return Err(format!("Plugin with ID '{}' not found", plugin_id).into()),
-    };
+    // Check if the plugin ID has the right format (name-version)
+    let parts: Vec<&str> = plugin_id.split('-').collect();
+    if parts.len() < 2 {
+        return Err(format!("Invalid plugin ID format: '{}'. Expected 'name-version'", plugin_id).into());
+    }
+    
+    let plugin_name = parts[0];
+    let plugin_version = parts[1];
     
     // Find the plugin file in plugins directory
     let plugins_dir = PathBuf::from("plugins");
@@ -775,20 +929,16 @@ pub fn remove_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> 
         return Err("Plugins directory not found".into());
     }
     
-    // Currently, we don't have a way to unregister plugins at runtime
-    // This is a limitation that would need to be addressed in the plugin system
-    println!("Note: The plugin will be removed from disk, but may still be registered until restart");
-    
-    // Remove plugin files (based on name pattern)
-    let base_name = format!("{}-{}", plugin.name, plugin.version);
     let mut found = false;
     
-    for entry in fs::read_dir(plugins_dir)? {
+    // Remove plugin binary and metadata
+    for entry in fs::read_dir(&plugins_dir)? {
         if let Ok(entry) = entry {
             let file_name = entry.file_name();
             let file_name_str = file_name.to_string_lossy();
             
-            if file_name_str.starts_with(&base_name) {
+            // Match both the WASM file and metadata file
+            if file_name_str.starts_with(&format!("{}-{}", plugin_name, plugin_version)) {
                 fs::remove_file(entry.path())?;
                 println!("Removed plugin file: {}", entry.path().display());
                 found = true;
@@ -798,7 +948,11 @@ pub fn remove_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> 
     
     if !found {
         println!("Warning: No plugin files were found for '{}'", plugin_id);
+        return Err(format!("Plugin '{}' not found", plugin_id).into());
     }
+    
+    println!("Plugin '{}' removed successfully.", plugin_id);
+    println!("Note: Plugin will be fully unloaded on restart");
     
     Ok(())
 }
@@ -928,7 +1082,89 @@ mod tests {
         }
     }
 
-    // Note: Plugin tests are challenging in a unit test context
-    // because they require actual WASM files and plugin system initialization.
-    // Integration tests would be more appropriate for these features.
+    #[test]
+    fn test_format_plugin_list() {
+        // Create test plugins
+        let plugins = vec![
+            PluginMetadata {
+                name: "test-plugin".to_string(),
+                version: "0.1.0".to_string(),
+                description: "Test plugin for testing".to_string(),
+                author: "Test Author".to_string(),
+                plugin_type: dataflare_plugin::plugin::PluginType::Processor,
+                input_schema: None,
+                output_schema: None,
+                config_schema: None,
+            },
+            PluginMetadata {
+                name: "another-plugin".to_string(),
+                version: "1.0.0".to_string(),
+                description: "Another test plugin".to_string(),
+                author: "Test Author".to_string(),
+                plugin_type: dataflare_plugin::plugin::PluginType::SourceConnector,
+                input_schema: None,
+                output_schema: None,
+                config_schema: None,
+            },
+        ];
+
+        let formatted = format_plugin_list(&plugins);
+        
+        // Verify the table contains expected content
+        assert!(formatted.contains("test-plugin"));
+        assert!(formatted.contains("another-plugin"));
+        assert!(formatted.contains("0.1.0"));
+        assert!(formatted.contains("1.0.0"));
+        assert!(formatted.contains("Processor"));
+        assert!(formatted.contains("SourceConnector"));
+        
+        // Verify table headers
+        assert!(formatted.contains("Name"));
+        assert!(formatted.contains("Version"));
+        assert!(formatted.contains("Type"));
+        assert!(formatted.contains("Description"));
+    }
+
+    #[test]
+    fn test_plugin_management() {
+        // Create a temporary directory for testing
+        let temp_dir = tempdir().unwrap();
+        let plugin_dir = temp_dir.path().join("plugins");
+        fs::create_dir_all(&plugin_dir).unwrap();
+        
+        // Create a test WASM plugin
+        let plugin_path = plugin_dir.join("test-plugin-0.1.0.wasm");
+        let mut file = File::create(&plugin_path).unwrap();
+        file.write_all(b"mock wasm content").unwrap();
+        
+        // Create metadata file
+        let metadata = PluginMetadata {
+            name: "test-plugin".to_string(),
+            version: "0.1.0".to_string(),
+            description: "Test plugin".to_string(),
+            author: "Test Author".to_string(),
+            plugin_type: dataflare_plugin::plugin::PluginType::Processor,
+            input_schema: None,
+            output_schema: None,
+            config_schema: None,
+        };
+        
+        let metadata_path = plugin_dir.join("test-plugin-0.1.0.meta.json");
+        let metadata_json = serde_json::to_string_pretty(&metadata).unwrap();
+        let mut metadata_file = File::create(&metadata_path).unwrap();
+        metadata_file.write_all(metadata_json.as_bytes()).unwrap();
+        
+        // Test plugin details
+        // This test is limited since we can't easily mock the global plugin system
+        // But we can verify file paths and error handling
+        
+        // Test plugin details for non-existent plugin
+        match get_plugin_details("non-existent-plugin") {
+            Ok(None) => {}, // Expected
+            _ => panic!("Expected None result for non-existent plugin"),
+        }
+    }
+    
+    // Note: Complete plugin installation and removal tests
+    // would require more setup and mocking of the plugin registry
 }

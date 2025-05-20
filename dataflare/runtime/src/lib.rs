@@ -10,6 +10,7 @@
 pub mod actor;
 pub mod workflow;
 pub mod executor;
+pub mod progress;
 
 /// Runtime mode for DataFlare
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
