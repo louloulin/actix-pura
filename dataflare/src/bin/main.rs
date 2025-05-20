@@ -14,11 +14,11 @@ use dataflare_processor::registry as processor_registry;
 use dataflare;
 
 #[derive(Parser)]
-#[command(name = "dataflare")]
-#[command(version = env!("CARGO_PKG_VERSION"))]
-#[command(about = "DataFlare 数据集成框架命令行工具", long_about = None)]
+#[clap(name = "dataflare")]
+#[clap(version = env!("CARGO_PKG_VERSION"))]
+#[clap(about = "DataFlare 数据集成框架命令行工具", long_about = None)]
 struct Cli {
-    #[command(subcommand)]
+    #[clap(subcommand)]
     command: Commands,
 }
 
@@ -27,26 +27,26 @@ enum Commands {
     /// 验证 YAML 工作流
     Validate {
         /// YAML 工作流文件路径
-        #[arg(short, long)]
+        #[clap(short, long)]
         file: PathBuf,
 
         /// 是否生成 DOT 图
-        #[arg(short, long)]
+        #[clap(short, long)]
         dot: bool,
     },
 
     /// 执行 YAML 工作流
     Execute {
         /// YAML 工作流文件路径
-        #[arg(short, long)]
+        #[clap(short, long)]
         file: PathBuf,
 
         /// 是否使用增量模式
-        #[arg(short, long)]
+        #[clap(short, long)]
         incremental: bool,
 
         /// 增量状态文件路径（仅在增量模式下使用）
-        #[arg(short, long)]
+        #[clap(short, long)]
         state: Option<PathBuf>,
     },
 

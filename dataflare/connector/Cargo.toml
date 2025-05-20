@@ -8,7 +8,7 @@ repository = "https://github.com/actix/actix"
 
 [dependencies]
 dataflare-core = { path = "../core" }
-actix = "0.13"
+actix = { path = "../../actix" }
 tokio = { version = "1.35.1", features = ["full"] }
 tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4"] }
 mongodb = { version = "2.7.1", features = ["bson-chrono-0_4"] }
