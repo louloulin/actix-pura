@@ -141,11 +141,11 @@ impl WorkflowExecutor {
         let progress_addr = progress_actor.start();
         self.progress_actor = Some(progress_addr);
         
-        // Register legacy callback if provided - 暂时禁用此功能直到解决生命周期问题
-        // TODO: 重新实现legacy callback支持
-        if false && self.legacy_progress_callback.is_some() {
-            warn!("Legacy progress callback is currently disabled");
-        }
+        // Temporarily disable legacy callback support until lifecycle issues are fixed
+        // TODO: Re-implement legacy callback support
+        // if let Some(callback) = &self.legacy_progress_callback {
+        //    // Implementation would go here
+        // }
 
         Ok(())
     }
@@ -434,7 +434,7 @@ mod tests {
         
         // Manually send a progress update via the progress actor
         if let Some(progress_actor) = &executor.progress_actor {
-            // Create test progress
+            // Create test progress directly
             let progress = WorkflowProgress {
                 workflow_id: workflow.id.clone(),
                 phase: WorkflowPhase::Initializing,
@@ -494,7 +494,7 @@ mod tests {
         
         // Manually send a progress update via the progress actor
         if let Some(progress_actor) = &executor.progress_actor {
-            // Create test progress
+            // Create test progress directly
             let progress = WorkflowProgress {
                 workflow_id: workflow.id.clone(),
                 phase: WorkflowPhase::Initializing,

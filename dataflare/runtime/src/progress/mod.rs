@@ -20,6 +20,7 @@ use futures::StreamExt;
 use std::time::Duration;
 use tokio::time::sleep;
 use chrono::Utc;
+use serde_json;
 
 /// Progress callback types supported by DataFlare
 #[derive(Debug, Clone)]
@@ -227,21 +228,14 @@ impl ProgressReporter {
     
     /// Send progress to webhook
     async fn send_webhook(&self, http_client: &reqwest::Client, webhook: &WebhookConfig, progress: &WorkflowProgress) -> Result<()> {
-        // 手动创建JSON，因为WorkflowProgress未实现Serialize特性
-        let payload = format!(
-            r#"{{
-                "workflow_id": {:?},
-                "phase": {:?},
-                "progress": {},
-                "message": {:?},
-                "timestamp": {:?}
-            }}"#,
-            progress.workflow_id,
-            format!("{:?}", progress.phase),
-            progress.progress,
-            progress.message,
-            progress.timestamp
-        );
+        // Manual JSON formatting since WorkflowProgress doesn't implement Serialize here
+        let payload = serde_json::json!({
+            "workflow_id": progress.workflow_id,
+            "phase": format!("{:?}", progress.phase),
+            "progress": progress.progress,
+            "message": progress.message,
+            "timestamp": progress.timestamp
+        }).to_string();
         
         // Prepare request
         let mut request_builder = match webhook.method.to_uppercase().as_str() {

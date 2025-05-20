@@ -733,13 +733,20 @@ pub fn execute_workflow(workflow_path: &Path, mode: RuntimeMode) -> Result<(), B
     // Execute in the Actix system
     system.block_on(async {
         // Create a workflow executor with the specified runtime mode
-        let mut executor = WorkflowExecutor::new()
-            .with_runtime_mode(mode);
+        let mut executor = WorkflowExecutor::new();
+        // Apply the runtime mode
+        match mode {
+            RuntimeMode::Standalone => executor = executor.with_runtime_mode(dataflare_runtime::executor::RuntimeMode::Standalone),
+            RuntimeMode::Edge => executor = executor.with_runtime_mode(dataflare_runtime::executor::RuntimeMode::Edge),
+            RuntimeMode::Cloud => executor = executor.with_runtime_mode(dataflare_runtime::executor::RuntimeMode::Cloud),
+        };
         
         // Add progress callback using the new API
-        executor.add_progress_callback(|progress| {
+        if let Err(e) = executor.add_progress_callback(|progress| {
             display_progress(progress);
-        })?;
+        }) {
+            return Err(format!("Failed to add progress callback: {}", e));
+        }
         
         // Initialize the executor
         if let Err(e) = executor.initialize() {
@@ -773,66 +780,35 @@ pub fn execute_workflow(workflow_path: &Path, mode: RuntimeMode) -> Result<(), B
 /// Display workflow progress
 fn display_progress(progress: WorkflowProgress) {
     let workflow_id = &progress.workflow_id;
+    let progress_percent = (progress.progress * 100.0) as u32;
     
     match progress.phase {
         WorkflowPhase::Initializing => {
             println!("🚀 Initializing workflow: {}", workflow_id);
         }
         WorkflowPhase::Extracting => {
-            let source_info = progress.source_id.as_deref().unwrap_or("");
-            let progress_percent = (progress.progress * 100.0) as u32;
-            let records = progress.records_processed.unwrap_or(0);
-            
-            if !source_info.is_empty() && records > 0 {
-                println!("📥 Extracting data from {}: {} ({}%, {} records)", source_info, workflow_id, progress_percent, records);
-            } else if !source_info.is_empty() {
-                println!("📥 Extracting data from {}: {} ({}%)", source_info, workflow_id, progress_percent);
-            } else {
-                println!("📥 Extracting data: {} ({}%)", workflow_id, progress_percent);
-            }
+            println!("📥 Extracting data: {} ({}%)", workflow_id, progress_percent);
+            println!("   {}", progress.message);
         }
         WorkflowPhase::Transforming => {
-            let transform_info = progress.transformation_id.as_deref().unwrap_or("");
-            let progress_percent = (progress.progress * 100.0) as u32;
-            let records = progress.records_processed.unwrap_or(0);
-            
-            if !transform_info.is_empty() && records > 0 {
-                println!("⚙️ Transforming data with {}: {} ({}%, {} records)", transform_info, workflow_id, progress_percent, records);
-            } else if !transform_info.is_empty() {
-                println!("⚙️ Transforming data with {}: {} ({}%)", transform_info, workflow_id, progress_percent);
-            } else {
-                println!("⚙️ Transforming data: {} ({}%)", workflow_id, progress_percent);
-            }
+            println!("⚙️ Transforming data: {} ({}%)", workflow_id, progress_percent);
+            println!("   {}", progress.message);
         }
         WorkflowPhase::Loading => {
-            let dest_info = progress.destination_id.as_deref().unwrap_or("");
-            let progress_percent = (progress.progress * 100.0) as u32;
-            let records = progress.records_processed.unwrap_or(0);
-            
-            if !dest_info.is_empty() && records > 0 {
-                println!("📤 Loading data to {}: {} ({}%, {} records)", dest_info, workflow_id, progress_percent, records);
-            } else if !dest_info.is_empty() {
-                println!("📤 Loading data to {}: {} ({}%)", dest_info, workflow_id, progress_percent);
-            } else {
-                println!("📤 Loading data: {} ({}%)", workflow_id, progress_percent);
-            }
+            println!("📤 Loading data: {} ({}%)", workflow_id, progress_percent);
+            println!("   {}", progress.message);
         }
         WorkflowPhase::Finalizing => {
             println!("📦 Finalizing workflow: {}", workflow_id);
+            println!("   {}", progress.message);
         }
         WorkflowPhase::Completed => {
-            if let Some(duration) = progress.duration_ms {
-                println!("✅ Workflow completed: {} (took {:.2} seconds)", workflow_id, duration as f64 / 1000.0);
-            } else {
-                println!("✅ Workflow completed: {}", workflow_id);
-            }
+            println!("✅ Workflow completed: {}", workflow_id);
+            println!("   {}", progress.message);
         }
         WorkflowPhase::Error => {
-            if let Some(error) = &progress.error {
-                println!("❌ Workflow failed: {} - {}", workflow_id, error);
-            } else {
-                println!("❌ Workflow failed: {} - {}", workflow_id, progress.message);
-            }
+            println!("❌ Workflow failed: {}", workflow_id);
+            println!("   Error: {}", progress.message);
         }
     }
 }
