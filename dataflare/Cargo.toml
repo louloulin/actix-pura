@@ -2,54 +2,32 @@
 name = "dataflare"
 version = "0.1.0"
 edition = "2021"
-description = "Data integration framework module for Actix"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/actix/actix"
+description = "DataFlare - Modern data pipeline framework"
+authors = ["DataFlare Team <team@dataflare.io>"]
+
+[workspace]
+members = [
+    "core",
+    "runtime",
+    "connector",
+    "processor",
+    "plugin",
+    "cli"
+]
 
 [dependencies]
 dataflare-core = { path = "core" }
-dataflare-runtime = { path = "runtime", features = ["full"] }
+dataflare-runtime = { path = "runtime" }
 dataflare-connector = { path = "connector" }
 dataflare-processor = { path = "processor" }
 dataflare-plugin = { path = "plugin" }
-dataflare-state = { path = "state" }
-dataflare-edge = { path = "edge", optional = true }
-dataflare-cloud = { path = "cloud", optional = true }
-# 移除 dataflare-cli 依赖，避免循环依赖
-actix = { path = "../actix" }
-actix-broker = { path = "../actix-broker" }
-actix-cluster = { path = "../actix-cluster", optional = true }
-actix-rt = "2.9.0"
-tokio = { version = "1.35.1", features = ["full"] }
-futures = "0.3.30"
-serde = { version = "1.0.193", features = ["derive"] }
-serde_json = "1.0.108"
-serde_yaml = "0.9.27"
-thiserror = "1.0.56"
-anyhow = "1.0.93"
-log = "0.4.20"
-env_logger = "0.10.1"
-async-trait = "0.1.77"
-clap = { version = "4.5.38", features = ["derive"] }
-rustc_version_runtime = "0.3.0"
+dataflare-cli = { path = "cli" }
 
-[features]
-default = []
-edge = ["dataflare-edge"]
-cloud = ["dataflare-cloud", "actix-cluster"]
-cli = []
-full = ["edge", "cloud", "cli"]
-
-[dev-dependencies]
-criterion = "0.5.1"
-proptest = "1.4.0"
-mockall = "0.12.1"
-tokio-test = "0.4.3"
-tempfile = "3.8.1"
-chrono = { version = "=0.4.39", features = ["serde"] }
-
-# Benchmarks
-[[bench]]
-name = "dataflare_benchmarks"
-harness = false
+actix = "0.13"
+clap = { version = "3.2", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }
+log = "0.4"
+env_logger = "0.10"
 
