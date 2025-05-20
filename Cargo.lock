@@ -48,7 +48,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clap 4.5.38",
- "env_logger",
+ "env_logger 0.10.2",
  "flate2",
  "fnv",
  "futures",
@@ -973,7 +973,7 @@ dependencies = [
  "actix",
  "actix-cluster",
  "actix-rt",
- "env_logger",
+ "env_logger 0.10.2",
  "log",
  "rand 0.8.5",
  "serde",
@@ -1057,8 +1057,10 @@ checksum = "4ea181bf566f71cb9a5d17a59e1871af638180a18fb0035c92ae62b705207123"
 dependencies = [
  "atty",
  "bitflags 1.3.2",
+ "clap_derive 3.2.25",
  "clap_lex 0.2.4",
  "indexmap 1.9.3",
+ "once_cell",
  "strsim 0.10.0",
  "termcolor",
  "textwrap 0.16.2",
@@ -1071,7 +1073,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed93b9805f8ba930df42c2590f05453d5ec36cbb85d018868a5b24d31f6ac000"
 dependencies = [
  "clap_builder",
- "clap_derive",
+ "clap_derive 4.5.32",
 ]
 
 [[package]]
@@ -1084,6 +1086,19 @@ dependencies = [
  "anstyle",
  "clap_lex 0.7.4",
  "strsim 0.11.1",
+]
+
+[[package]]
+name = "clap_derive"
+version = "3.2.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae6371b8bdc8b7d3959e9cf7b22d4435ef3e79e138688421ec654acf8c81b008"
+dependencies = [
+ "heck 0.4.1",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -1357,6 +1372,7 @@ dependencies = [
  "ciborium",
  "clap 3.2.25",
  "criterion-plot",
+ "futures",
  "itertools 0.10.5",
  "lazy_static",
  "num-traits",
@@ -1368,6 +1384,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "tinytemplate",
+ "tokio",
  "walkdir",
 ]
 
@@ -1604,35 +1621,18 @@ name = "dataflare"
 version = "0.1.0"
 dependencies = [
  "actix",
- "actix-broker",
- "actix-cluster",
- "actix-rt",
- "anyhow",
- "async-trait",
- "chrono",
- "clap 4.5.38",
- "criterion 0.5.1",
- "dataflare-cloud",
+ "clap 3.2.25",
+ "dataflare-cli",
  "dataflare-connector",
  "dataflare-core",
- "dataflare-edge",
  "dataflare-plugin",
  "dataflare-processor",
  "dataflare-runtime",
- "dataflare-state",
- "env_logger",
- "futures",
+ "env_logger 0.10.2",
  "log",
- "mockall 0.12.1",
- "proptest",
- "rustc_version_runtime 0.3.0",
  "serde",
  "serde_json",
- "serde_yaml",
- "tempfile",
- "thiserror 1.0.69",
  "tokio",
- "tokio-test",
 ]
 
 [[package]]
@@ -1640,21 +1640,14 @@ name = "dataflare-cli"
 version = "0.1.0"
 dependencies = [
  "actix",
- "actix-broker",
- "actix-cluster",
- "actix-rt",
  "anyhow",
  "async-trait",
- "clap 4.5.38",
- "dataflare-cloud",
+ "clap 3.2.25",
  "dataflare-connector",
  "dataflare-core",
- "dataflare-edge",
- "dataflare-plugin",
  "dataflare-processor",
  "dataflare-runtime",
- "dataflare-state",
- "env_logger",
+ "env_logger 0.10.2",
  "futures",
  "log",
  "serde",
@@ -1727,7 +1720,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "criterion 0.5.1",
- "env_logger",
+ "env_logger 0.10.2",
  "futures",
  "lazy_static",
  "log",
@@ -1826,28 +1819,27 @@ name = "dataflare-runtime"
 version = "0.1.0"
 dependencies = [
  "actix",
- "actix-rt",
  "anyhow",
  "async-trait",
  "chrono",
  "criterion 0.4.0",
  "dataflare-connector",
  "dataflare-core",
- "dataflare-plugin",
  "dataflare-processor",
+ "dotenv",
+ "env_logger 0.10.2",
  "futures",
  "log",
- "mockall 0.12.1",
  "petgraph",
- "proptest",
  "rand 0.8.5",
  "reqwest",
  "serde",
  "serde_json",
  "serde_yaml",
+ "test-log",
  "thiserror 1.0.69",
  "tokio",
- "tokio-test",
+ "tracing",
  "uuid",
 ]
 
@@ -2048,7 +2040,7 @@ dependencies = [
  "actix-cluster",
  "actix-rt",
  "ctrlc",
- "env_logger",
+ "env_logger 0.10.2",
  "log",
  "structopt",
  "tokio",
@@ -2059,6 +2051,12 @@ name = "doc-comment"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
+
+[[package]]
+name = "dotenv"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77c90badedccf4105eca100756a0b1289e191f6fcbdadd3cee1d2f614f97da8f"
 
 [[package]]
 name = "downcast"
@@ -2149,6 +2147,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "env_filter"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "186e05a59d4c50738528153b83b0b0194d3a29507dfec16eccd4b342903397d0"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "env_logger"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2159,6 +2166,18 @@ dependencies = [
  "log",
  "regex",
  "termcolor",
+]
+
+[[package]]
+name = "env_logger"
+version = "0.11.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13c863f0904021b108aa8b2f55046443e6b1ebde8fd4a15c399893aae4fa069f"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "env_filter",
+ "log",
 ]
 
 [[package]]
@@ -2229,7 +2248,7 @@ dependencies = [
  "actix",
  "actix-cluster",
  "actix-rt",
- "env_logger",
+ "env_logger 0.10.2",
  "log",
  "serde",
  "structopt",
@@ -2694,7 +2713,7 @@ dependencies = [
  "actix-cluster",
  "actix-rt",
  "actix-web",
- "env_logger",
+ "env_logger 0.10.2",
  "futures",
  "log",
  "serde",
@@ -3631,6 +3650,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
 
 [[package]]
+name = "matchers"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8263075bb86c5a1b1427b5ae862e8889656f126e9f77c484496e8b47cf5c5558"
+dependencies = [
+ "regex-automata 0.1.10",
+]
+
+[[package]]
 name = "matches"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3778,7 +3806,7 @@ dependencies = [
  "pbkdf2",
  "percent-encoding",
  "rand 0.8.5",
- "rustc_version_runtime 0.2.1",
+ "rustc_version_runtime",
  "rustls 0.21.12",
  "rustls-pemfile",
  "serde",
@@ -4003,6 +4031,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61807f77802ff30975e01f4f071c8ba10c022052f98b3294119f3e615d13e5be"
 
 [[package]]
+name = "nu-ansi-term"
+version = "0.46.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77a8165726e8236064dbb45459242600304b42a5ea24ee2948e18e023bf7ba84"
+dependencies = [
+ "overload",
+ "winapi",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4170,6 +4208,12 @@ name = "os_str_bytes"
 version = "6.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2355d85b9a3786f481747ced0e0ff2ba35213a1f9bd406ed906554d7af805a1"
+
+[[package]]
+name = "overload"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 
 [[package]]
 name = "parking"
@@ -4568,7 +4612,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "rand_xorshift",
- "regex-syntax",
+ "regex-syntax 0.8.5",
  "rusty-fork",
  "tempfile",
  "unarray",
@@ -4881,8 +4925,17 @@ checksum = "b544ef1b4eac5dc2db33ea63606ae9ffcfac26c1416a2806ae0bf5f56b201191"
 dependencies = [
  "aho-corasick",
  "memchr",
- "regex-automata",
- "regex-syntax",
+ "regex-automata 0.4.9",
+ "regex-syntax 0.8.5",
+]
+
+[[package]]
+name = "regex-automata"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c230d73fb8d8c1b9c0b3135c5142a8acee3a0558fb8db5cf1cb65f8d7862132"
+dependencies = [
+ "regex-syntax 0.6.29",
 ]
 
 [[package]]
@@ -4893,7 +4946,7 @@ checksum = "809e8dc61f6de73b46c85f4c96486310fe304c434cfa43669d7b40f711150908"
 dependencies = [
  "aho-corasick",
  "memchr",
- "regex-syntax",
+ "regex-syntax 0.8.5",
 ]
 
 [[package]]
@@ -4901,6 +4954,12 @@ name = "regex-lite"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "53a49587ad06b26609c52e423de037e7f57f20d53535d66e08c695f347df952a"
+
+[[package]]
+name = "regex-syntax"
+version = "0.6.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f162c6dd7b008981e4d40210aca20b4bd0f9b60ca9271061b07f78537722f2e1"
 
 [[package]]
 name = "regex-syntax"
@@ -5102,16 +5161,6 @@ checksum = "d31b7153270ebf48bf91c65ae5b0c00e749c4cfad505f66530ac74950249582f"
 dependencies = [
  "rustc_version 0.2.3",
  "semver 0.9.0",
-]
-
-[[package]]
-name = "rustc_version_runtime"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2dd18cd2bae1820af0b6ad5e54f4a51d0f3fcc53b05f845675074efcc7af071d"
-dependencies = [
- "rustc_version 0.4.1",
- "semver 1.0.26",
 ]
 
 [[package]]
@@ -5452,6 +5501,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sharded-slab"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
 name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5769,7 +5827,7 @@ dependencies = [
  "actix",
  "actix-cluster",
  "actix-rt",
- "env_logger",
+ "env_logger 0.10.2",
  "log",
  "rand 0.8.5",
  "serde",
@@ -5804,6 +5862,28 @@ name = "termtree"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f50febec83f5ee1df3015341d8bd429f2d1cc62bcba7ea2076759d315084683"
+
+[[package]]
+name = "test-log"
+version = "0.2.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7f46083d221181166e5b6f6b1e5f1d499f3a76888826e6cb1d057554157cd0f"
+dependencies = [
+ "env_logger 0.11.8",
+ "test-log-macros",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "test-log-macros"
+version = "0.2.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "888d0c3c6db53c0fdab160d2ed5e12ba745383d3e85813f2ea0f2b1475ab553f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.100",
+]
 
 [[package]]
 name = "textwrap"
@@ -5858,6 +5938,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.100",
+]
+
+[[package]]
+name = "thread_local"
+version = "1.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b9ef9bad013ada3808854ceac7b46812a6465ba368859a37e2100283d2d719c"
+dependencies = [
+ "cfg-if",
+ "once_cell",
 ]
 
 [[package]]
@@ -6195,6 +6285,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e672c95779cf947c5311f83787af4fa8fffd12fb27e4993211a84bdfd9610f9c"
 dependencies = [
  "once_cell",
+ "valuable",
 ]
 
 [[package]]
@@ -6205,6 +6296,34 @@ checksum = "97d095ae15e245a057c8e8451bab9b3ee1e1f68e9ba2b4fbc18d0ac5237835f2"
 dependencies = [
  "pin-project",
  "tracing",
+]
+
+[[package]]
+name = "tracing-log"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3"
+dependencies = [
+ "log",
+ "once_cell",
+ "tracing-core",
+]
+
+[[package]]
+name = "tracing-subscriber"
+version = "0.3.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8189decb5ac0fa7bc8b96b7cb9b2701d60d48805aca84a238004d665fcc4008"
+dependencies = [
+ "matchers",
+ "nu-ansi-term",
+ "once_cell",
+ "regex",
+ "sharded-slab",
+ "thread_local",
+ "tracing",
+ "tracing-core",
+ "tracing-log",
 ]
 
 [[package]]
@@ -6220,7 +6339,7 @@ dependencies = [
  "bincode",
  "chrono",
  "clap 3.2.25",
- "env_logger",
+ "env_logger 0.10.2",
  "futures",
  "log",
  "mockall 0.11.4",
@@ -6536,6 +6655,12 @@ checksum = "a1fad49f3eae9c160c06b4d49700a99e75817f127cf856e494b56d5e23170020"
 dependencies = [
  "anyerror",
 ]
+
+[[package]]
+name = "valuable"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "vcpkg"

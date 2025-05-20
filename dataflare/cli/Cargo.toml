@@ -11,18 +11,9 @@ dataflare-core = { path = "../core" }
 dataflare-runtime = { path = "../runtime" }
 dataflare-connector = { path = "../connector" }
 dataflare-processor = { path = "../processor" }
-dataflare-plugin = { path = "../plugin" }
-dataflare-state = { path = "../state" }
 
-# Optional components
-dataflare-edge = { path = "../edge", optional = true }
-dataflare-cloud = { path = "../cloud", optional = true }
-
-# Actix dependencies
-actix = { path = "../../actix" }
-actix-rt = "2.9.0"
-actix-broker = { path = "../../actix-broker" }
-actix-cluster = { path = "../../actix-cluster", optional = true }
+# Actix依赖
+actix = "0.13"  # 从工作区获取
 
 # Other dependencies
 tokio = { version = "1", features = ["full"] }
