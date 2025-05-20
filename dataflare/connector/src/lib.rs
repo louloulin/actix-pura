@@ -13,6 +13,7 @@ pub mod registry;
 pub mod postgres;
 pub mod csv;
 pub mod hybrid;
+pub mod mongodb;
 
 // Re-exports for convenience
 pub use dataflare_core::connector::{
@@ -38,6 +39,9 @@ pub fn register_default_connectors() {
 
         // Register CSV connectors
         csv::register_csv_connectors();
+        
+        // Register MongoDB connector
+        mongodb::register_mongodb_connector();
     });
 }
 
