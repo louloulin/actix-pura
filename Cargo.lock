@@ -1800,6 +1800,7 @@ name = "dataflare-runtime"
 version = "0.1.0"
 dependencies = [
  "actix",
+ "actix-rt",
  "anyhow",
  "async-trait",
  "chrono",
@@ -1813,6 +1814,7 @@ dependencies = [
  "mockall 0.12.1",
  "petgraph",
  "proptest",
+ "rand 0.8.5",
  "reqwest",
  "serde",
  "serde_json",

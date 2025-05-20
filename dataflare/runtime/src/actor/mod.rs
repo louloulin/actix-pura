@@ -7,12 +7,18 @@ mod processor;
 mod destination;
 pub mod workflow;
 pub mod supervisor;
+pub mod message_bus;
+pub mod router;
+pub mod pool;
 
 pub use source::SourceActor;
 pub use processor::ProcessorActor;
 pub use destination::DestinationActor;
 pub use workflow::WorkflowActor;
 pub use supervisor::SupervisorActor;
+pub use message_bus::{MessageBus, DataFlareMessage, ActorId, TraceInfo, MessageHandler};
+pub use router::{MessageRouter, RouterActor, RouterConfig, RouterStats, Tracer, RouteMessage, GetRouterStats, ResetRouterStats};
+pub use pool::{ActorPool, PoolBuilder, PoolConfig, PoolStrategy, StopWorker};
 
 use actix::prelude::*;
 use dataflare_core::error::Result;
