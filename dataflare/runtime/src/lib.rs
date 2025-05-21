@@ -11,6 +11,7 @@ pub mod actor;
 pub mod workflow;
 pub mod executor;
 pub mod progress;
+pub mod batch;
 
 #[cfg(test)]
 mod tests;

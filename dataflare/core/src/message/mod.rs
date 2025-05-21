@@ -48,6 +48,38 @@ impl DataRecord {
             updated_at: now,
         }
     }
+    
+    /// 创建一个新的JSON数据记录（别名，用于可读性）
+    pub fn new_json(data: serde_json::Value) -> Self {
+        Self::new(data)
+    }
+
+    /// 获取数据的可变对象引用
+    pub fn as_object_mut(&mut self) -> Option<&mut serde_json::Map<String, serde_json::Value>> {
+        if let serde_json::Value::Object(ref mut map) = self.data {
+            Some(map)
+        } else {
+            None
+        }
+    }
+    
+    /// 从指定路径获取字符串值
+    pub fn as_str(&self, path: &str) -> Option<&str> {
+        if let Some(value) = self.get_value(path) {
+            value.as_str()
+        } else {
+            None
+        }
+    }
+    
+    /// 从指定路径获取整数值
+    pub fn as_i64(&self, path: &str) -> Option<i64> {
+        if let Some(value) = self.get_value(path) {
+            value.as_i64()
+        } else {
+            None
+        }
+    }
 
     /// Agrega un metadato al registro
     pub fn add_metadata<K: Into<String>, V: Into<String>>(&mut self, key: K, value: V) -> &mut Self {
