@@ -122,3 +122,6 @@ pub use adapter::{
     BatchSourceAdapter,
     BatchDestinationAdapter,
 };
+
+// 批处理工具函数
+pub mod util;

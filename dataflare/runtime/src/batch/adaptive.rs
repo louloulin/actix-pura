@@ -21,16 +21,13 @@ pub struct AdaptiveBatchingConfig {
     pub max_size: usize,
     
     /// Target throughput in records per second
-    pub throughput_target: Option<usize>,
+    pub throughput_target: usize,
     
     /// Target latency in milliseconds
-    pub latency_target_ms: Option<u64>,
+    pub latency_target_ms: u64,
     
     /// Adaptation rate (0.0-1.0) - how quickly to adjust batch size
     pub adaptation_rate: f64,
-    
-    /// Evaluation interval - how often to adjust batch size
-    pub evaluation_interval: Duration,
     
     /// Stability threshold - minimum number of batches before adaptation
     pub stability_threshold: usize,
@@ -40,13 +37,12 @@ impl Default for AdaptiveBatchingConfig {
     fn default() -> Self {
         Self {
             initial_size: 1000,
-            min_size: 10,
-            max_size: 100000,
-            throughput_target: None,
-            latency_target_ms: Some(50), // Default to 50ms target latency
-            adaptation_rate: 0.2,
-            evaluation_interval: Duration::from_secs(5),
-            stability_threshold: 10,
+            min_size: 100,
+            max_size: 10000,
+            throughput_target: 100000, // 10万记录/秒
+            latency_target_ms: 50,     // 50毫秒
+            adaptation_rate: 0.2,      // 20%的调整率
+            stability_threshold: 3,    // 连续3次测量稳定视为稳定
         }
     }
 }
@@ -63,11 +59,11 @@ pub struct AdaptiveBatcher {
     /// Performance metrics
     metrics: BatchingMetrics,
     
-    /// Last evaluation time
-    last_evaluation: Instant,
+    /// Last batch start time
+    last_batch_start: Option<Instant>,
     
-    /// Number of batches processed since last adjustment
-    batches_since_adjustment: usize,
+    /// Stable count
+    stable_count: usize,
 }
 
 impl AdaptiveBatcher {
@@ -77,109 +73,221 @@ impl AdaptiveBatcher {
             current_size: config.initial_size,
             config,
             metrics: BatchingMetrics::new(),
-            last_evaluation: Instant::now(),
-            batches_since_adjustment: 0,
+            last_batch_start: None,
+            stable_count: 0,
         }
     }
     
+    /// Use default configuration to create a batcher
+    pub fn default() -> Self {
+        Self::new(AdaptiveBatchingConfig::default())
+    }
+    
     /// Get the current recommended batch size
-    pub fn batch_size(&self) -> usize {
+    pub fn get_batch_size(&self) -> usize {
         self.current_size
     }
     
-    /// Record a batch processing event
-    pub fn record_batch(&mut self, batch_size: usize, processing_time: Duration) {
-        self.metrics.record_batch(batch_size, processing_time);
-        self.batches_since_adjustment += 1;
-        
-        // Check if it's time to evaluate and adapt
-        if self.last_evaluation.elapsed() >= self.config.evaluation_interval && 
-           self.batches_since_adjustment >= self.config.stability_threshold {
-            self.adapt();
-            self.last_evaluation = Instant::now();
-            self.batches_since_adjustment = 0;
+    /// Start a new batch processing
+    pub fn start_batch(&mut self) {
+        self.last_batch_start = Some(Instant::now());
+    }
+    
+    /// Complete batch processing and update batch size
+    pub fn complete_batch(&mut self, records_processed: usize) {
+        if let Some(start_time) = self.last_batch_start {
+            let processing_time = start_time.elapsed();
+            
+            // Record batch processing metrics
+            self.metrics.record_batch(
+                records_processed, 
+                processing_time,
+                self.current_size
+            );
+            
+            // Adapt batch size
+            self.adapt(processing_time, records_processed);
+            
+            // Reset start time
+            self.last_batch_start = None;
         }
     }
     
     /// Adapt the batch size based on performance metrics
-    pub fn adapt(&mut self) {
-        // Get current performance metrics
-        let current_throughput = self.metrics.throughput();
-        let current_latency = self.metrics.average_latency();
+    pub fn adapt(&mut self, processing_time: Duration, records_processed: usize) {
+        // Calculate current throughput (records per second)
+        let throughput = if processing_time.as_secs_f64() > 0.0 {
+            records_processed as f64 / processing_time.as_secs_f64()
+        } else {
+            0.0 // Avoid division by zero
+        };
         
-        // Calculate adjustment factor
-        let mut adjustment_factor = 1.0; // No change by default
+        // Calculate average processing time per record (milliseconds)
+        let avg_record_time_ms = if records_processed > 0 {
+            processing_time.as_millis() as f64 / records_processed as f64
+        } else {
+            0.0
+        };
         
-        // Adjust for throughput if target is specified
-        if let Some(target_throughput) = self.config.throughput_target {
-            if let Some(throughput) = current_throughput {
-                // If throughput is below target, increase batch size
-                // If throughput is above target, we're good
-                if throughput < target_throughput as f64 {
-                    let throughput_ratio = target_throughput as f64 / throughput;
-                    // Cap the adjustment to avoid extreme changes
-                    let capped_ratio = throughput_ratio.min(2.0);
-                    adjustment_factor *= capped_ratio;
-                }
-            }
-        }
+        // Processing time (milliseconds)
+        let processing_ms = processing_time.as_millis() as u64;
         
-        // Adjust for latency if target is specified
-        if let Some(target_latency_ms) = self.config.latency_target_ms {
-            if let Some(latency) = current_latency {
-                let latency_ms = latency.as_millis() as u64;
-                // If latency is above target, decrease batch size
-                // If latency is below target and we're not already increasing for throughput,
-                // we can increase batch size
-                if latency_ms > target_latency_ms {
-                    let latency_ratio = target_latency_ms as f64 / latency_ms as f64;
-                    // Cap the adjustment to avoid extreme changes
-                    let capped_ratio = latency_ratio.max(0.5);
-                    adjustment_factor *= capped_ratio;
-                } else if latency_ms < target_latency_ms / 2 && adjustment_factor == 1.0 {
-                    // If latency is less than half the target, we can process larger batches
-                    adjustment_factor *= 1.1; // Increase by 10%
-                }
-            }
-        }
+        // Determine current performance against target
+        let throughput_ratio = throughput / self.config.throughput_target as f64;
+        let latency_ratio = processing_ms as f64 / self.config.latency_target_ms as f64;
         
-        // Apply smoothing using adaptation rate
-        adjustment_factor = 1.0 + (adjustment_factor - 1.0) * self.config.adaptation_rate;
+        // Decision logic: whether to adjust batch size
+        let mut new_size = self.current_size;
+        let mut is_stable = false;
         
-        // Calculate new batch size
-        let new_size = (self.current_size as f64 * adjustment_factor).round() as usize;
-        
-        // Clamp to min/max
-        let new_size = new_size.clamp(self.config.min_size, self.config.max_size);
-        
-        // Log the adjustment
-        if new_size != self.current_size {
-            info!(
-                "Adapting batch size from {} to {} (adjustment factor: {:.2}, throughput: {:?} rps, latency: {:?})",
-                self.current_size,
-                new_size,
-                adjustment_factor,
-                current_throughput.map(|t| t.round() as usize),
-                current_latency.map(|d| format!("{}ms", d.as_millis())),
+        if throughput_ratio < 0.8 && latency_ratio > 1.2 {
+            // Low throughput and high latency: decrease batch size
+            debug!(
+                "Batch processing performance poor: throughput={:.2} records/sec, processing time={}ms, decreasing batch size", 
+                throughput, processing_ms
             );
+            new_size = (self.current_size as f64 * (1.0 - self.config.adaptation_rate)) as usize;
+            self.stable_count = 0;
+        } else if throughput_ratio < 0.8 && latency_ratio <= 1.0 {
+            // Low throughput but normal latency: increase batch size to improve throughput
+            debug!(
+                "Attempting to improve throughput: current={:.2} records/sec, target={} records/sec, increasing batch size", 
+                throughput, self.config.throughput_target
+            );
+            new_size = (self.current_size as f64 * (1.0 + self.config.adaptation_rate)) as usize;
+            self.stable_count = 0;
+        } else if throughput_ratio >= 0.8 && latency_ratio > 1.2 {
+            // Normal throughput but high latency: decrease batch size
+            debug!(
+                "Attempting to reduce latency: current={}ms, target={}ms, decreasing batch size",
+                processing_ms, self.config.latency_target_ms
+            );
+            new_size = (self.current_size as f64 * (1.0 - self.config.adaptation_rate)) as usize;
+            self.stable_count = 0;
+        } else {
+            // Throughput and latency within acceptable range: maintain current batch size
+            debug!(
+                "Batch processing performance good: throughput={:.2} records/sec, processing time={}ms, maintaining batch size={}",
+                throughput, processing_ms, self.current_size
+            );
+            self.stable_count += 1;
+            is_stable = self.stable_count >= self.config.stability_threshold;
         }
         
-        self.current_size = new_size;
+        // Ensure batch size is within configured range
+        new_size = new_size.max(self.config.min_size).min(self.config.max_size);
         
-        // Reset metrics for the next evaluation period
-        self.metrics.reset();
+        // Update if batch size changes by more than 5%
+        if (new_size as f64 - self.current_size as f64).abs() / self.current_size as f64 > 0.05 {
+            info!(
+                "Adjusting batch size: {} -> {} (throughput={:.2} records/sec, latency={}ms, average record processing time={:.2}ms)",
+                self.current_size, new_size, throughput, processing_ms, avg_record_time_ms
+            );
+            self.current_size = new_size;
+        }
+        
+        // Record stability status
+        if is_stable && !self.metrics.is_system_stable() {
+            info!("Batch processing system stabilized at size {}, throughput {:.2} records/sec", self.current_size, throughput);
+            self.metrics.set_system_stable(true);
+        } else if !is_stable && self.metrics.is_system_stable() {
+            info!("Batch processing system no longer stable, re-adjusting");
+            self.metrics.set_system_stable(false);
+        }
     }
     
     /// Get current metrics
-    pub fn metrics(&self) -> &BatchingMetrics {
+    pub fn get_metrics(&self) -> &BatchingMetrics {
         &self.metrics
     }
     
-    /// Reset metrics and adaptation state
+    /// Reset batch processor state
     pub fn reset(&mut self) {
-        self.metrics.reset();
         self.current_size = self.config.initial_size;
-        self.last_evaluation = Instant::now();
-        self.batches_since_adjustment = 0;
+        self.metrics.reset();
+        self.last_batch_start = None;
+        self.stable_count = 0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_adaptive_batcher_initialization() {
+        let config = AdaptiveBatchingConfig {
+            initial_size: 500,
+            min_size: 50,
+            max_size: 5000,
+            throughput_target: 50000,
+            latency_target_ms: 100,
+            adaptation_rate: 0.1,
+            stability_threshold: 5,
+        };
+        
+        let batcher = AdaptiveBatcher::new(config.clone());
+        
+        // Verify initialization
+        assert_eq!(batcher.current_size, config.initial_size);
+        assert_eq!(batcher.get_batch_size(), config.initial_size);
+    }
+    
+    #[test]
+    fn test_adaptive_batcher_adaptation() {
+        let mut batcher = AdaptiveBatcher::default();
+        
+        // Simulate high latency scenario
+        batcher.start_batch();
+        // Simulate processing time of 200ms, exceeding target of 50ms
+        batcher.complete_batch(1000);
+        batcher.adapt(Duration::from_millis(200), 1000);
+        
+        // Batch size should decrease
+        assert!(batcher.get_batch_size() < 1000);
+        
+        // Reset and simulate low throughput but normal latency scenario
+        batcher.reset();
+        batcher.start_batch();
+        // Simulate processing time of 25ms, but only processed 100 records
+        batcher.complete_batch(100);
+        batcher.adapt(Duration::from_millis(25), 100);
+        
+        // Batch size should increase
+        assert!(batcher.get_batch_size() > 1000);
+    }
+    
+    #[test]
+    fn test_adaptive_batcher_stability() {
+        let config = AdaptiveBatchingConfig {
+            initial_size: 1000,
+            min_size: 100,
+            max_size: 10000,
+            throughput_target: 100000,
+            latency_target_ms: 50,
+            adaptation_rate: 0.2,
+            stability_threshold: 3,
+        };
+        
+        let mut batcher = AdaptiveBatcher::new(config);
+        
+        // Simulate ideal performance scenario continuous multiple times
+        for _ in 0..4 {
+            batcher.start_batch();
+            // Process 1000 records, time 40ms, within target
+            batcher.complete_batch(1000);
+            batcher.adapt(Duration::from_millis(40), 1000);
+        }
+        
+        // System should be marked as stable
+        assert!(batcher.get_metrics().is_system_stable());
+        
+        // Simulate performance decline
+        batcher.start_batch();
+        batcher.complete_batch(1000);
+        batcher.adapt(Duration::from_millis(150), 1000);
+        
+        // System should no longer be stable
+        assert!(!batcher.get_metrics().is_system_stable());
     }
 } 

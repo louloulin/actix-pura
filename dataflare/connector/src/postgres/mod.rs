@@ -27,6 +27,8 @@ use crate::source::ExtractionMode;
 
 pub mod batch;
 pub mod cdc;
+#[cfg(test)]
+pub mod batch_test;
 
 pub use self::batch::PostgresBatchSourceConnector;
 
