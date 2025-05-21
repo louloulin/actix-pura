@@ -25,6 +25,7 @@ use crate::source::SourceConnector;
 use crate::hybrid::HybridConfig;
 
 pub mod batch;
+pub mod cdc;
 
 pub use self::batch::PostgresBatchSourceConnector;
 
@@ -975,9 +976,7 @@ pub fn register_postgres_connector() {
 
 /// Registra los conectores PostgreSQL
 pub fn register_postgres_connectors() {
-    // Registrar conector PostgreSQL tradicional
     register_postgres_connector();
-    
-    // Registrar conector PostgreSQL optimizado para lotes
     batch::register_postgres_batch_connector();
+    cdc::register_postgres_cdc_connector();
 }

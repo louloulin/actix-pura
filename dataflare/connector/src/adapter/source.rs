@@ -3,14 +3,12 @@
 //! This module provides an adapter that converts legacy SourceConnectors
 //! to the new BatchSourceConnector interface.
 
-use std::pin::Pin;
-use std::sync::Arc;
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use log::warn;
 
 use dataflare_core::{
-    error::{DataFlareError, Result},
+    error::Result,
     message::{DataRecord, DataRecordBatch},
     model::Schema,
     state::SourceState,

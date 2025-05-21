@@ -89,6 +89,22 @@ pub fn initialize() -> dataflare_core::error::Result<()> {
     Ok(())
 }
 
+/// Initialize the connector registry
+pub fn init() -> dataflare_core::error::Result<()> {
+    // Register PostgreSQL connector
+    postgres::register_postgres_connector();
+    postgres::batch::register_postgres_batch_connector();
+    postgres::cdc::register_postgres_cdc_connector();
+    
+    // Register CSV connector (commented out until implemented)
+    // csv::register_csv_connector();
+    
+    // Register factory
+    factory::initialize()?;
+    
+    Ok(())
+}
+
 // Re-export main factory functions
 pub use factory::{
     initialize as initialize_factory,

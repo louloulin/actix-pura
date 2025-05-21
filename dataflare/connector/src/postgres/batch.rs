@@ -246,8 +246,7 @@ impl BatchSourceConnector for PostgresBatchSourceConnector {
     }
     
     async fn read_batch(&mut self, max_size: usize) -> Result<DataRecordBatch> {
-        // Adjust batch size if needed
-        let effective_batch_size = std::cmp::min(max_size, self.batch_size);
+        // Adjust batch size if needed (using max_size directly)
         
         // Ensure we have connection
         if self.base.client.is_none() {
