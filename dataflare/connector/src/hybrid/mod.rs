@@ -219,13 +219,13 @@ where
                                 // 直接尝试从持续流中获取下一个记录
                                 if let Some(stream) = &mut self.ongoing_stream {
                                     let pinned = std::pin::Pin::new(stream);
-                                    return pinned.poll_next(cx);
+                                    pinned.poll_next(cx)
                                 } else {
                                     // 没有持续流，完成
                                     self.config.state = HybridState::Completed;
                                     log::info!("HybridStream: 完成（没有持续流）");
                                     println!("HybridStream: 完成（没有持续流）");
-                                    return std::task::Poll::Ready(None);
+                                    std::task::Poll::Ready(None)
                                 }
                             } else {
                                 // 如果不应该转换，则完成

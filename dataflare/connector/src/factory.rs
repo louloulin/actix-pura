@@ -3,16 +3,16 @@
 //! This module implements an improved connector factory system to create
 //! and manage connector instances.
 
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::collections::HashMap;
 use serde_json::Value;
 
-use dataflare_core::error::{DataFlareError, Result};
-use dataflare_core::connector::{
-    Connector, 
-    BatchSourceConnector, 
-    BatchDestinationConnector,
-    ConnectorCapabilities
+use dataflare_core::{
+    error::{Result, DataFlareError},
+    connector::{
+        Connector, BatchSourceConnector, BatchDestinationConnector,
+        ConnectorCapabilities
+    },
 };
 
 use crate::registry;
@@ -27,6 +27,12 @@ pub struct ConnectorFactory {
     
     /// Connector capabilities cache
     capabilities_cache: HashMap<String, ConnectorCapabilities>,
+}
+
+impl Default for ConnectorFactory {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ConnectorFactory {

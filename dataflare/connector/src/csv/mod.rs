@@ -499,26 +499,21 @@ impl DestinationConnector for CsvDestinationConnector {
             WriteMode::Append => {
                 // 追加模式
                 if !self.file_opened {
-                    let file = if Path::new(file_path).exists() {
-                        std::fs::OpenOptions::new()
-                            .write(true)
-                            .append(true)
-                            .open(file_path)
-                    } else {
-                        std::fs::OpenOptions::new()
-                            .write(true)
-                            .create(true)
-                            .open(file_path)
-                    }.map_err(|e| DataFlareError::Io(e))?;
+                    let file = File::options()
+                        .append(true)
+                        .create(true)
+                        .truncate(false)
+                        .open(file_path)
+                        .map_err(DataFlareError::Io)?;
 
                     self.file_opened = true;
                     file
                 } else {
                     std::fs::OpenOptions::new()
-                        .write(true)
+                        
                         .append(true)
                         .open(file_path)
-                        .map_err(|e| DataFlareError::Io(e))?
+                        .map_err(DataFlareError::Io)?
                 }
             },
             WriteMode::Overwrite => {
@@ -528,7 +523,7 @@ impl DestinationConnector for CsvDestinationConnector {
                     .create(true)
                     .truncate(true)
                     .open(file_path)
-                    .map_err(|e| DataFlareError::Io(e))?;
+                    .map_err(DataFlareError::Io)?;
 
                 self.file_opened = true;
                 self.records_written = 0; // 重置记录计数

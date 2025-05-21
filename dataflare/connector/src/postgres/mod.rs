@@ -4,13 +4,13 @@
 
 use std::sync::Arc;
 use async_trait::async_trait;
-use futures::{Stream, StreamExt};
+use futures::Stream;
 use serde_json::{Value, json};
-
-use crate::source::ExtractionMode;
 use tokio_postgres::{NoTls, Row};
 use chrono::{DateTime, Utc};
 use log::{error, info};
+use std::collections::HashMap;
+use std::time::Duration;
 
 use dataflare_core::{
     error::{DataFlareError, Result},
@@ -23,6 +23,7 @@ use dataflare_core::{
 
 use crate::source::SourceConnector;
 use crate::hybrid::HybridConfig;
+use crate::source::ExtractionMode;
 
 pub mod batch;
 pub mod cdc;
@@ -301,12 +302,10 @@ impl SourceConnector for PostgresSourceConnector {
 
             if let Some(client) = &connector.client {
                 // 使用连接器的客户端执行查询
-                let schema_query = format!(
-                    "SELECT column_name, data_type, is_nullable
+                let schema_query = "SELECT column_name, data_type, is_nullable
                      FROM information_schema.columns
                      WHERE table_name = $1
-                     ORDER BY ordinal_position",
-                );
+                     ORDER BY ordinal_position".to_string();
 
                 let rows = client.query(&schema_query, &[&table]).await
                     .map_err(|e| DataFlareError::Query(format!("Error al consultar estructura de tabla: {}", e)))?;
@@ -318,12 +317,10 @@ impl SourceConnector for PostgresSourceConnector {
         };
 
         // 查询表结构
-        let schema_query = format!(
-            "SELECT column_name, data_type, is_nullable
+        let schema_query = "SELECT column_name, data_type, is_nullable
              FROM information_schema.columns
              WHERE table_name = $1
-             ORDER BY ordinal_position",
-        );
+             ORDER BY ordinal_position".to_string();
 
         let rows = client.query(&schema_query, &[&table]).await
             .map_err(|e| DataFlareError::Query(format!("Error al consultar estructura de tabla: {}", e)))?;
@@ -395,7 +392,7 @@ impl SourceConnector for PostgresSourceConnector {
             },
             ExtractionMode::Hybrid => {
                 // 混合模式：根据配置使用初始模式
-                if let Some(hybrid_config) = HybridConfig::from_config(&self.config).ok() {
+                if let Ok(hybrid_config) = HybridConfig::from_config(&self.config) {
                     match hybrid_config.initial_mode {
                         dataflare_core::connector::ExtractionMode::Full => {
                             // 使用全量模式作为初始模式
@@ -601,7 +598,7 @@ impl SourceConnector for PostgresSourceConnector {
             },
             ExtractionMode::Hybrid => {
                 // 混合模式：根据配置使用初始模式
-                if let Some(hybrid_config) = HybridConfig::from_config(&self.config).ok() {
+                if let Ok(hybrid_config) = HybridConfig::from_config(&self.config) {
                     match hybrid_config.initial_mode {
                         dataflare_core::connector::ExtractionMode::Full => {
                             // 使用全量模式作为初始模式
@@ -742,7 +739,7 @@ impl PostgresSourceConnector {
             },
             ExtractionMode::Hybrid => {
                 // 混合模式：使用 HybridStream 包装器
-                if let Some(hybrid_config) = HybridConfig::from_config(&self.config).ok() {
+                if let Ok(hybrid_config) = HybridConfig::from_config(&self.config) {
                     // 克隆状态以避免移动问题
                     let state_clone = state.clone();
 

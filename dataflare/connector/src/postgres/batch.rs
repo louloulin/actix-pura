@@ -5,7 +5,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use async_trait::async_trait;
-use futures::StreamExt;
 use serde_json::{Value, json};
 use tokio_postgres::Row;
 use chrono::{DateTime, Utc};
@@ -220,13 +219,13 @@ impl Connector for PostgresBatchSourceConnector {
     }
     
     fn get_capabilities(&self) -> ConnectorCapabilities {
-        let mut capabilities = ConnectorCapabilities::default();
-        capabilities.supports_batch_operations = true;
-        capabilities.supports_parallel_processing = true;
-        capabilities.preferred_batch_size = Some(self.batch_size);
-        capabilities.max_batch_size = Some(10000); // Reasonable maximum for PostgreSQL
-        
-        capabilities
+        ConnectorCapabilities {
+            supports_batch_operations: true,
+            supports_parallel_processing: true,
+            preferred_batch_size: Some(self.batch_size),
+            max_batch_size: Some(10000), // Reasonable maximum for PostgreSQL
+            ..Default::default()
+        }
     }
     
     fn get_metadata(&self) -> HashMap<String, String> {
@@ -296,7 +295,7 @@ impl BatchSourceConnector for PostgresBatchSourceConnector {
             self.position = Position::new().with_data("offset", new_offset.to_string());
         } else if self.base.get_extraction_mode() == crate::source::ExtractionMode::Incremental {
             // For incremental extraction, update cursor value if records present
-            if !records.is_empty() && records.len() > 0 {
+            if !records.is_empty() && !records.is_empty() {
                 // Get state to find cursor field
                 let state = self.base.get_state()?;
                 if let Some(cursor_field) = state.data.get("cursor_field").and_then(|v| v.as_str()) {

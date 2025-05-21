@@ -348,7 +348,7 @@ impl MongoDBSourceConnector {
                 mongodb::bson::Bson::Document(subdoc) => {
                     // Add object type and process subdocument
                     field_types.entry(field_path.clone())
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(DataType::Object);
                     
                     self.process_document_for_schema(subdoc, &field_path, field_types);
@@ -356,7 +356,7 @@ impl MongoDBSourceConnector {
                 mongodb::bson::Bson::Array(array) => {
                     // Add array type
                     field_types.entry(field_path.clone())
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(DataType::Array(Box::new(DataType::String)));
                     
                     // Process array elements (sample first few elements if there are many)
@@ -369,42 +369,42 @@ impl MongoDBSourceConnector {
                 },
                 mongodb::bson::Bson::String(_) => {
                     field_types.entry(field_path)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(DataType::String);
                 },
                 mongodb::bson::Bson::ObjectId(_) => {
                     field_types.entry(field_path)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(DataType::String);
                 },
                 mongodb::bson::Bson::Int32(_) => {
                     field_types.entry(field_path)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(DataType::Int32);
                 },
                 mongodb::bson::Bson::Int64(_) => {
                     field_types.entry(field_path)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(DataType::Int64);
                 },
                 mongodb::bson::Bson::Double(_) => {
                     field_types.entry(field_path)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(DataType::Float64);
                 },
                 mongodb::bson::Bson::Decimal128(_) => {
                     field_types.entry(field_path)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(DataType::Float64);
                 },
                 mongodb::bson::Bson::Boolean(_) => {
                     field_types.entry(field_path)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(DataType::Boolean);
                 },
                 mongodb::bson::Bson::DateTime(_) => {
                     field_types.entry(field_path)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(DataType::Timestamp);
                 },
                 mongodb::bson::Bson::Null => {
@@ -413,7 +413,7 @@ impl MongoDBSourceConnector {
                 _ => {
                     // Handle other BSON types
                     field_types.entry(field_path)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(DataType::String); // Default to string for unknown types
                 }
             }

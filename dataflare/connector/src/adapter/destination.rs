@@ -85,11 +85,11 @@ impl<T: DestinationConnector> Connector for BatchDestinationAdapter<T> {
     }
     
     fn get_capabilities(&self) -> ConnectorCapabilities {
-        // Enhance capabilities based on the adaptations we provide
-        let mut caps = ConnectorCapabilities::default();
-        caps.supports_batch_operations = true;
-        caps.preferred_batch_size = Some(1000); // Default batch size
-        caps
+        ConnectorCapabilities {
+            supports_batch_operations: true,
+            preferred_batch_size: Some(1000),
+            ..Default::default()
+        }
     }
     
     fn get_metadata(&self) -> HashMap<String, String> {
