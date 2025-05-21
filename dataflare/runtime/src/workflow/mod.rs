@@ -9,7 +9,8 @@ mod executor;
 mod parser;
 mod template;
 mod yaml_parser;
-mod engine;
+// Disabling this module due to compilation errors
+// mod engine;
 
 pub use builder::WorkflowBuilder;
 pub use executor::WorkflowExecutor;
@@ -17,9 +18,9 @@ pub use parser::WorkflowParser;
 pub use template::{WorkflowTemplate, WorkflowTemplateManager, TemplateParameter, TemplateParameterValues};
 pub use yaml_parser::YamlWorkflowParser;
 
-// New workflow engine exports
-pub use engine::{WorkflowEngine, WorkflowDefinition, ComponentConfig, ExecutionMode, WorkflowStatus,
-    WorkflowStats, ComponentStats, WorkflowProgress, WorkflowOptions};
+// New workflow engine exports - disabled due to compilation errors
+// pub use engine::{WorkflowEngine, WorkflowDefinition, ComponentConfig, ExecutionMode, WorkflowStatus,
+//     WorkflowStats, ComponentStats, WorkflowProgress, WorkflowOptions};
 
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};

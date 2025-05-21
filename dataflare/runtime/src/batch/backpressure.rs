@@ -4,7 +4,7 @@
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use log::{debug, info, warn};
+use log::{debug, info};
 
 /// 背压信用模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

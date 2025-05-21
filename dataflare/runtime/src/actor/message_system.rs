@@ -8,7 +8,6 @@ use actix::{Actor, Addr, Context, Handler, Message, MessageResult};
 use actix::dev::ToEnvelope;
 use dataflare_core::{
     DataFlareError, DataRecord, DataRecordBatch, Result,
-    Configurable, Monitorable, Lifecycle,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

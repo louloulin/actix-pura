@@ -11,11 +11,10 @@ use log::{debug, error, info, warn};
 use std::sync::{Arc, RwLock};
 
 use dataflare_core::error::{DataFlareError, Result};
-use dataflare_core::message::WorkflowPhase;
 
 use crate::actor::{
     ActorRegistry, ActorRef, MessageRouter,
-    WorkflowActor, SupervisorActor, 
+    WorkflowActor, 
     Initialize, Finalize, GetStatus, ActorStatus
 };
 
@@ -204,7 +203,8 @@ impl ClusterActor {
     /// Create a new cluster actor
     pub fn new(config: ClusterConfig) -> Self {
         let registry = Arc::new(RwLock::new(ActorRegistry::new()));
-        let router = MessageRouter::new(Arc::clone(&registry));
+        let router_registry = Arc::new(ActorRegistry::new());
+        let router = MessageRouter::new(router_registry);
         
         Self {
             config,
@@ -442,22 +442,41 @@ impl Handler<StopWorkflow> for ClusterActor {
             let finalize_ref = self.registry.read().unwrap().get::<Finalize>(&msg.id);
             
             if let Some(actor_ref) = finalize_ref {
-                let actor_id = msg.id.clone();
-                let fut = actor_ref.send(Finalize { workflow_id: msg.id.clone() });
+                // Clone everything we need before moving into the async block
+                let actor_id = msg.id.clone(); 
+                let actor_id_for_map = actor_id.clone(); // Clone again for the map closure
+                let workflow_id = msg.id.clone();
+                // Clone actor address
+                let actor_addr = actor_ref.clone();
                 
-                ctx.spawn(fut.into_actor(self).map(move |res, actor, _ctx| {
-                    match res {
+                ctx.spawn(async move {
+                    // Send the message inside the spawned future
+                    match actor_addr.send(Finalize { workflow_id }).await {
                         Ok(Ok(_)) => {
                             info!("Workflow {} finalized", actor_id);
-                            actor.workflows.insert(actor_id.clone(), WorkflowStatus::Stopped);
+                            // Return success to update workflow status later
+                            Ok(())
                         },
                         Ok(Err(e)) => {
                             error!("Failed to finalize workflow {}: {}", actor_id, e);
-                            actor.workflows.insert(actor_id.clone(), WorkflowStatus::Failed(format!("Finalization failed: {}", e)));
+                            // Return error with message
+                            Err(format!("Finalization failed: {}", e))
                         },
                         Err(e) => {
                             error!("Failed to send finalize message to workflow {}: {}", actor_id, e);
-                            actor.workflows.insert(actor_id.clone(), WorkflowStatus::Failed(format!("Communication error: {}", e)));
+                            // Return error with message
+                            Err(format!("Communication error: {}", e))
+                        }
+                    }
+                }.into_actor(self).map(move |res, actor, _ctx| {
+                    match res {
+                        Ok(_) => {
+                            // Update workflow status to stopped using the second clone
+                            actor.workflows.insert(actor_id_for_map.clone(), WorkflowStatus::Stopped);
+                        },
+                        Err(error_msg) => {
+                            // Update workflow status to failed with error message
+                            actor.workflows.insert(actor_id_for_map.clone(), WorkflowStatus::Failed(error_msg));
                         }
                     }
                 }));

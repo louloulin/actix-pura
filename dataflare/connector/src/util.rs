@@ -2,10 +2,10 @@
 //! 
 //! 提供批处理操作的辅助函数，如大小估算和切片
 
-use dataflare_core::{
-    error::Result,
-    message::DataRecordBatch,
-};
+use dataflare_core::message::DataRecordBatch;
+use std::collections::HashMap;
+use chrono::Utc;
+use uuid::Uuid;
 
 /// 估算批次大小（字节）
 /// 
@@ -14,8 +14,8 @@ pub fn estimate_batch_size(batch: &DataRecordBatch) -> usize {
     // 基础大小（批次结构本身）
     let mut size = std::mem::size_of::<DataRecordBatch>();
     
-    // 添加记录数组大小
-    size += std::mem::size_of::<Vec<_>>() + 
+    // 添加记录数组大小 - 使用具体类型注解
+    size += std::mem::size_of::<Vec<dataflare_core::message::DataRecord>>() + 
         batch.records.capacity() * std::mem::size_of::<*const ()>();
     
     // 每条记录的估算大小
@@ -54,9 +54,11 @@ pub fn slice_batch(batch: &DataRecordBatch, start_index: usize, end_index: usize
     // 如果切片为空或无效，返回空批次
     if start >= end {
         return DataRecordBatch {
+            id: Uuid::new_v4(),
             records: Vec::new(),
             schema: batch.schema.clone(),
             metadata: batch.metadata.clone(),
+            created_at: Utc::now(),
         };
     }
     
@@ -65,9 +67,11 @@ pub fn slice_batch(batch: &DataRecordBatch, start_index: usize, end_index: usize
     
     // 创建新批次，保留原始模式和元数据
     DataRecordBatch {
+        id: Uuid::new_v4(),
         records,
         schema: batch.schema.clone(),
         metadata: batch.metadata.clone(),
+        created_at: Utc::now(),
     }
 }
 
@@ -77,9 +81,11 @@ pub fn slice_batch(batch: &DataRecordBatch, start_index: usize, end_index: usize
 pub fn merge_batches(batches: &[DataRecordBatch]) -> DataRecordBatch {
     if batches.is_empty() {
         return DataRecordBatch {
+            id: Uuid::new_v4(),
             records: Vec::new(),
             schema: None,
-            metadata: serde_json::Map::new(),
+            metadata: HashMap::new(),
+            created_at: Utc::now(),
         };
     }
     
@@ -102,9 +108,11 @@ pub fn merge_batches(batches: &[DataRecordBatch]) -> DataRecordBatch {
     
     // 使用第一个批次的模式和元数据
     DataRecordBatch {
+        id: Uuid::new_v4(),
         records: merged_records,
         schema: batches[0].schema.clone(),
         metadata: batches[0].metadata.clone(),
+        created_at: Utc::now(),
     }
 }
 

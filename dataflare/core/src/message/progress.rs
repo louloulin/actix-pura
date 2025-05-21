@@ -16,6 +16,8 @@ pub enum WorkflowPhase {
     Transforming,
     /// Workflow is loading data
     Loading,
+    /// Workflow is processing data
+    Processing,
     /// Workflow is finalizing
     Finalizing,
     /// Workflow completed successfully
@@ -32,7 +34,7 @@ pub struct WorkflowProgress {
     /// Current workflow phase
     pub phase: WorkflowPhase,
     /// Progress value (0.0 to 1.0)
-    pub progress: f32,
+    pub progress: f64,
     /// Progress message
     pub message: String,
     /// Timestamp of the progress update
@@ -43,6 +45,10 @@ pub struct WorkflowProgress {
     pub transformation_id: Option<String>,
     /// Destination ID (if applicable)
     pub destination_id: Option<String>,
+    /// Task ID (if applicable)
+    pub task_id: Option<String>,
+    /// Task name (if applicable)
+    pub task_name: Option<String>,
     /// Number of records processed (if applicable)
     pub records_processed: Option<usize>,
     /// Duration in milliseconds (if completed)
@@ -63,6 +69,8 @@ impl WorkflowProgress {
             source_id: None,
             transformation_id: None,
             destination_id: None,
+            task_id: None,
+            task_name: None,
             records_processed: None,
             duration_ms: None,
             error: None,
@@ -80,6 +88,8 @@ impl WorkflowProgress {
             source_id: None,
             transformation_id: None,
             destination_id: None,
+            task_id: None,
+            task_name: None,
             records_processed: None,
             duration_ms: Some(duration_ms),
             error: None,
@@ -97,6 +107,8 @@ impl WorkflowProgress {
             source_id: None,
             transformation_id: None,
             destination_id: None,
+            task_id: None,
+            task_name: None,
             records_processed: None,
             duration_ms: None,
             error: Some(error_msg.to_string()),
@@ -114,6 +126,8 @@ impl WorkflowProgress {
             source_id: Some(source_id.to_string()),
             transformation_id: None,
             destination_id: None,
+            task_id: None,
+            task_name: None,
             records_processed: None,
             duration_ms: None,
             error: None,
@@ -131,6 +145,8 @@ impl WorkflowProgress {
             source_id: Some(source_id.to_string()),
             transformation_id: None,
             destination_id: None,
+            task_id: None,
+            task_name: None,
             records_processed: Some(records),
             duration_ms: None,
             error: None,
@@ -148,6 +164,8 @@ impl WorkflowProgress {
             source_id: None,
             transformation_id: Some(transformation_id.to_string()),
             destination_id: None,
+            task_id: None,
+            task_name: None,
             records_processed: None,
             duration_ms: None,
             error: None,
@@ -165,6 +183,8 @@ impl WorkflowProgress {
             source_id: None,
             transformation_id: Some(transformation_id.to_string()),
             destination_id: None,
+            task_id: None,
+            task_name: None,
             records_processed: Some(records),
             duration_ms: None,
             error: None,
@@ -182,6 +202,8 @@ impl WorkflowProgress {
             source_id: None,
             transformation_id: None,
             destination_id: Some(destination_id.to_string()),
+            task_id: None,
+            task_name: None,
             records_processed: None,
             duration_ms: None,
             error: None,
@@ -199,6 +221,8 @@ impl WorkflowProgress {
             source_id: None,
             transformation_id: None,
             destination_id: Some(destination_id.to_string()),
+            task_id: None,
+            task_name: None,
             records_processed: Some(records),
             duration_ms: None,
             error: None,

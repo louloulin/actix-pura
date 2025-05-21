@@ -13,7 +13,7 @@ use dataflare_core::{
 };
 use dataflare_connector::destination::DestinationConnector;
 
-use crate::actor::{DataFlareActor, Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus, SendBatch};
+use crate::actor::{DataFlareActor, Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus, SendBatch, SubscribeProgress, UnsubscribeProgress};
 
 /// Actor que gestiona la carga de datos en un destino
 pub struct DestinationActor {
@@ -259,26 +259,28 @@ impl Handler<SendBatch> for DestinationActor {
 }
 
 /// Implementación del handler para suscribirse a actualizaciones de progreso
-impl Handler<crate::actor::SubscribeToProgress> for DestinationActor {
-    type Result = ();
+impl Handler<SubscribeProgress> for DestinationActor {
+    type Result = Result<()>;
 
-    fn handle(&mut self, msg: crate::actor::SubscribeToProgress, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: SubscribeProgress, _ctx: &mut Self::Context) -> Self::Result {
         let recipients = self.progress_recipients
             .entry(msg.workflow_id.clone())
             .or_insert_with(Vec::new);
 
         recipients.push(msg.recipient);
+        Ok(())
     }
 }
 
 /// Implementación del handler para cancelar la suscripción a actualizaciones de progreso
-impl Handler<crate::actor::UnsubscribeFromProgress> for DestinationActor {
-    type Result = ();
+impl Handler<UnsubscribeProgress> for DestinationActor {
+    type Result = Result<()>;
 
-    fn handle(&mut self, msg: crate::actor::UnsubscribeFromProgress, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: UnsubscribeProgress, _ctx: &mut Self::Context) -> Self::Result {
         if let Some(recipients) = self.progress_recipients.get_mut(&msg.workflow_id) {
             recipients.retain(|r| r != &msg.recipient);
         }
+        Ok(())
     }
 }
 

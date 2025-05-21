@@ -102,6 +102,10 @@ pub enum DataFlareError {
     #[error("Error de HTTP: {0}")]
     Http(String),
 
+    /// Error de cluster
+    #[error("Error de cluster: {0}")]
+    Cluster(String),
+
     /// Error desconocido
     #[error("Error desconocido: {0}")]
     Unknown(String),

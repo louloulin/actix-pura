@@ -294,9 +294,9 @@ impl WorkflowExecutor {
         // Ejecutar flujo de trabajo
         let result = workflow_addr.send(crate::actor::workflow::ExecuteWorkflow {
             workflow_id: workflow.id.clone(),
-            config: serde_json::to_value(workflow).map_err(|e| {
+            parameters: Some(serde_json::to_value(workflow).map_err(|e| {
                 DataFlareError::Serialization(format!("Error al serializar flujo de trabajo: {}", e))
-            })?,
+            })?),
         }).await;
 
         match result {

@@ -10,12 +10,12 @@ use std::any::{Any, TypeId};
 
 use actix::prelude::*;
 use actix::dev::ToEnvelope;
-use log::{debug, error, warn};
+use log::debug;
 
 use dataflare_core::error::{DataFlareError, Result};
 
 /// A type-safe reference to an actor that can handle a specific message type
-pub struct ActorRef<M: Message + Send> 
+pub struct ActorRef<M: Message + Send + 'static> 
 where 
     M::Result: Send,
 {
@@ -27,7 +27,7 @@ where
     _marker: PhantomData<M>,
 }
 
-impl<M: Message + Send> ActorRef<M> 
+impl<M: Message + Send + 'static> ActorRef<M> 
 where 
     M::Result: Send,
 {
@@ -58,7 +58,7 @@ where
     }
 }
 
-impl<M: Message + Send> Clone for ActorRef<M> 
+impl<M: Message + Send + 'static> Clone for ActorRef<M> 
 where 
     M::Result: Send,
 {
@@ -71,36 +71,25 @@ where
     }
 }
 
-/// Trait for actors that handle specific message types
-pub trait ActorHandler<M: Message>: Actor {
-    /// Handle a message
-    fn handle_message(&mut self, msg: M, ctx: &mut Self::Context) -> M::Result;
+/// 可以处理特定消息类型的trait
+/// 
+/// 这是一个可以被动态分发的trait
+pub trait ActorHandler<M: Message + Send + 'static>: Send + 'static {
+    /// 处理消息并返回结果
+    /// 
+    /// 这个方法会被调用来处理具体的消息类型
+    fn handle_message(&mut self, msg: M) -> M::Result where M::Result: Send;
 }
 
-impl<A, M> ActorHandler<M> for A
+// 为ActorRef实现ActorHandler
+impl<M: Message + Send + 'static> ActorHandler<M> for ActorRef<M>
 where
-    A: Actor + Handler<M>,
-    M: Message,
+    M::Result: Send,
 {
-    fn handle_message(&mut self, msg: M, ctx: &mut Self::Context) -> M::Result {
-        <Self as Handler<M>>::handle(self, msg, ctx)
-    }
-}
-
-/// Helper to convert a message recipient into an actor
-trait IntoActor<M: Message> {
-    fn into_actor(self) -> Addr<dyn ActorHandler<M>>;
-}
-
-impl<M: Message + 'static> IntoActor<M> for Recipient<M> {
-    fn into_actor(self) -> Addr<dyn ActorHandler<M>> {
-        let boxed = Box::new(self);
-        let addr: Addr<dyn ActorHandler<M>> = unsafe {
-            // This is safe because we're creating a proxy for the original actor
-            // The memory layout is compatible and we're not changing any behavior
-            std::mem::transmute(boxed)
-        };
-        addr
+    fn handle_message(&mut self, msg: M) -> M::Result {
+        // 这里只是一个示例实现，实际应该发送消息到actor
+        // 在真实实现中，我们需要处理通过recipient发送消息并等待结果
+        todo!("实现ActorRef的消息处理")
     }
 }
 
@@ -119,7 +108,7 @@ impl ActorRegistry {
     }
 
     /// Register an actor reference
-    pub fn register<M: Message + Send + 'static>(&mut self, actor_ref: ActorRef<M>) 
+    pub fn register<M: Message + Send + Sync + 'static>(&mut self, actor_ref: ActorRef<M>) 
     where 
         M::Result: Send,
     {
@@ -127,9 +116,10 @@ impl ActorRegistry {
         let id = actor_ref.id.clone();
         
         let type_map = self.refs.entry(type_id).or_insert_with(HashMap::new);
-        type_map.insert(id, Box::new(actor_ref));
         
-        debug!("Registered actor {} for message type {:?}", actor_ref.id, type_id);
+        debug!("Registered actor {} for message type {:?}", id, type_id);
+        
+        type_map.insert(id, Box::new(actor_ref));
     }
 
     /// Get an actor reference by ID

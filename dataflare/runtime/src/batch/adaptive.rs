@@ -4,7 +4,7 @@
 //! to optimize throughput and latency.
 
 use std::time::{Duration, Instant};
-use log::{debug, info, warn};
+use log::{debug, info};
 
 use super::metrics::BatchingMetrics;
 

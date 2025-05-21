@@ -9,15 +9,11 @@ mod backpressure;
 
 use std::sync::Arc;
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use log::{debug, info, warn};
 
-use dataflare_core::{
-    error::{DataFlareError, Result},
-    message::DataRecord,
-};
+use dataflare_core::message::DataRecord;
 
 // Re-export core components
 pub use self::adaptive::{AdaptiveBatcher, AdaptiveBatchingConfig};

@@ -270,6 +270,11 @@ impl DataRecordBatch {
     pub fn is_empty(&self) -> bool {
         self.records.is_empty()
     }
+    
+    /// Retorna una referencia a los registros
+    pub fn records(&self) -> &Vec<DataRecord> {
+        &self.records
+    }
 }
 
 /// Mensaje para iniciar la extracción de datos

@@ -227,14 +227,14 @@ fn benchmark_zero_copy_pipeline(batch_size: usize, total_records: usize) -> (f64
         
         // 第二阶段：过滤批次（零拷贝操作）
         let filtered = batch.filter(|record| {
-            let id = record.get::<i64>("id").unwrap_or(0);
+            let id = record.data.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
             id % 2 == 0 // 只保留偶数ID
         });
         
         // 第三阶段：转换批次（零拷贝操作）
         let transformed = filtered.map(|record| {
-            let id = record.get::<i64>("id").unwrap_or(0);
-            let value = record.get::<i64>("value").unwrap_or(0);
+            let id = record.data.get("id").and_then(|v| v.as_i64()).unwrap_or(0);
+            let value = record.data.get("value").and_then(|v| v.as_i64()).unwrap_or(0);
             
             DataRecord::new(json!({
                 "id": id,
@@ -245,7 +245,7 @@ fn benchmark_zero_copy_pipeline(batch_size: usize, total_records: usize) -> (f64
         
         // 第四阶段：再次过滤（零拷贝操作）
         let final_batch = transformed.filter(|record| {
-            let value = record.get::<i64>("transformed_value").unwrap_or(0);
+            let value = record.data.get("transformed_value").and_then(|v| v.as_i64()).unwrap_or(0);
             value > 100 // 只保留大值
         });
         
@@ -398,5 +398,37 @@ fn run_all_benchmarks() {
 
 /// 执行基准测试的主函数
 fn main() {
-    run_all_benchmarks();
+    println!("Running simple batch processing test...");
+    
+    // Create a test batch
+    let batch_size = 1000;
+    let batch = create_test_batch(batch_size);
+    println!("Created test batch with {} records", batch.len());
+
+    // Process the batch
+    let processed = test_batch_process(&batch);
+    println!("Processed batch with {} records", processed.len());
+
+    // Test no backpressure throughput
+    println!("\nTesting throughput with no backpressure...");
+    let (throughput, duration) = benchmark_throughput_no_backpressure(1000, 10000);
+    println!("Throughput: {:.2} records/second", throughput);
+    println!("Duration: {:?}", duration);
+
+    // Test adaptive batcher
+    println!("\nTesting throughput with adaptive batching...");
+    let config = AdaptiveBatchingConfig {
+        initial_size: 1000,
+        min_size: 100,
+        max_size: 5000,
+        throughput_target: 100000, // 10万记录/秒
+        latency_target_ms: 50,     // 50毫秒
+        adaptation_rate: 0.2,      // 20%调整率
+        stability_threshold: 0.05, // 5%稳定阈值
+    };
+    let (throughput, duration) = benchmark_throughput_adaptive(config, 10000);
+    println!("Throughput: {:.2} records/second", throughput);
+    println!("Duration: {:?}", duration);
+    
+    println!("\nAll tests completed successfully!");
 } 

@@ -151,7 +151,7 @@ impl WorkflowExecutor {
         info!("Preparando flujo de trabajo {}", workflow.id);
 
         // Crear actor de flujo de trabajo
-        let workflow_actor = WorkflowActor::new(&workflow.id);
+        let workflow_actor = WorkflowActor::new(workflow.id.clone());
         let workflow_addr = workflow_actor.start();
         self.workflow_actor = Some(workflow_addr.clone());
 
@@ -332,9 +332,9 @@ impl WorkflowExecutor {
         // Execute workflow
         let result = workflow_addr.send(crate::actor::workflow::ExecuteWorkflow {
             workflow_id: workflow.id.clone(),
-            config: serde_json::to_value(workflow).map_err(|e| {
+            parameters: Some(serde_json::to_value(workflow).map_err(|e| {
                 DataFlareError::Serialization(format!("Failed to serialize workflow: {}", e))
-            })?,
+            })?),
         }).await;
 
         match result {

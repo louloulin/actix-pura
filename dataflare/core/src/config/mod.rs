@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize, Serializer, Deserializer};
 use log::LevelFilter;
 use crate::error::{DataFlareError, Result};
+use serde_json::Value;
 
 // Serializador personalizado para LevelFilter
 fn serialize_level_filter<S>(level: &LevelFilter, serializer: S) -> std::result::Result<S::Ok, S::Error>
@@ -255,6 +256,30 @@ pub enum MaskingMethod {
     /// Enmascaramiento con hash
     #[serde(rename = "hash")]
     Hash,
+}
+
+/// Task configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskConfig {
+    /// Task ID
+    pub id: String,
+    /// Task name
+    pub name: String,
+    /// Task type
+    pub task_type: String,
+    /// Task configuration
+    pub config: Value,
+}
+
+impl Default for TaskConfig {
+    fn default() -> Self {
+        Self {
+            id: "default_task".to_string(),
+            name: "Default Task".to_string(),
+            task_type: "generic".to_string(),
+            config: serde_json::json!({}),
+        }
+    }
 }
 
 #[cfg(test)]

@@ -9,8 +9,6 @@ use serde_json::{Value, json};
 use tokio_postgres::{NoTls, Row};
 use chrono::{DateTime, Utc};
 use log::{error, info};
-use std::collections::HashMap;
-use std::time::Duration;
 
 use dataflare_core::{
     error::{DataFlareError, Result},

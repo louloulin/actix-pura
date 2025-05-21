@@ -36,17 +36,19 @@ use dataflare_core::message::{WorkflowPhase, DataRecordBatch, WorkflowProgress};
 use serde_json::Value;
 
 /// Actor status
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ActorStatus {
-    /// Actor is initialized but not running
+    /// 初始化状态
     Initialized,
-    /// Actor is running
+    /// 运行中
     Running,
-    /// Actor is paused
+    /// 已暂停
     Paused,
-    /// Actor is stopped
+    /// 已停止
     Stopped,
-    /// Actor has an error
+    /// 已完成（最终状态）
+    Finalized,
+    /// 错误状态
     Error(String),
 }
 
@@ -119,6 +121,12 @@ pub struct UnsubscribeProgress {
     pub recipient: Recipient<WorkflowProgress>,
 }
 
+/// Message to subscribe to progress updates (alias for SubscribeProgress)
+pub type SubscribeToProgress = SubscribeProgress;
+
+/// Message to unsubscribe from progress updates (alias for UnsubscribeProgress)
+pub type UnsubscribeFromProgress = UnsubscribeProgress;
+
 /// Common trait for all DataFlare actors
 pub trait DataFlareActor: Actor {
     /// Get the actor ID
@@ -186,5 +194,5 @@ mod tests {
 }
 
 // Re-exports
-pub use message_system::MessageSystem;
-pub use router::ActorRouter;
+// pub use message_system::MessageSystem;
+// pub use router::ActorRouter;
