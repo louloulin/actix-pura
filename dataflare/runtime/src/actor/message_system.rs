@@ -5,6 +5,7 @@
 //! improved error handling and message routing.
 
 use actix::{Actor, Addr, Context, Handler, Message, MessageResult};
+use actix::dev::ToEnvelope;
 use dataflare_core::{
     DataFlareError, DataRecord, DataRecordBatch, Result,
     Configurable, Monitorable, Lifecycle,
@@ -262,7 +263,7 @@ impl MessageResponse {
 /// Trait for actors that can handle DataFlare messages
 pub trait MessageHandler: Actor {
     /// Handle a message envelope
-    fn handle_message(&mut self, msg: MessageEnvelope, ctx: &mut Self::Context) -> Result<MessageResponse>;
+    fn handle_message(&mut self, msg: MessageEnvelope, ctx: &mut Context<DataFlareActor<Self>>) -> Result<MessageResponse>;
 }
 
 /// Actor that implements the MessageHandler trait
@@ -414,7 +415,10 @@ impl MessageRouter {
     }
     
     /// Send a message to an actor
-    pub async fn send<A: Actor + Handler<MessageEnvelope>>(&self, msg: MessageEnvelope) -> Result<MessageResponse> {
+    pub async fn send<A: Actor + Handler<MessageEnvelope>>(&self, msg: MessageEnvelope) -> Result<MessageResponse> 
+    where
+        A::Context: ToEnvelope<A, MessageEnvelope>,
+    {
         let recipient_id = msg.recipient.clone();
         
         if let Some(addr) = self.registry.get::<A>(&recipient_id) {
@@ -427,7 +431,10 @@ impl MessageRouter {
     }
     
     /// Broadcast a message to all actors of a specific role
-    pub async fn broadcast<A: Actor + Handler<MessageEnvelope>>(&self, sender: ActorId, role: ActorRole, payload: MessagePayload) -> Result<Vec<Result<MessageResponse>>> {
+    pub async fn broadcast<A: Actor + Handler<MessageEnvelope>>(&self, sender: ActorId, role: ActorRole, payload: MessagePayload) -> Result<Vec<Result<MessageResponse>>> 
+    where
+        A::Context: ToEnvelope<A, MessageEnvelope>,
+    {
         let mut results = Vec::new();
         
         for id in self.registry.get_all_ids() {
@@ -440,5 +447,22 @@ impl MessageRouter {
         }
         
         Ok(results)
+    }
+}
+
+/// A dummy message handler implementation for testing and temporary uses
+pub struct DummyMessageHandler;
+
+impl Actor for DummyMessageHandler {
+    type Context = Context<Self>;
+}
+
+impl MessageHandler for DummyMessageHandler {
+    fn handle_message(&mut self, msg: MessageEnvelope, _ctx: &mut Context<DataFlareActor<Self>>) -> Result<MessageResponse> {
+        // Just echo back the message with an ACK response
+        Ok(MessageResponse::new(
+            msg.message_id,
+            MessagePayload::Response(ActorResponse::Ack),
+        ))
     }
 }

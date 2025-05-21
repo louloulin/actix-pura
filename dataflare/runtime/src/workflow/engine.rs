@@ -5,7 +5,8 @@
 
 use crate::actor::{
     ActorId, ActorRole, MessageEnvelope, MessagePayload, ActorCommand,
-    ActorQuery, ActorResponse, MessageRouter, NewActorStatus,
+    ActorQuery, ActorResponse, MessageRouter, NewDataFlareActor, SourceActor, ProcessorActor, DestinationActor, WorkflowActor,
+    message_system::{DummyMessageHandler},
 };
 use actix::prelude::*;
 use dataflare_core::{
@@ -228,82 +229,110 @@ impl WorkflowEngine {
     
     /// Initialize a workflow
     pub async fn initialize_workflow(&mut self, workflow_id: &str) -> Result<()> {
+        // Retrieve workflow context first
         let context = self.workflows.get_mut(workflow_id).ok_or_else(|| {
             DataFlareError::Workflow(format!("Workflow with ID {} not found", workflow_id))
         })?;
         
-        // Create actors for each component
-        self.create_source_actor(workflow_id, &context.definition.source).await?;
+        // Extract the necessary configuration for actor creation
+        let source_config = context.definition.source.clone();
+        let processor_configs = context.definition.processors.clone();
+        let destination_config = context.definition.destination.clone();
         
-        for processor_config in &context.definition.processors {
+        // Release mutable borrow of self.workflows
+        let _ = context;
+        
+        // Create actors for each component
+        self.create_source_actor(workflow_id, &source_config).await?;
+        
+        for processor_config in &processor_configs {
             self.create_processor_actor(workflow_id, processor_config).await?;
         }
         
-        self.create_destination_actor(workflow_id, &context.definition.destination).await?;
+        self.create_destination_actor(workflow_id, &destination_config).await?;
         
         // Update workflow status
-        context.status = WorkflowStatus::Ready;
-        
-        // Send progress update
-        let progress = WorkflowProgress {
-            workflow_id: workflow_id.to_string(),
-            status: WorkflowStatus::Ready,
-            progress: 0.0,
-            phase: "initialized".to_string(),
-            current_component: None,
-            message: Some("Workflow initialized".to_string()),
-            timestamp: chrono::Utc::now(),
-        };
-        
-        if let Err(e) = context.progress_tx.send(progress).await {
-            log::warn!("Failed to send progress update: {}", e);
+        if let Some(context) = self.workflows.get_mut(workflow_id) {
+            context.status = WorkflowStatus::Ready;
+            
+            // Send progress update
+            let progress = WorkflowProgress {
+                workflow_id: workflow_id.to_string(),
+                status: WorkflowStatus::Ready,
+                progress: 0.0,
+                phase: "initialized".to_string(),
+                current_component: None,
+                message: Some("Workflow initialized".to_string()),
+                timestamp: chrono::Utc::now(),
+            };
+            
+            if let Err(e) = context.progress_tx.send(progress).await {
+                log::warn!("Failed to send progress update: {}", e);
+            }
         }
         
         Ok(())
     }
     
+    /// Send a message to an actor using a generic type parameter
+    async fn send_to_actor(&self, msg: MessageEnvelope) -> Result<crate::actor::message_system::MessageResponse> {
+        // Use DummyMessageHandler as a workaround
+        self.router.send::<NewDataFlareActor<DummyMessageHandler>>(msg).await
+    }
+    
     /// Start a workflow
     pub async fn start_workflow(&mut self, workflow_id: &str) -> Result<()> {
-        let context = self.workflows.get_mut(workflow_id).ok_or_else(|| {
-            DataFlareError::Workflow(format!("Workflow with ID {} not found", workflow_id))
-        })?;
-        
-        if context.status != WorkflowStatus::Ready && context.status != WorkflowStatus::Paused {
-            return Err(DataFlareError::Workflow(format!(
-                "Workflow {} is not in a startable state: {:?}", workflow_id, context.status
-            )));
-        }
-        
-        // Update workflow status
-        context.status = WorkflowStatus::Running;
-        context.stats.start_time = Some(chrono::Utc::now());
+        // Get necessary info from context
+        let (status, source_actor_id) = {
+            let context = self.workflows.get_mut(workflow_id).ok_or_else(|| {
+                DataFlareError::Workflow(format!("Workflow with ID {} not found", workflow_id))
+            })?;
+            
+            if context.status != WorkflowStatus::Ready && context.status != WorkflowStatus::Paused {
+                return Err(DataFlareError::Workflow(format!(
+                    "Workflow {} is not in a startable state: {:?}", workflow_id, context.status
+                )));
+            }
+            
+            // Update workflow status
+            context.status = WorkflowStatus::Running;
+            context.stats.start_time = Some(chrono::Utc::now());
+            
+            // Get source actor ID
+            let source_id = context.actor_ids.get(&context.definition.source.id)
+                .ok_or_else(|| {
+                    DataFlareError::Workflow(format!("Source actor for workflow {} not found", workflow_id))
+                })?
+                .clone();
+                
+            (context.status.clone(), source_id)
+        };
         
         // Send start command to source actor
-        let source_id = context.actor_ids.get(&context.definition.source.id).ok_or_else(|| {
-            DataFlareError::Workflow(format!("Source actor for workflow {} not found", workflow_id))
-        })?;
-        
         let msg = MessageEnvelope::new(
             ActorId::new("workflow_engine"),
-            source_id.clone(),
+            source_actor_id.clone(),
             MessagePayload::Command(ActorCommand::Start),
         );
         
-        self.router.send::<crate::actor::NewDataFlareActor<_>>(msg).await?;
+        // Use our helper method
+        self.send_to_actor(msg).await?;
         
         // Send progress update
-        let progress = WorkflowProgress {
-            workflow_id: workflow_id.to_string(),
-            status: WorkflowStatus::Running,
-            progress: 0.0,
-            phase: "started".to_string(),
-            current_component: Some(context.definition.source.id.clone()),
-            message: Some("Workflow started".to_string()),
-            timestamp: chrono::Utc::now(),
-        };
-        
-        if let Err(e) = context.progress_tx.send(progress).await {
-            log::warn!("Failed to send progress update: {}", e);
+        if let Some(context) = self.workflows.get_mut(workflow_id) {
+            let progress = WorkflowProgress {
+                workflow_id: workflow_id.to_string(),
+                status: status,
+                progress: 0.0,
+                phase: "started".to_string(),
+                current_component: Some(context.definition.source.id.clone()),
+                message: Some("Workflow started".to_string()),
+                timestamp: chrono::Utc::now(),
+            };
+            
+            if let Err(e) = context.progress_tx.send(progress).await {
+                log::warn!("Failed to send progress update: {}", e);
+            }
         }
         
         Ok(())
@@ -311,43 +340,51 @@ impl WorkflowEngine {
     
     /// Pause a workflow
     pub async fn pause_workflow(&mut self, workflow_id: &str) -> Result<()> {
-        let context = self.workflows.get_mut(workflow_id).ok_or_else(|| {
-            DataFlareError::Workflow(format!("Workflow with ID {} not found", workflow_id))
-        })?;
-        
-        if context.status != WorkflowStatus::Running {
-            return Err(DataFlareError::Workflow(format!(
-                "Workflow {} is not running", workflow_id
-            )));
-        }
-        
-        // Update workflow status
-        context.status = WorkflowStatus::Paused;
+        // Get actor IDs and check status
+        let (status, actor_ids) = {
+            let context = self.workflows.get_mut(workflow_id).ok_or_else(|| {
+                DataFlareError::Workflow(format!("Workflow with ID {} not found", workflow_id))
+            })?;
+            
+            if context.status != WorkflowStatus::Running {
+                return Err(DataFlareError::Workflow(format!(
+                    "Workflow {} is not running", workflow_id
+                )));
+            }
+            
+            // Update workflow status
+            context.status = WorkflowStatus::Paused;
+            
+            (context.status.clone(), context.actor_ids.clone())
+        };
         
         // Send pause command to all actors
-        for (component_id, actor_id) in &context.actor_ids {
+        for (_, actor_id) in &actor_ids {
             let msg = MessageEnvelope::new(
                 ActorId::new("workflow_engine"),
                 actor_id.clone(),
                 MessagePayload::Command(ActorCommand::Pause),
             );
             
-            self.router.send::<crate::actor::NewDataFlareActor<_>>(msg).await?;
+            // Use our helper method
+            self.send_to_actor(msg).await?;
         }
         
         // Send progress update
-        let progress = WorkflowProgress {
-            workflow_id: workflow_id.to_string(),
-            status: WorkflowStatus::Paused,
-            progress: 0.0,
-            phase: "paused".to_string(),
-            current_component: None,
-            message: Some("Workflow paused".to_string()),
-            timestamp: chrono::Utc::now(),
-        };
-        
-        if let Err(e) = context.progress_tx.send(progress).await {
-            log::warn!("Failed to send progress update: {}", e);
+        if let Some(context) = self.workflows.get_mut(workflow_id) {
+            let progress = WorkflowProgress {
+                workflow_id: workflow_id.to_string(),
+                status: status,
+                progress: 0.0,
+                phase: "paused".to_string(),
+                current_component: None,
+                message: Some("Workflow paused".to_string()),
+                timestamp: chrono::Utc::now(),
+            };
+            
+            if let Err(e) = context.progress_tx.send(progress).await {
+                log::warn!("Failed to send progress update: {}", e);
+            }
         }
         
         Ok(())
@@ -355,45 +392,57 @@ impl WorkflowEngine {
     
     /// Stop a workflow
     pub async fn stop_workflow(&mut self, workflow_id: &str) -> Result<()> {
-        let context = self.workflows.get_mut(workflow_id).ok_or_else(|| {
-            DataFlareError::Workflow(format!("Workflow with ID {} not found", workflow_id))
-        })?;
+        // Get actor IDs and check status
+        let (actor_ids, should_stop) = {
+            let context = self.workflows.get_mut(workflow_id).ok_or_else(|| {
+                DataFlareError::Workflow(format!("Workflow with ID {} not found", workflow_id))
+            })?;
+            
+            if context.status == WorkflowStatus::Completed || 
+               matches!(context.status, WorkflowStatus::Failed(_)) {
+                return Err(DataFlareError::Workflow(format!(
+                    "Workflow {} is already stopped", workflow_id
+                )));
+            }
+            
+            (context.actor_ids.clone(), true)
+        };
         
-        if context.status == WorkflowStatus::Completed || 
-           matches!(context.status, WorkflowStatus::Failed(_)) {
-            return Err(DataFlareError::Workflow(format!(
-                "Workflow {} is already stopped", workflow_id
-            )));
+        if !should_stop {
+            return Ok(());
         }
         
         // Send stop command to all actors
-        for (component_id, actor_id) in &context.actor_ids {
+        for (_, actor_id) in &actor_ids {
             let msg = MessageEnvelope::new(
                 ActorId::new("workflow_engine"),
                 actor_id.clone(),
                 MessagePayload::Command(ActorCommand::Stop),
             );
             
-            self.router.send::<crate::actor::NewDataFlareActor<_>>(msg).await?;
+            // Use our helper method
+            self.send_to_actor(msg).await?;
         }
         
         // Update workflow status
-        context.status = WorkflowStatus::Completed;
-        context.stats.end_time = Some(chrono::Utc::now());
-        
-        // Send progress update
-        let progress = WorkflowProgress {
-            workflow_id: workflow_id.to_string(),
-            status: WorkflowStatus::Completed,
-            progress: 1.0,
-            phase: "completed".to_string(),
-            current_component: None,
-            message: Some("Workflow completed".to_string()),
-            timestamp: chrono::Utc::now(),
-        };
-        
-        if let Err(e) = context.progress_tx.send(progress).await {
-            log::warn!("Failed to send progress update: {}", e);
+        if let Some(context) = self.workflows.get_mut(workflow_id) {
+            context.status = WorkflowStatus::Completed;
+            context.stats.end_time = Some(chrono::Utc::now());
+            
+            // Send progress update
+            let progress = WorkflowProgress {
+                workflow_id: workflow_id.to_string(),
+                status: WorkflowStatus::Completed,
+                progress: 1.0,
+                phase: "completed".to_string(),
+                current_component: None,
+                message: Some("Workflow completed".to_string()),
+                timestamp: chrono::Utc::now(),
+            };
+            
+            if let Err(e) = context.progress_tx.send(progress).await {
+                log::warn!("Failed to send progress update: {}", e);
+            }
         }
         
         Ok(())
