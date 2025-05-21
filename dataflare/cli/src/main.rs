@@ -110,6 +110,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let workflow = YamlWorkflowParser::load_from_file(file)?;
             info!("工作流已加载: {}", workflow.id);
             
+            // 输出CSV源配置信息
+            for (name, source) in &workflow.sources {
+                info!("源配置 '{}' 信息:", name);
+                if let Some(file_path) = source.config.get("file_path") {
+                    info!("  文件路径: {:?}", file_path);
+                    if let Some(path_str) = file_path.as_str() {
+                        let path = std::path::Path::new(path_str);
+                        if path.exists() {
+                            let metadata = std::fs::metadata(path)?;
+                            info!("  文件大小: {} 字节", metadata.len());
+                            debug!("  读取文件前10行:");
+                            if let Ok(file) = std::fs::File::open(path) {
+                                use std::io::{BufRead, BufReader};
+                                let reader = BufReader::new(file);
+                                for (i, line) in reader.lines().take(10).enumerate() {
+                                    if let Ok(line) = line {
+                                        debug!("    行 {}: {}", i + 1, line);
+                                    }
+                                }
+                            }
+                        } else {
+                            warn!("  文件不存在: {}", path.display());
+                        }
+                    }
+                }
+            }
+            
             // 输出目标配置信息
             for (name, dest) in &workflow.destinations {
                 info!("目标配置 '{}' 信息:", name);
@@ -125,7 +152,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     info!("  父目录存在: {}", parent.display());
                                 } else {
                                     warn!("  父目录不存在: {}", parent.display());
+                                    debug!("  尝试创建目录: {}", parent.display());
+                                    std::fs::create_dir_all(parent)?;
+                                    info!("  已创建目录: {}", parent.display());
                                 }
+                            }
+                        }
+                        
+                        // 尝试创建一个空文件以验证写入权限
+                        let test_path = path.with_file_name(format!("test_{}.tmp", workflow.id));
+                        match std::fs::File::create(&test_path) {
+                            Ok(_) => {
+                                info!("  有写入权限");
+                                // 删除测试文件
+                                let _ = std::fs::remove_file(&test_path);
+                            },
+                            Err(e) => {
+                                warn!("  可能没有写入权限: {}", e);
                             }
                         }
                     }
@@ -175,11 +218,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(file_path) = dest.config.get("file_path").and_then(|v| v.as_str()) {
                         let path = std::path::Path::new(file_path);
                         if path.exists() {
-                            info!("目标文件已创建: {} (大小: {} 字节)", 
-                                  file_path, 
-                                  std::fs::metadata(path).map(|m| m.len()).unwrap_or(0));
+                            let metadata = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                            info!("目标文件已创建: {} (大小: {} 字节)", file_path, metadata);
+                            
+                            // 读取文件前几行作为示例
+                            if metadata > 0 {
+                                debug!("文件内容预览:");
+                                if let Ok(file) = std::fs::File::open(path) {
+                                    use std::io::{BufRead, BufReader};
+                                    let reader = BufReader::new(file);
+                                    for (i, line) in reader.lines().take(5).enumerate() {
+                                        if let Ok(line) = line {
+                                            debug!("  行 {}: {}", i + 1, line);
+                                        }
+                                    }
+                                }
+                            } else {
+                                warn!("目标文件存在但为空");
+                            }
                         } else {
                             warn!("目标文件未创建: {}", file_path);
+                            
+                            // 检查文件父目录是否存在
+                            if let Some(parent) = path.parent() {
+                                if !parent.exists() {
+                                    warn!("目标文件的父目录不存在: {}", parent.display());
+                                } else {
+                                    // 检查目录下的其他文件
+                                    debug!("检查目录 {}:", parent.display());
+                                    if let Ok(entries) = std::fs::read_dir(parent) {
+                                        for entry in entries {
+                                            if let Ok(entry) = entry {
+                                                debug!("  {}", entry.path().display());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
