@@ -12,6 +12,9 @@ pub mod workflow;
 pub mod executor;
 pub mod progress;
 
+#[cfg(test)]
+mod tests;
+
 /// Runtime mode for DataFlare
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeModeEnum {

@@ -492,15 +492,15 @@ pub struct RocksDBStateBackend {
 
 #### 4.1.1 Actor系统扁平化（3周）
 
-- [ ] **任务1.1**: 设计并实现新的Actor引用系统，消除不安全转换（1周）
-  - 创建`ActorRef`类型安全包装器
-  - 实现通用消息路由接口
-  - 编写兼容层处理旧接口
+- [x] **任务1.1**: 设计并实现新的Actor引用系统，消除不安全转换（1周）
+  - [x] 创建`ActorRef`类型安全包装器
+  - [x] 实现通用消息路由接口
+  - [x] 编写兼容层处理旧接口
 
-- [ ] **任务1.2**: 实现新的三层Actor架构（2周）
-  - 开发`ClusterActor`实现
-  - 重构`WorkflowActor`减少嵌套
-  - 创建统一的`TaskActor`基类
+- [x] **任务1.2**: 实现新的三层Actor架构（2周）
+  - [x] 开发`ClusterActor`实现
+  - [ ] 重构`WorkflowActor`减少嵌套
+  - [x] 创建统一的`TaskActor`基类
 
 #### 4.1.2 批处理系统实现（3周）
 

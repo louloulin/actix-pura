@@ -1,148 +1,147 @@
-//! # DataFlare Actor System
+//! Actor system for DataFlare
 //!
-//! This module defines the actors that make up the DataFlare system.
-//! It provides a unified actor model for data processing, with support
-//! for message passing, supervision, and lifecycle management.
+//! This module provides the actor-based runtime for DataFlare.
 
-mod source;
-mod processor;
-mod destination;
+// Module declarations
+pub mod source;
+pub mod processor;
+pub mod destination;
 pub mod workflow;
 pub mod supervisor;
 pub mod message_bus;
-pub mod router;
-pub mod pool;
 pub mod message_system;
+pub mod pool;
+pub mod router;
+pub mod actor_ref;
+pub mod cluster;
+pub mod task;
 
+// Re-exports
 pub use source::SourceActor;
 pub use processor::ProcessorActor;
 pub use destination::DestinationActor;
 pub use workflow::WorkflowActor;
 pub use supervisor::SupervisorActor;
-pub use message_bus::{MessageBus, DataFlareMessage, ActorId as OldActorId, TraceInfo, MessageHandler as OldMessageHandler};
-pub use router::{MessageRouter as OldMessageRouter, RouterActor, RouterConfig, RouterStats, Tracer, RouteMessage, GetRouterStats, ResetRouterStats};
-pub use pool::{ActorPool, PoolBuilder, PoolConfig, PoolStrategy, StopWorker};
-
-// New message system exports
-pub use message_system::{ActorId, ActorRole, ActorStatus as NewActorStatus, MessageEnvelope, MessagePayload,
-    ActorCommand, ActorQuery, ActorResponse, ActorEvent, MessageResponse, MessageHandler, DataFlareActor as NewDataFlareActor,
-    ActorRegistry, MessageRouter};
+pub use message_bus::MessageBus;
+pub use pool::ActorPool;
+pub use actor_ref::{ActorRef, ActorRegistry, MessageRouter};
+pub use cluster::{ClusterActor, ClusterConfig, RegisterNode, UnregisterNode, 
+                 Heartbeat, DeployWorkflow, StopWorkflow};
+pub use task::{TaskActor, TaskKind, TaskState, TaskStats, ProcessBatch,
+              GetTaskState, SetTaskState, GetTaskStats};
 
 use actix::prelude::*;
 use dataflare_core::error::Result;
-use dataflare_core::message::{DataRecordBatch, WorkflowProgress};
+use dataflare_core::message::{WorkflowPhase, DataRecordBatch, WorkflowProgress};
+use serde_json::Value;
 
-/// Trait para actores de DataFlare
-pub trait DataFlareActor: Actor {
-    /// Obtiene el ID del actor
-    fn get_id(&self) -> &str;
-
-    /// Obtiene el tipo del actor
-    fn get_type(&self) -> &str;
-
-    /// Inicializa el actor
-    fn initialize(&mut self, ctx: &mut Self::Context) -> Result<()>;
-
-    /// Finaliza el actor
-    fn finalize(&mut self, ctx: &mut Self::Context) -> Result<()>;
-
-    /// Reporta progreso
-    fn report_progress(&self, workflow_id: &str, phase: dataflare_core::message::WorkflowPhase, progress: f64, message: &str);
+/// Actor status
+#[derive(Debug, Clone)]
+pub enum ActorStatus {
+    /// Actor is initialized but not running
+    Initialized,
+    /// Actor is running
+    Running,
+    /// Actor is paused
+    Paused,
+    /// Actor is stopped
+    Stopped,
+    /// Actor has an error
+    Error(String),
 }
 
-/// Mensaje para inicializar un actor
+/// Message to initialize an actor
 #[derive(Message)]
 #[rtype(result = "Result<()>")]
 pub struct Initialize {
-    /// ID del flujo de trabajo
+    /// ID of the workflow
     pub workflow_id: String,
-
-    /// Configuración del actor
-    pub config: serde_json::Value,
+    /// Configuration values
+    pub config: Value,
 }
 
-/// Mensaje para finalizar un actor
+/// Message to finalize an actor
 #[derive(Message)]
 #[rtype(result = "Result<()>")]
 pub struct Finalize {
-    /// ID del flujo de trabajo
+    /// ID of the workflow
     pub workflow_id: String,
 }
 
-/// Mensaje para pausar un actor
-#[derive(Message)]
-#[rtype(result = "Result<()>")]
-pub struct Pause {
-    /// ID del flujo de trabajo
-    pub workflow_id: String,
-}
-
-/// Mensaje para reanudar un actor
-#[derive(Message)]
-#[rtype(result = "Result<()>")]
-pub struct Resume {
-    /// ID del flujo de trabajo
-    pub workflow_id: String,
-}
-
-/// Mensaje para obtener el estado de un actor
+/// Message to get actor status
 #[derive(Message)]
 #[rtype(result = "Result<ActorStatus>")]
 pub struct GetStatus;
 
-/// Estado de un actor
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ActorStatus {
-    /// Actor inicializado
-    Initialized,
-    /// Actor en ejecución
-    Running,
-    /// Actor pausado
-    Paused,
-    /// Actor finalizado
-    Finalized,
-    /// Actor en error
-    Error(String),
+/// Message to pause an actor
+#[derive(Message)]
+#[rtype(result = "Result<()>")]
+pub struct Pause {
+    /// Workflow ID
+    pub workflow_id: String,
 }
 
-/// Mensaje para enviar un lote de datos
+/// Message to resume an actor
+#[derive(Message)]
+#[rtype(result = "Result<()>")]
+pub struct Resume {
+    /// Workflow ID
+    pub workflow_id: String,
+}
+
+/// Message to send a batch of data
 #[derive(Message)]
 #[rtype(result = "Result<()>")]
 pub struct SendBatch {
-    /// ID del flujo de trabajo
+    /// Workflow ID
     pub workflow_id: String,
-
-    /// Lote de datos
+    /// Batch of data
     pub batch: DataRecordBatch,
 }
 
-/// Mensaje para suscribirse a actualizaciones de progreso
+/// Message to subscribe to progress updates
 #[derive(Message)]
-#[rtype(result = "()")]
-pub struct SubscribeToProgress {
-    /// ID del flujo de trabajo
+#[rtype(result = "Result<()>")]
+pub struct SubscribeProgress {
+    /// Workflow ID
     pub workflow_id: String,
-
-    /// Receptor de actualizaciones
+    /// Progress update recipient
     pub recipient: Recipient<WorkflowProgress>,
 }
 
-/// Mensaje para cancelar la suscripción a actualizaciones de progreso
+/// Message to unsubscribe from progress updates
 #[derive(Message)]
-#[rtype(result = "()")]
-pub struct UnsubscribeFromProgress {
-    /// ID del flujo de trabajo
+#[rtype(result = "Result<()>")]
+pub struct UnsubscribeProgress {
+    /// Workflow ID
     pub workflow_id: String,
-
-    /// Receptor a cancelar
+    /// Recipient to cancel
     pub recipient: Recipient<WorkflowProgress>,
+}
+
+/// Common trait for all DataFlare actors
+pub trait DataFlareActor: Actor {
+    /// Get the actor ID
+    fn get_id(&self) -> &str;
+    
+    /// Get the actor type
+    fn get_type(&self) -> &str;
+    
+    /// Initialize the actor
+    fn initialize(&mut self, ctx: &mut Self::Context) -> Result<()>;
+    
+    /// Finalize the actor
+    fn finalize(&mut self, ctx: &mut Self::Context) -> Result<()>;
+    
+    /// Report progress
+    fn report_progress(&self, workflow_id: &str, phase: WorkflowPhase, progress: f64, message: &str);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // Implementación de prueba de un actor DataFlare
+    // Test implementation of a DataFlare actor
     struct TestActor {
         id: String,
         actor_type: String,
@@ -170,7 +169,7 @@ mod tests {
         }
 
         fn report_progress(&self, _workflow_id: &str, _phase: dataflare_core::message::WorkflowPhase, _progress: f64, _message: &str) {
-            // No hace nada en la prueba
+            // Does nothing in the test
         }
     }
 
@@ -185,3 +184,7 @@ mod tests {
         assert_eq!(actor.get_type(), "test");
     }
 }
+
+// Re-exports
+pub use message_system::MessageSystem;
+pub use router::ActorRouter;
