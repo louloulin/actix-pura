@@ -35,23 +35,3 @@ cloud = []
 [[bin]]
 name = "main"
 path = "src/bin/main.rs"
-
-[[bin]]
-name = "batch_benchmark"
-path = "bench/batch_benchmark.rs"
-
-[[bin]]
-name = "postgres_batch_benchmark"
-path = "bench/postgres_batch_benchmark.rs"
-
-[[bin]]
-name = "generate_test_data"
-path = "bench/generate_test_data.rs"
-
-[[bin]]
-name = "simple_benchmark"
-path = "bench/simple_benchmark.rs"
-
-[[bin]]
-name = "simple_core_benchmark"
-path = "bench/simple_core_benchmark.rs"
