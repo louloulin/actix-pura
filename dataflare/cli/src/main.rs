@@ -58,9 +58,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 解析命令行参数
     let cli = Cli::parse();
 
-    // 使用 actix 系统
-    let system = actix::System::new();
-
     // 处理命令
     match &cli.command {
         Commands::Validate { file, dot } => {
@@ -91,25 +88,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // 创建工作流执行器
             let mut executor = WorkflowExecutor::new();
 
-            // 初始化执行器
-            executor.initialize()?;
+            // 创建并使用本地 Tokio 运行时，同时创建 LocalSet 来支持 spawn_local
+            let runtime = tokio::runtime::Runtime::new()?;
+            let local = tokio::task::LocalSet::new();
+            local.block_on(&runtime, async {
+                // 初始化执行器
+                executor.initialize()?;
 
-            // 设置进度回调
-            let mut executor = executor.with_progress_callback(Box::new(|progress| {
-                println!("工作流进度更新: {:?}", progress);
-            }));
+                // 设置进度回调
+                let mut executor = executor.with_progress_callback(Box::new(|progress| {
+                    println!("工作流进度更新: {:?}", progress);
+                }));
 
-            // 准备工作流
-            executor.prepare(&workflow)?;
+                // 准备工作流
+                executor.prepare(&workflow)?;
 
-            // 执行工作流
-            let start = Instant::now();
-            actix::System::new().block_on(async {
-                executor.execute(&workflow).await
+                // 执行工作流
+                let start = Instant::now();
+                executor.execute(&workflow).await?;
+                let duration = start.elapsed();
+
+                println!("工作流执行完成，耗时 {:.2} 秒", duration.as_secs_f64());
+                
+                Ok::<(), Box<dyn std::error::Error>>(())
             })?;
-            let duration = start.elapsed();
-
-            println!("工作流执行完成，耗时 {:.2} 秒", duration.as_secs_f64());
         },
         Commands::Version => {
             println!("DataFlare 版本: {}", env!("CARGO_PKG_VERSION"));

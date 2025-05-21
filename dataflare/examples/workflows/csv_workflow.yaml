@@ -8,7 +8,7 @@ sources:
   csv_source:
     type: csv
     config:
-      path: "./dataflare/examples/data/sample.csv"
+      file_path: "../examples/data/sample.csv"
       has_header: true
       delimiter: ","
     collection_mode: full

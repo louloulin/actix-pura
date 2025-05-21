@@ -9,7 +9,7 @@ sources:
   csv_source:
     type: csv
     config:
-      file_path: "./dataflare/examples/data/sample.csv"
+      file_path: "../examples/data/sample.csv"
       has_header: true
       delimiter: ","
     collection_mode: full
@@ -49,7 +49,7 @@ destinations:
       - transform_data
     type: csv
     config:
-      file_path: "./dataflare/examples/data/transformed_output.csv"
+      file_path: "../examples/data/transformed_output.csv"
       delimiter: ","
       write_header: true
 
