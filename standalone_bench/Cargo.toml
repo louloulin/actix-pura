@@ -1,16 +1,15 @@
 [package]
-name = "dataflare-benchmark"
+name = "standalone_bench"
 version = "0.1.0"
 edition = "2021"
 
 [workspace]
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
+dataflare-core = { path = "../dataflare/core" }
+dataflare-connector = { path = "../dataflare/connector" }
+tokio = { version = "1", features = ["full"] }
+log = "0.4"
+env_logger = "0.10"
 serde_json = "1.0"
-uuid = { version = "1.4", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] }
-
-[[bin]]
-name = "batch_benchmark"
-path = "src/batch_benchmark.rs" 
+futures = "0.3" 

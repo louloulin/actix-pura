@@ -1,33 +1,38 @@
-//! Performance Test Script
-//! 
-//! 使用直接的CSV连接器测试而不依赖Actor系统
-
 use std::path::PathBuf;
 use std::time::Instant;
 use log::{info, error, debug, LevelFilter};
 use serde_json::json;
+use futures::StreamExt;
 
-use dataflare::{
-    DataFlareConfig,
-    connector::csv::{CsvSourceConnector, CsvDestinationConnector},
-    connector::source::SourceConnector,
-    connector::destination::{DestinationConnector, WriteMode},
+// 引入必要的类型
+use dataflare_core::{
     message::{DataRecord, DataRecordBatch},
     error::Result,
 };
 
+use dataflare_connector::{
+    source::SourceConnector,
+    destination::{DestinationConnector, WriteMode},
+    csv::{CsvSourceConnector, CsvDestinationConnector},
+};
+
+fn setup_logger() -> Result<()> {
+    env_logger::Builder::new()
+        .filter_level(LevelFilter::Info)
+        .init();
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    // 初始化 DataFlare
-    let mut config = DataFlareConfig::default();
-    config.log_level = LevelFilter::Debug;
-    dataflare::init(config)?;
+    // 初始化日志
+    setup_logger()?;
 
-    info!("开始CSV性能测试");
+    info!("开始CSV性能基准测试");
 
     // 配置文件路径 - 使用绝对路径确保访问
     let input_path = PathBuf::from("/Users/louloulin/mastra_docs/actix/examples/data/large_test.csv");
-    let output_path = PathBuf::from("/Users/louloulin/mastra_docs/actix/examples/data/performance_output.csv");
+    let output_path = PathBuf::from("/Users/louloulin/mastra_docs/actix/examples/data/benchmark_output.csv");
     
     info!("输入文件: {:?}", input_path);
     info!("输出文件: {:?}", output_path);
@@ -70,7 +75,6 @@ async fn main() -> Result<()> {
     let mut filtered_records = Vec::new();
     
     info!("开始处理记录");
-    use futures::StreamExt;
     
     while let Some(record_result) = stream.next().await {
         match record_result {
@@ -125,8 +129,8 @@ async fn main() -> Result<()> {
                             // 添加到过滤结果
                             filtered_records.push(transformed);
                             
-                            // 每1000条记录报告一次进度
-                            if filtered_records.len() % 1000 == 0 {
+                            // 每5000条记录报告一次进度
+                            if filtered_records.len() % 5000 == 0 {
                                 info!("已处理 {} 条记录，筛选后 {} 条", total_records, filtered_records.len());
                             }
                         }
