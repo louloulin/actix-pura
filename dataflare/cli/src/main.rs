@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use std::time::Instant;
 use clap::{Parser, Subcommand};
 use dataflare_runtime::workflow::{YamlWorkflowParser, WorkflowExecutor};
+use log::{info, debug, error, warn, LevelFilter};
+use env_logger::Builder;
 
 #[derive(Parser)]
 #[command(name = "dataflare")]
@@ -14,6 +16,10 @@ use dataflare_runtime::workflow::{YamlWorkflowParser, WorkflowExecutor};
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+
+    /// 日志级别 (error, warn, info, debug, trace)
+    #[arg(short, long, default_value = "info")]
+    log_level: String,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -52,83 +58,166 @@ enum Commands {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 初始化 DataFlare
-    dataflare_cli::init()?;
-
     // 解析命令行参数
     let cli = Cli::parse();
+
+    // 设置日志级别
+    let log_level = match cli.log_level.to_lowercase().as_str() {
+        "error" => LevelFilter::Error,
+        "warn" => LevelFilter::Warn,
+        "info" => LevelFilter::Info,
+        "debug" => LevelFilter::Debug,
+        "trace" => LevelFilter::Trace,
+        _ => LevelFilter::Info,
+    };
+
+    // 初始化日志
+    Builder::new()
+        .filter_level(log_level)
+        .format_timestamp_secs()
+        .init();
+
+    // 初始化 DataFlare
+    dataflare_cli::init()?;
+    
+    info!("DataFlare CLI 启动");
+    debug!("日志级别: {:?}", log_level);
 
     // 处理命令
     match &cli.command {
         Commands::Validate { file, dot } => {
-            println!("验证工作流: {:?}", file);
+            info!("验证工作流: {:?}", file);
 
             // 使用 YAML 解析器加载工作流
             let workflow = YamlWorkflowParser::load_from_file(file)?;
+            info!("工作流验证成功: {}", workflow.id);
+            info!("名称: {}", workflow.name);
+            info!("描述: {}", workflow.description.as_deref().unwrap_or("无"));
+            info!("版本: {}", workflow.version);
+            debug!("源数量: {}", workflow.sources.len());
+            debug!("转换数量: {}", workflow.transformations.len());
+            debug!("目标数量: {}", workflow.destinations.len());
 
-            println!("工作流验证成功: {}", workflow.id);
-            println!("名称: {}", workflow.name);
-            println!("描述: {}", workflow.description.as_deref().unwrap_or("无"));
-            println!("版本: {}", workflow.version);
-            println!("源数量: {}", workflow.sources.len());
-            println!("转换数量: {}", workflow.transformations.len());
-            println!("目标数量: {}", workflow.destinations.len());
+            // 打印目标配置的详细信息
+            for (name, dest) in &workflow.destinations {
+                debug!("目标 '{}' 配置:", name);
+                if let Some(file_path) = dest.config.get("file_path") {
+                    debug!("  文件路径: {:?}", file_path);
+                }
+            }
 
             if *dot {
                 // 生成 DOT 图
-                println!("DOT 图功能暂未实现");
+                info!("DOT 图功能暂未实现");
             }
         },
         Commands::Execute { file, incremental: _, state: _ } => {
-            println!("执行工作流: {:?}", file);
+            info!("执行工作流: {:?}", file);
+            // 验证文件路径
+            if !file.exists() {
+                error!("工作流文件不存在: {:?}", file);
+                return Err(format!("工作流文件不存在: {:?}", file).into());
+            }
+            info!("工作流文件路径: {}", file.canonicalize()?.display());
 
             // 使用 YAML 解析器加载工作流
             let workflow = YamlWorkflowParser::load_from_file(file)?;
+            info!("工作流已加载: {}", workflow.id);
+            
+            // 输出目标配置信息
+            for (name, dest) in &workflow.destinations {
+                info!("目标配置 '{}' 信息:", name);
+                if let Some(file_path) = dest.config.get("file_path") {
+                    info!("  文件路径: {:?}", file_path);
+                    if let Some(path_str) = file_path.as_str() {
+                        let path = std::path::Path::new(path_str);
+                        if path.exists() {
+                            info!("  文件已存在，将被覆盖或追加");
+                        } else {
+                            if let Some(parent) = path.parent() {
+                                if parent.exists() {
+                                    info!("  父目录存在: {}", parent.display());
+                                } else {
+                                    warn!("  父目录不存在: {}", parent.display());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // 创建工作流执行器
+            info!("创建工作流执行器");
             let mut executor = WorkflowExecutor::new();
 
             // 创建并使用本地 Tokio 运行时，同时创建 LocalSet 来支持 spawn_local
+            info!("创建 Tokio 运行时");
             let runtime = tokio::runtime::Runtime::new()?;
             let local = tokio::task::LocalSet::new();
             local.block_on(&runtime, async {
                 // 初始化执行器
+                info!("初始化执行器");
                 executor.initialize()?;
 
                 // 设置进度回调
                 let mut executor = executor.with_progress_callback(Box::new(|progress| {
-                    println!("工作流进度更新: {:?}", progress);
+                    info!("工作流进度更新: {:?}", progress);
                 }));
 
                 // 准备工作流
+                info!("准备工作流");
                 executor.prepare(&workflow)?;
 
                 // 执行工作流
+                info!("开始执行工作流");
                 let start = Instant::now();
-                executor.execute(&workflow).await?;
+                match executor.execute(&workflow).await {
+                    Ok(_) => {
+                        info!("工作流执行成功");
+                    },
+                    Err(e) => {
+                        error!("工作流执行失败: {}", e);
+                        return Err(Box::new(e) as Box<dyn std::error::Error>);
+                    }
+                }
                 let duration = start.elapsed();
 
-                println!("工作流执行完成，耗时 {:.2} 秒", duration.as_secs_f64());
+                info!("工作流执行完成，耗时 {:.2} 秒", duration.as_secs_f64());
+
+                // 检查目标文件是否生成
+                for (name, dest) in &workflow.destinations {
+                    if let Some(file_path) = dest.config.get("file_path").and_then(|v| v.as_str()) {
+                        let path = std::path::Path::new(file_path);
+                        if path.exists() {
+                            info!("目标文件已创建: {} (大小: {} 字节)", 
+                                  file_path, 
+                                  std::fs::metadata(path).map(|m| m.len()).unwrap_or(0));
+                        } else {
+                            warn!("目标文件未创建: {}", file_path);
+                        }
+                    }
+                }
                 
                 Ok::<(), Box<dyn std::error::Error>>(())
             })?;
         },
         Commands::Version => {
-            println!("DataFlare 版本: {}", env!("CARGO_PKG_VERSION"));
-            println!("Actix 版本: {}", "2.0.0");
+            info!("DataFlare 版本: {}", env!("CARGO_PKG_VERSION"));
+            info!("使用 Tokio 运行时");
         },
         Commands::ListConnectors => {
-            println!("支持的连接器:");
-            println!("源连接器:");
+            info!("支持的连接器:");
+            info!("源连接器:");
             for connector in dataflare_cli::list_source_connectors() {
-                println!("  - {}", connector);
+                info!("  - {}", connector);
             }
-            println!("目标连接器:");
+            info!("目标连接器:");
             for connector in dataflare_cli::list_destination_connectors() {
-                println!("  - {}", connector);
+                info!("  - {}", connector);
             }
         },
     }
 
+    info!("DataFlare CLI 执行完成");
     Ok(())
 }
