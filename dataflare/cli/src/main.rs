@@ -16,7 +16,7 @@ struct Cli {
     command: Commands,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug, Clone)]
 enum Commands {
     /// 验证 YAML 工作流
     Validate {
@@ -104,7 +104,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // 执行工作流
             let start = Instant::now();
-            system.block_on(async {
+            actix::System::new().block_on(async {
                 executor.execute(&workflow).await
             })?;
             let duration = start.elapsed();
