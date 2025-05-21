@@ -23,6 +23,7 @@ use dataflare_core::{
     },
 };
 
+use crate::source::SourceConnector;
 use super::PostgresSourceConnector;
 
 /// Batch-optimized PostgreSQL source connector
@@ -79,8 +80,8 @@ impl PostgresBatchSourceConnector {
         self
     }
     
-    /// Build a SQL query based on the current position
-    async fn build_query_from_position(&self) -> Result<(String, Vec<tokio_postgres::types::ToSql + Sync>)> {
+    /// Build SQL query based on the current position
+    async fn build_query_from_position(&self) -> Result<(String, Vec<String>)> {
         // Get table name
         let table = self.base.config.get("table")
             .and_then(|t| t.as_str())
@@ -112,23 +113,26 @@ impl PostgresBatchSourceConnector {
                     .ok_or_else(|| DataFlareError::Config("cursor_field is required for incremental mode".to_string()))?;
                     
                 // Get cursor value from position or use default
-                let cursor_value = self.position.get_data("cursor_value")
-                    .or_else(|| state.data.get("cursor_value"))
-                    .unwrap_or(&"0".to_string());
+                let cursor_value = if let Some(cv) = self.position.get_data("cursor_value") {
+                    cv.clone()
+                } else if let Some(field_value) = state.data.get("cursor_field").and_then(|v| v.as_str()) {
+                    field_value.to_string()
+                } else {
+                    "0".to_string()
+                };
                     
                 let query = format!(
                     "SELECT * FROM {} WHERE {} > $1 ORDER BY {} ASC LIMIT {}",
                     table, cursor_field, cursor_field, self.batch_size
                 );
                 
-                let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
-                params.push(&cursor_value);
+                let params = vec![cursor_value];
                 
                 Ok((query, params))
             },
             _ => {
                 // Other modes not fully supported yet in batch mode
-                Err(DataFlareError::Connector(format!(
+                Err(DataFlareError::Connection(format!(
                     "Extraction mode {:?} not fully supported in batch mode yet", 
                     extraction_mode
                 )))
@@ -138,7 +142,7 @@ impl PostgresBatchSourceConnector {
     
     /// Convert PostgreSQL row to DataRecord
     fn row_to_record(&self, row: Row) -> Result<DataRecord> {
-        let mut record = DataRecord::new();
+        let mut record_data = serde_json::Map::new();
         
         // Get column names
         let cols = row.columns();
@@ -151,40 +155,46 @@ impl PostgresBatchSourceConnector {
             // Process value based on column type
             if col_type == &tokio_postgres::types::Type::INT4 || col_type == &tokio_postgres::types::Type::INT8 {
                 if let Ok(value) = row.try_get::<_, i64>(name) {
-                    record.set_int(name, value);
+                    record_data.insert(name.to_string(), json!(value));
                 }
             } else if col_type == &tokio_postgres::types::Type::FLOAT4 || col_type == &tokio_postgres::types::Type::FLOAT8 {
                 if let Ok(value) = row.try_get::<_, f64>(name) {
-                    record.set_float(name, value);
+                    record_data.insert(name.to_string(), json!(value));
                 }
             } else if col_type == &tokio_postgres::types::Type::TEXT || col_type == &tokio_postgres::types::Type::VARCHAR {
                 if let Ok(value) = row.try_get::<_, String>(name) {
-                    record.set_string(name, value);
+                    record_data.insert(name.to_string(), json!(value));
                 }
             } else if col_type == &tokio_postgres::types::Type::BOOL {
                 if let Ok(value) = row.try_get::<_, bool>(name) {
-                    record.set_bool(name, value);
+                    record_data.insert(name.to_string(), json!(value));
                 }
             } else if col_type == &tokio_postgres::types::Type::TIMESTAMP || col_type == &tokio_postgres::types::Type::TIMESTAMPTZ {
                 if let Ok(value) = row.try_get::<_, DateTime<Utc>>(name) {
-                    record.set_timestamp(name, value);
+                    record_data.insert(name.to_string(), json!(value.to_rfc3339()));
                 }
             } else if col_type == &tokio_postgres::types::Type::JSON || col_type == &tokio_postgres::types::Type::JSONB {
-                if let Ok(value) = row.try_get::<_, serde_json::Value>(name) {
-                    record.set_object(name, value);
+                // For JSON types, we'll parse the string representation
+                if let Ok(value) = row.try_get::<_, String>(name) {
+                    if let Ok(json_value) = serde_json::from_str::<Value>(&value) {
+                        record_data.insert(name.to_string(), json_value);
+                    } else {
+                        record_data.insert(name.to_string(), json!(value));
+                    }
                 }
             } else {
                 // Default to string representation
                 if let Ok(value) = row.try_get::<_, String>(name) {
-                    record.set_string(name, value);
+                    record_data.insert(name.to_string(), json!(value));
                 }
             }
         }
         
-        Ok(record)
+        Ok(DataRecord::new(Value::Object(record_data)))
     }
 }
 
+#[async_trait]
 impl Connector for PostgresBatchSourceConnector {
     fn connector_type(&self) -> &str {
         "postgres-batch"
@@ -204,6 +214,8 @@ impl Connector for PostgresBatchSourceConnector {
     
     async fn check_connection(&self) -> Result<bool> {
         // Use base connector to check connection
+        // We need to use the trait method, so import the trait first
+        use crate::source::SourceConnector;
         self.base.check_connection().await
     }
     
@@ -248,13 +260,24 @@ impl BatchSourceConnector for PostgresBatchSourceConnector {
         })?;
         
         // Build query based on position
-        let (query, params) = self.build_query_from_position().await?;
+        let (query, param_values) = self.build_query_from_position().await?;
         
         debug!("Executing batch query: {}", query);
         
         // Execute query
-        let rows = client.query(&query, &params).await
-            .map_err(|e| DataFlareError::Query(format!("Failed to execute query: {}", e)))?;
+        let rows = if param_values.is_empty() {
+            client.query(&query, &[]).await
+                .map_err(|e| DataFlareError::Query(format!("Failed to execute query: {}", e)))?
+        } else {
+            // Convert params to the right type for Postgres
+            let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = param_values
+                .iter()
+                .map(|v| v as &(dyn tokio_postgres::types::ToSql + Sync))
+                .collect();
+            
+            client.query(&query, &params).await
+                .map_err(|e| DataFlareError::Query(format!("Failed to execute query: {}", e)))?
+        };
         
         // Convert rows to records
         let mut records = Vec::with_capacity(rows.len());
@@ -283,8 +306,14 @@ impl BatchSourceConnector for PostgresBatchSourceConnector {
                     // Get last record's cursor value
                     let last_record = &records[records.len() - 1];
                     
-                    if let Some(cursor_value) = last_record.get_string(cursor_field) {
-                        self.position = Position::new().with_data("cursor_value", cursor_value);
+                    if let Some(value) = last_record.data.get(cursor_field) {
+                        if let Some(s) = value.as_str() {
+                            self.position = Position::new().with_data("cursor_value", s.to_string());
+                        } else if let Some(n) = value.as_i64() {
+                            self.position = Position::new().with_data("cursor_value", n.to_string());
+                        } else if let Some(f) = value.as_f64() {
+                            self.position = Position::new().with_data("cursor_value", f.to_string());
+                        }
                     }
                 }
             }
@@ -299,19 +328,19 @@ impl BatchSourceConnector for PostgresBatchSourceConnector {
     }
     
     async fn commit(&mut self, position: Position) -> Result<()> {
-        // Store position
-        self.position = position;
-        
         // Update base state with position data
         let mut state = self.base.get_state()?;
         
         // Copy position data to state
-        for (key, value) in position.data() {
-            state.add_data(key, value);
+        for (key, value) in position.data().iter() {
+            state.add_data(key, value.to_string());
         }
         
         // Save updated state back to base
         self.base.state = state;
+        
+        // Store position (after we've used it)
+        self.position = position;
         
         Ok(())
     }

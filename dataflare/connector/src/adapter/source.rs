@@ -3,60 +3,58 @@
 //! This module provides an adapter that converts legacy SourceConnectors
 //! to the new BatchSourceConnector interface.
 
-use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::Arc;
 use async_trait::async_trait;
-use futures::{Stream, StreamExt, TryStreamExt};
-use log::{debug, warn};
+use futures::{Stream, StreamExt};
+use log::warn;
 
 use dataflare_core::{
     error::{DataFlareError, Result},
     message::{DataRecord, DataRecordBatch},
     model::Schema,
-    state::{SourceState, Position},
+    state::SourceState,
     connector::{
         Connector, SourceConnector, BatchSourceConnector, 
-        ExtractionMode, ConnectorCapabilities
-    }
+        ExtractionMode, ConnectorCapabilities, Position
+    },
 };
 
-/// Adapter that converts a SourceConnector to a BatchSourceConnector
+/// Adapter that transforms a legacy SourceConnector to a BatchSourceConnector
 pub struct BatchSourceAdapter<T: SourceConnector> {
-    /// The wrapped source connector
+    /// Wrapped source connector
     inner: T,
     
-    /// Buffer for read operations
-    buffer: Vec<DataRecord>,
+    /// Batch size
+    batch_size: usize,
     
     /// Current position
     position: Position,
-    
-    /// Buffered stream for reading
-    stream: Option<Pin<Box<dyn Stream<Item = Result<DataRecord>> + Send>>>,
 }
 
 impl<T: SourceConnector> BatchSourceAdapter<T> {
-    /// Create a new adapter for a source connector
-    pub fn new(inner: T) -> Self {
+    /// Create a new batch source adapter
+    pub fn new(source: T) -> Self {
         Self {
-            inner,
-            buffer: Vec::new(),
+            inner: source,
+            batch_size: 1000,
             position: Position::new(),
-            stream: None,
         }
     }
     
-    /// Initialize the stream if it doesn't exist
-    async fn ensure_stream_initialized(&mut self) -> Result<()> {
-        if self.stream.is_none() {
-            let state = self.get_state()?;
-            let stream = self.inner.read(Some(state)).await?;
-            self.stream = Some(stream);
-        }
-        Ok(())
+    /// Set batch size
+    pub fn with_batch_size(mut self, batch_size: usize) -> Self {
+        self.batch_size = batch_size;
+        self
+    }
+    
+    /// Initialize a stream from the inner connector
+    async fn create_stream(&mut self, state: Option<SourceState>) -> Result<Box<dyn Stream<Item = Result<DataRecord>> + Send + Unpin>> {
+        self.inner.read(state).await
     }
 }
 
+#[async_trait]
 impl<T: SourceConnector> Connector for BatchSourceAdapter<T> {
     fn connector_type(&self) -> &str {
         self.inner.connector_type()
@@ -71,17 +69,16 @@ impl<T: SourceConnector> Connector for BatchSourceAdapter<T> {
     }
     
     fn get_capabilities(&self) -> ConnectorCapabilities {
-        // Enhance capabilities based on the adaptations we provide
-        let mut caps = ConnectorCapabilities::default();
-        caps.supports_batch_operations = true;
-        caps.preferred_batch_size = Some(1000); // Default batch size
-        caps
+        let mut capabilities = self.inner.get_capabilities();
+        capabilities.supports_batch_operations = true;
+        capabilities.preferred_batch_size = Some(self.batch_size);
+        capabilities
     }
     
-    fn get_metadata(&self) -> HashMap<String, String> {
-        let mut metadata = HashMap::new();
-        metadata.insert("adapter".to_string(), "BatchSourceAdapter".to_string());
-        metadata.insert("original_type".to_string(), self.inner.connector_type().to_string());
+    fn get_metadata(&self) -> std::collections::HashMap<String, String> {
+        let mut metadata = self.inner.get_metadata();
+        metadata.insert("adapted".to_string(), "true".to_string());
+        metadata.insert("batch_size".to_string(), self.batch_size.to_string());
         metadata
     }
 }
@@ -93,40 +90,33 @@ impl<T: SourceConnector> BatchSourceConnector for BatchSourceAdapter<T> {
     }
     
     async fn read_batch(&mut self, max_size: usize) -> Result<DataRecordBatch> {
-        // Ensure we have an initialized stream
-        self.ensure_stream_initialized().await?;
+        let state = self.get_state()?;
         
-        // Use the existing stream to read records up to max_size
+        // Create a new stream for reading
+        let mut stream = self.create_stream(Some(state.clone())).await?;
+        
+        // Use the stream to read records up to max_size
         let mut records = Vec::with_capacity(max_size);
-        let stream = self.stream.as_mut()
-            .ok_or_else(|| DataFlareError::Connector("Stream not initialized".to_string()))?;
         
         // Read up to max_size records from the stream
-        while records.len() < max_size {
-            match stream.next().await {
-                Some(Ok(record)) => {
-                    records.push(record);
-                },
-                Some(Err(e)) => {
-                    // Log error but continue reading
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(record) => records.push(record),
+                Err(e) => {
                     warn!("Error reading record: {}", e);
-                },
-                None => {
-                    // End of stream
-                    break;
+                    return Err(e);
                 }
+            }
+            
+            if records.len() >= max_size {
+                break;
             }
         }
         
-        // If we got any records, update position
-        if !records.is_empty() {
-            self.position = Position::new()
-                .with_data("record_count", (self.position.get_data("record_count")
-                    .and_then(|v| v.parse::<u64>().ok())
-                    .unwrap_or(0) + records.len() as u64).to_string());
-        }
+        // Update position based on last processed record
+        // In a real implementation, we would extract the position from the last record
         
-        // Create a batch from the records
+        // Return batch
         Ok(DataRecordBatch::new(records))
     }
     
@@ -135,8 +125,9 @@ impl<T: SourceConnector> BatchSourceConnector for BatchSourceAdapter<T> {
     }
     
     async fn commit(&mut self, position: Position) -> Result<()> {
-        // Store the position for later use
+        // Update position
         self.position = position;
+        
         Ok(())
     }
     
@@ -145,11 +136,9 @@ impl<T: SourceConnector> BatchSourceConnector for BatchSourceAdapter<T> {
     }
     
     async fn seek(&mut self, position: Position) -> Result<()> {
-        // Reset stream to force re-initialization
-        self.stream = None;
+        // Store position
         self.position = position;
         
-        // We'll need to re-initialize the stream on next read
         Ok(())
     }
     
@@ -162,7 +151,6 @@ impl<T: SourceConnector> BatchSourceConnector for BatchSourceAdapter<T> {
     }
     
     async fn read_stream(&mut self) -> Result<Box<dyn Stream<Item = Result<DataRecord>> + Send + Unpin>> {
-        // Use the inner connector's read method directly
         let state = self.get_state()?;
         self.inner.read(Some(state)).await
     }

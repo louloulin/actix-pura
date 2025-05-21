@@ -59,14 +59,14 @@ impl ConnectorFactory {
     pub fn create_source(&self, connector_type: &str) -> Result<Box<dyn BatchSourceConnector>> {
         self.source_registry.get(connector_type)
             .map(|factory| factory())
-            .ok_or_else(|| DataFlareError::Connector(format!("Unknown source connector type: {}", connector_type)))
+            .ok_or_else(|| DataFlareError::Connection(format!("Unknown source connector type: {}", connector_type)))
     }
     
     /// Create a batch destination connector
     pub fn create_destination(&self, connector_type: &str) -> Result<Box<dyn BatchDestinationConnector>> {
         self.destination_registry.get(connector_type)
             .map(|factory| factory())
-            .ok_or_else(|| DataFlareError::Connector(format!("Unknown destination connector type: {}", connector_type)))
+            .ok_or_else(|| DataFlareError::Connection(format!("Unknown destination connector type: {}", connector_type)))
     }
     
     /// Get connector capabilities
@@ -90,7 +90,7 @@ impl ConnectorFactory {
             return Ok(capabilities);
         }
         
-        Err(DataFlareError::Connector(format!("Unknown connector type: {}", connector_type)))
+        Err(DataFlareError::Connection(format!("Unknown connector type: {}", connector_type)))
     }
     
     /// Configure a source connector with parameters
@@ -120,7 +120,7 @@ impl ConnectorFactory {
 
 // Global factory instance
 lazy_static::lazy_static! {
-    static ref FACTORY: RwLock<ConnectorFactory> = RwLock::new(ConnectorFactory::new());
+    static ref FACTORY: Arc<RwLock<ConnectorFactory>> = Arc::new(RwLock::new(ConnectorFactory::new()));
 }
 
 /// Initialize the connector factory with all registered connectors
@@ -156,9 +156,9 @@ pub fn initialize() -> Result<()> {
     Ok(())
 }
 
-/// Get a reference to the global connector factory
+/// Get the global connector factory
 pub fn get_factory() -> Arc<RwLock<ConnectorFactory>> {
-    Arc::clone(&FACTORY)
+    FACTORY.clone()
 }
 
 /// Helper function to create a configured source connector
@@ -179,14 +179,15 @@ mod tests {
     use async_trait::async_trait;
     use dataflare_core::model::Schema;
     use dataflare_core::message::DataRecordBatch;
-    use dataflare_core::state::{Position, SourceState};
-    use dataflare_core::connector::{ExtractionMode, WriteMode, WriteState, WriteStats};
+    use dataflare_core::state::SourceState;
+    use dataflare_core::connector::{ExtractionMode, WriteMode, WriteState, WriteStats, Position};
     
     struct TestSourceConnector {
         config: Value,
         capabilities: ConnectorCapabilities,
     }
     
+    #[async_trait]
     impl Connector for TestSourceConnector {
         fn connector_type(&self) -> &str {
             "test-source"
@@ -250,6 +251,7 @@ mod tests {
         capabilities: ConnectorCapabilities,
     }
     
+    #[async_trait]
     impl Connector for TestDestConnector {
         fn connector_type(&self) -> &str {
             "test-dest"

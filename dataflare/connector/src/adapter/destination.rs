@@ -9,16 +9,17 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use log::{debug, warn};
 use chrono::Utc;
+use serde_json::Value;
 
 use dataflare_core::{
     error::{DataFlareError, Result},
     message::{DataRecord, DataRecordBatch},
     model::Schema,
-    state::Position,
     connector::{
         Connector, DestinationConnector, BatchDestinationConnector,
-        WriteMode, WriteState, WriteStats, ConnectorCapabilities
-    }
+        WriteMode, WriteStats, WriteState, Position
+    },
+    connector::ConnectorCapabilities
 };
 
 /// Adapter that converts a DestinationConnector to a BatchDestinationConnector
@@ -70,12 +71,13 @@ impl<T: DestinationConnector> BatchDestinationAdapter<T> {
     }
 }
 
+#[async_trait]
 impl<T: DestinationConnector> Connector for BatchDestinationAdapter<T> {
     fn connector_type(&self) -> &str {
         self.inner.connector_type()
     }
     
-    fn configure(&mut self, config: &serde_json::Value) -> Result<()> {
+    fn configure(&mut self, config: &Value) -> Result<()> {
         self.inner.configure(config)
     }
     
@@ -106,11 +108,9 @@ impl<T: DestinationConnector> BatchDestinationConnector for BatchDestinationAdap
     }
     
     async fn write_batch(&mut self, batch: DataRecordBatch) -> Result<WriteStats> {
-        // Use the inner connector's write_batch method
-        let stats = self.inner.write_batch(&batch, self.mode).await?;
-        
-        // Update our stats
-        self.update_stats(&stats);
+        // Clone the mode so we can use it
+        let mode_copy = self.mode.clone();
+        let stats = self.inner.write_batch(&batch, mode_copy).await?;
         
         Ok(stats)
     }
@@ -147,14 +147,15 @@ impl<T: DestinationConnector> BatchDestinationConnector for BatchDestinationAdap
     }
     
     async fn write_record(&mut self, record: DataRecord, mode: WriteMode) -> Result<WriteStats> {
-        // Use the inner connector directly for single records
-        let old_mode = self.mode;
-        self.mode = mode;
-        let stats = self.inner.write_record(&record, mode).await?;
-        self.mode = old_mode;
+        // Save the original mode
+        let old_mode = self.mode.clone();
         
-        // Update our stats
-        self.update_stats(&stats);
+        // Temporarily use the provided mode
+        self.mode = mode.clone();
+        let stats = self.inner.write_record(&record, mode).await?;
+        
+        // Restore the original mode
+        self.mode = old_mode;
         
         Ok(stats)
     }

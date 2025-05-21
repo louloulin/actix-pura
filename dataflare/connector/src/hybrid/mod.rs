@@ -36,6 +36,12 @@ pub struct HybridConfig {
     
     /// Grace period between initial and ongoing extraction (in seconds)
     pub grace_period_seconds: u64,
+    
+    /// Current state of the hybrid stream
+    pub state: HybridState,
+    
+    /// Transition condition
+    pub transition_after: TransitionCondition,
 }
 
 /// 转换条件
@@ -77,10 +83,26 @@ impl HybridConfig {
                 .and_then(|v| v.as_u64())
                 .unwrap_or(60);
                 
+            // Determine transition condition
+            let transition_after = hybrid.get("transition_after")
+                .and_then(|v| v.as_str())
+                .map(|s| match s {
+                    "completion" => TransitionCondition::Completion,
+                    "never" => TransitionCondition::Never,
+                    ts if ts.starts_with("timestamp:") => {
+                        let timestamp = ts.trim_start_matches("timestamp:").to_string();
+                        TransitionCondition::Timestamp(timestamp)
+                    },
+                    _ => TransitionCondition::Completion,
+                })
+                .unwrap_or(TransitionCondition::Completion);
+                
             Ok(Self {
                 initial_mode,
                 ongoing_mode,
                 grace_period_seconds,
+                state: HybridState::Initial,
+                transition_after,
             })
         } else {
             Err(DataFlareError::Config("Missing hybrid configuration".to_string()))
@@ -311,6 +333,8 @@ mod tests {
             initial_mode: ExtractionMode::Full,
             ongoing_mode: ExtractionMode::CDC,
             grace_period_seconds: 60,
+            state: HybridState::Initial,
+            transition_after: TransitionCondition::Completion,
         };
 
         // 创建混合流
@@ -376,6 +400,8 @@ mod tests {
             initial_mode: ExtractionMode::Full,
             ongoing_mode: ExtractionMode::CDC,
             grace_period_seconds: 60,
+            state: HybridState::Initial,
+            transition_after: TransitionCondition::Timestamp("2023-01-03T00:00:00Z".to_string()),
         };
 
         // 创建混合流
@@ -443,6 +469,8 @@ mod tests {
             initial_mode: ExtractionMode::Full,
             ongoing_mode: ExtractionMode::CDC,
             grace_period_seconds: 60,
+            state: HybridState::Initial,
+            transition_after: TransitionCondition::Never,
         };
 
         // 创建混合流
