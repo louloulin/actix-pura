@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use actix::prelude::*;
-use log::{error, info};
+use log::{error, info, debug, warn};
 use chrono::Utc;
 
 use dataflare_core::{
@@ -15,7 +15,7 @@ use dataflare_core::{
 use dataflare_connector::source::SourceConnector;
 
 use crate::actor::{DataFlareActor, Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus, 
-                  SubscribeProgress, UnsubscribeProgress};
+                  SubscribeProgress, UnsubscribeProgress, SendBatch, ReportExtractionCompletion};
 
 /// Actor que gestiona la extracción de datos de una fuente
 pub struct SourceActor {
@@ -87,11 +87,11 @@ impl Actor for SourceActor {
     type Context = Context<Self>;
 
     fn started(&mut self, _ctx: &mut Self::Context) {
-        info!("SourceActor {} iniciado", self.id);
+        info!("SourceActor {} 已启动", self.id);
     }
 
     fn stopped(&mut self, _ctx: &mut Self::Context) {
-        info!("SourceActor {} detenido", self.id);
+        info!("SourceActor {} 已停止", self.id);
     }
 }
 
@@ -105,18 +105,20 @@ impl DataFlareActor for SourceActor {
     }
 
     fn initialize(&mut self, _ctx: &mut Self::Context) -> Result<()> {
-        info!("Inicializando SourceActor {}", self.id);
+        info!("初始化SourceActor {}", self.id);
         self.status = ActorStatus::Initialized;
         Ok(())
     }
 
     fn finalize(&mut self, _ctx: &mut Self::Context) -> Result<()> {
-        info!("Finalizando SourceActor {}", self.id);
+        info!("完成SourceActor {}", self.id);
         self.status = ActorStatus::Finalized;
         Ok(())
     }
 
     fn report_progress(&self, workflow_id: &str, phase: WorkflowPhase, progress: f64, message: &str) {
+        info!("SourceActor {} 报告进度: {:?} 阶段 {:.2}% - {}", 
+            self.id, phase, progress * 100.0, message);
         self.report_progress_to_subscribers(workflow_id, phase, progress, message);
     }
 }
@@ -126,15 +128,21 @@ impl Handler<Initialize> for SourceActor {
     type Result = Result<()>;
 
     fn handle(&mut self, msg: Initialize, _ctx: &mut Self::Context) -> Self::Result {
-        info!("Inicializando SourceActor {} para workflow {}", self.id, msg.workflow_id);
+        info!("初始化 SourceActor {} 工作流 {}", self.id, msg.workflow_id);
+        debug!("配置内容: {:?}", msg.config);
 
-        // Configurar el conector
+        // 配置连接器
+        info!("开始配置源连接器...");
         self.connector.configure(&msg.config)
-            .map_err(|e| DataFlareError::Config(format!("Error al configurar conector: {}", e)))?;
+            .map_err(|e| {
+                error!("配置源连接器失败: {}", e);
+                DataFlareError::Config(format!("Error al configurar conector: {}", e))
+            })?;
 
-        // Guardar la configuración
+        // 保存配置
         self.config = Some(msg.config);
         self.status = ActorStatus::Initialized;
+        info!("SourceActor {} 初始化完成", self.id);
 
         Ok(())
     }
@@ -187,11 +195,12 @@ impl Handler<StartExtraction> for SourceActor {
     type Result = ResponseActFuture<Self, Result<()>>;
 
     fn handle(&mut self, msg: StartExtraction, _ctx: &mut Self::Context) -> Self::Result {
-        info!("Iniciando extracción para workflow {} en fuente {}", msg.workflow_id, msg.source_id);
+        info!("开始提取数据: 工作流 {} 源 {}", msg.workflow_id, msg.source_id);
 
-        // Verificar que el actor esté inicializado
+        // 验证Actor状态
         if self.status != ActorStatus::Initialized && self.status != ActorStatus::Running {
             let status = self.status.clone();
+            error!("Actor状态不适合提取: {:?}", status);
             return Box::pin(async move {
                 Err(DataFlareError::Actor(format!(
                     "Actor no está en estado adecuado para extracción: {:?}", status
@@ -199,54 +208,108 @@ impl Handler<StartExtraction> for SourceActor {
             }.into_actor(self));
         }
 
-        // Guardar el estado de la fuente
-        self.source_state = msg.state.clone();
-
-        // Configurar el conector
-        if let Err(e) = self.connector.configure(&msg.config) {
-            return Box::pin(async move {
-                Err(DataFlareError::Config(format!("Error al configurar conector: {}", e)))
-            }.into_actor(self));
-        }
-
-        // Cambiar el estado a Running
+        // 更新状态
         self.status = ActorStatus::Running;
-
-        // Reportar inicio de extracción
-        self.report_progress(&msg.workflow_id, WorkflowPhase::Extracting, 0.0, "Iniciando extracción");
-
-        // Crear una copia de los valores necesarios para el futuro
-        let workflow_id = msg.workflow_id.clone();
-        let source_id = msg.source_id.clone();
-        let state = self.source_state.clone();
-        let batch_size = self.batch_size;
+        info!("SourceActor状态更新为Running");
         
-        // Obtener una referencia al actor para usar en el future
-        // Enviar los mensajes al address del actor en lugar de usar self directamente
+        // 获取Actor自身的地址，用于消息传递
         let actor_addr = _ctx.address();
+        let workflow_id = msg.workflow_id.clone();
+        let batch_size = self.batch_size;
+        let source_id = msg.source_id.clone();
         
+        // 保存对连接器的引用
+        let mut connector_ref = &mut self.connector;
+        
+        debug!("开始异步提取任务, 批处理大小: {}", batch_size);
+        
+        // 执行异步提取操作
         Box::pin(async move {
-            info!("Iniciando extracción desde fuente {} para workflow {}", source_id, workflow_id);
+            info!("开始从源 {} 提取数据", source_id);
             
-            // Enviar un mensaje al actor para actualizar progreso cuando terminemos
-            let result = async {
-                // Realizar todo el procesamiento autónomo aquí
-                // Al final, reportar resultados
-                Ok(())
-            }.await;
+            // 创建数据流
+            let state_option = None; // 假设这里不使用状态
+            let mut stream = match connector_ref.read(state_option).await {
+                Ok(stream) => {
+                    info!("成功创建数据流");
+                    stream
+                },
+                Err(e) => {
+                    error!("创建数据流失败: {}", e);
+                    return Err(e);
+                }
+            };
             
-            // Enviar mensaje de finalización al actor
-            // Esto es mejor que intentar actualizar el estado directamente
+            // 跟踪进度
+            let mut total_records = 0;
+            let mut current_batch = Vec::new();
+            
+            // 处理记录流
+            use futures::StreamExt;
+            info!("开始处理记录流");
+            while let Some(record_result) = stream.next().await {
+                match record_result {
+                    Ok(record) => {
+                        // 添加到当前批次
+                        current_batch.push(record);
+                        total_records += 1;
+                        
+                        // 达到批处理大小时发送批次
+                        if current_batch.len() >= batch_size {
+                            let batch = DataRecordBatch::new(current_batch);
+                            current_batch = Vec::new();
+                            
+                            info!("发送批次 #{}，记录数: {}", total_records / batch_size, batch.records.len());
+                            if let Err(e) = actor_addr.send(SendBatch {
+                                workflow_id: workflow_id.clone(),
+                                batch,
+                            }).await {
+                                error!("发送批次失败: {}", e);
+                                return Err(DataFlareError::Actor(format!("Error al enviar lote: {}", e)));
+                            }
+                            
+                            // 报告进度 (假设总进度为100%，每个批次递增)
+                            // 注意：在实际实现中，你应该有一个更好的方式来估算总记录数
+                            if total_records % (batch_size * 10) == 0 {
+                                info!("处理进度: {} 记录", total_records);
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        error!("读取记录失败: {}", e);
+                        return Err(e);
+                    }
+                }
+            }
+            
+            // 发送最后一个不完整的批次
+            if !current_batch.is_empty() {
+                let batch = DataRecordBatch::new(current_batch);
+                info!("发送最后一个批次，记录数: {}", batch.records.len());
+                if let Err(e) = actor_addr.send(SendBatch {
+                    workflow_id: workflow_id.clone(),
+                    batch,
+                }).await {
+                    error!("发送最后批次失败: {}", e);
+                    return Err(DataFlareError::Actor(format!("Error al enviar último lote: {}", e)));
+                }
+            }
+            
+            // 发送完成通知
+            info!("完成提取，总记录数: {}", total_records);
+            let result: Result<()> = Ok(());
+            
+            // 发送消息通知Actor
             if let Err(e) = actor_addr.send(ReportExtractionCompletion {
                 workflow_id: workflow_id.clone(),
-                records_processed: 100, // Ejemplo - actualizar con el valor real
+                records_processed: total_records as u64,
                 success: result.is_ok(),
                 error: result.as_ref().err().map(|e: &DataFlareError| e.to_string()),
             }).await {
-                error!("No se pudo enviar notificación de finalización: {}", e);
+                error!("发送完成通知失败: {}", e);
             }
             
-            result
+            Ok(())
         }.into_actor(self))
     }
 }

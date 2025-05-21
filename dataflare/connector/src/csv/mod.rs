@@ -7,6 +7,7 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use async_trait::async_trait;
+use log::{debug, error, info, warn};
 
 use futures::Stream;
 use serde_json::{Value, json, Map};
@@ -267,14 +268,24 @@ impl SourceConnector for CsvSourceConnector {
 
     async fn read(&mut self, state: Option<SourceState>) -> Result<Box<dyn Stream<Item = Result<DataRecord>> + Send + Unpin>> {
         let file_path = self.file_path.as_ref().ok_or_else(|| {
+            error!("CSV源连接器: 文件路径未配置");
             DataFlareError::Config("No se ha configurado la ruta del archivo CSV".to_string())
         })?;
 
-        let file = File::open(file_path).map_err(|e| {
-            DataFlareError::Io(e)
-        })?;
+        info!("CSV源连接器: 尝试打开文件 {:?}", file_path);
+        let file = match File::open(file_path) {
+            Ok(f) => {
+                info!("CSV源连接器: 成功打开文件 {:?}", file_path);
+                f
+            },
+            Err(e) => {
+                error!("CSV源连接器: 打开文件 {:?} 失败: {}", file_path, e);
+                return Err(DataFlareError::Io(e));
+            }
+        };
 
         // 创建 CSV 读取器
+        info!("CSV源连接器: 创建CSV读取器 (分隔符: {:?}, 标题行: {})", self.delimiter, self.has_header);
         let mut reader = csv::ReaderBuilder::new()
             .delimiter(self.delimiter as u8)
             .has_headers(self.has_header)
@@ -282,23 +293,33 @@ impl SourceConnector for CsvSourceConnector {
 
         // 获取当前状态或使用提供的状态
         let current_state = state.unwrap_or_else(|| self.state.clone());
+        info!("CSV源连接器: 使用提取模式: {:?}", self.extraction_mode);
 
         // 根据提取模式处理
         match self.extraction_mode {
             ExtractionMode::Full => {
                 // 全量模式：读取所有记录
+                info!("CSV源连接器: 使用全量模式读取数据");
                 let records = reader.records()
                     .enumerate()
                     .map(|(i, result)| {
-                        result.map_err(|e| {
-                            DataFlareError::Csv(format!("Error al leer fila CSV {}: {}", i, e))
-                        }).and_then(|record| {
-                            let row = record.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-                            self.create_record_from_row(&row)
-                        })
+                        match result {
+                            Ok(record) => {
+                                if i == 0 || i % 1000 == 0 {
+                                    debug!("CSV源连接器: 成功读取第 {} 行", i+1);
+                                }
+                                let row = record.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+                                self.create_record_from_row(&row)
+                            },
+                            Err(e) => {
+                                error!("CSV源连接器: 读取第 {} 行时出错: {}", i+1, e);
+                                Err(DataFlareError::Csv(format!("Error al leer fila CSV {}: {}", i, e)))
+                            }
+                        }
                     })
                     .collect::<Vec<_>>();
 
+                info!("CSV源连接器: 完成CSV文件读取，共 {} 条记录", records.len());
                 // 创建流
                 let stream = futures::stream::iter(records);
                 Ok(Box::new(stream))
@@ -310,30 +331,43 @@ impl SourceConnector for CsvSourceConnector {
                     .and_then(|v| v.parse::<usize>().ok())
                     .unwrap_or(0);
 
+                info!("CSV源连接器: 使用增量模式读取数据，起始行: {}", start_row);
+
                 // 跳过已处理的行
                 let records = reader.records()
                     .enumerate()
                     .skip(start_row)
                     .map(|(i, result)| {
-                        result.map_err(|e| {
-                            DataFlareError::Csv(format!("Error al leer fila CSV {}: {}", i, e))
-                        }).and_then(|record| {
-                            let row = record.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-                            let mut data_record = self.create_record_from_row(&row)?;
+                        match result {
+                            Ok(record) => {
+                                if (i - start_row) == 0 || (i - start_row) % 1000 == 0 {
+                                    debug!("CSV源连接器: 成功读取第 {} 行 (跳过 {} 行后)", i+1, start_row);
+                                }
+                                let row = record.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+                                let mut data_record = self.create_record_from_row(&row)?;
 
-                            // 添加行号作为元数据
-                            data_record.metadata.insert("row_number".to_string(), (i + 1).to_string());
+                                // 添加行号作为元数据
+                                data_record.metadata.insert("row_number".to_string(), (i + 1).to_string());
 
-                            Ok(data_record)
-                        })
+                                Ok(data_record)
+                            },
+                            Err(e) => {
+                                error!("CSV源连接器: 读取第 {} 行时出错: {}", i+1, e);
+                                Err(DataFlareError::Csv(format!("Error al leer fila CSV {}: {}", i, e)))
+                            }
+                        }
                     })
                     .collect::<Vec<_>>();
 
+                info!("CSV源连接器: 完成CSV文件增量读取，共 {} 条记录", records.len());
                 // 创建流
                 let stream = futures::stream::iter(records);
                 Ok(Box::new(stream))
             },
-            _ => Err(DataFlareError::Config("Este modo de extracción no está implementado para CSV".to_string())),
+            _ => {
+                error!("CSV源连接器: 不支持的提取模式");
+                Err(DataFlareError::Config("Este modo de extracción no está implementado para CSV".to_string()))
+            },
         }
     }
 
@@ -421,29 +455,40 @@ impl DestinationConnector for CsvDestinationConnector {
 
         // 获取文件路径
         if let Some(file_path) = config.get("file_path").and_then(|p| p.as_str()) {
+            info!("CSV目标连接器: 配置文件路径为 {}", file_path);
             self.file_path = Some(PathBuf::from(file_path));
+        } else {
+            error!("CSV目标连接器: 未找到文件路径配置");
         }
 
         // 获取分隔符
         if let Some(delimiter) = config.get("delimiter").and_then(|d| d.as_str()) {
             if !delimiter.is_empty() {
+                info!("CSV目标连接器: 配置分隔符为 '{}'", delimiter);
                 self.delimiter = delimiter.chars().next().unwrap_or(',');
             }
         }
 
         // 获取是否写入标题行
         if let Some(write_header) = config.get("write_header").and_then(|w| w.as_bool()) {
+            info!("CSV目标连接器: 配置写入标题行为 {}", write_header);
             self.write_header = write_header;
         }
 
         // 获取列名
         if let Some(columns) = config.get("columns").and_then(|c| c.as_array()) {
-            self.columns = columns.iter()
+            let col_names: Vec<String> = columns.iter()
                 .filter_map(|c| c.as_str())
                 .map(|s| s.to_string())
                 .collect();
+            
+            if !col_names.is_empty() {
+                info!("CSV目标连接器: 配置列名为 {:?}", col_names);
+                self.columns = col_names;
+            }
         }
 
+        info!("CSV目标连接器: 配置完成");
         Ok(())
     }
 
@@ -482,142 +527,153 @@ impl DestinationConnector for CsvDestinationConnector {
     }
 
     async fn write_batch(&mut self, batch: &DataRecordBatch, mode: WriteMode) -> Result<WriteStats> {
-        let start = std::time::Instant::now();
         let file_path = self.file_path.as_ref().ok_or_else(|| {
+            error!("CSV目标连接器: 文件路径未配置");
             DataFlareError::Config("No se ha configurado la ruta del archivo CSV".to_string())
         })?;
 
-        // 创建目录（如果不存在）
+        info!("CSV目标连接器: 准备写入文件 {:?}, 写入模式: {:?}", file_path, mode);
+        
+        // 检查目录是否存在，不存在则创建
         if let Some(parent) = file_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                DataFlareError::Io(e)
-            })?;
+            if !parent.exists() {
+                info!("CSV目标连接器: 创建目录 {:?}", parent);
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    error!("CSV目标连接器: 创建目录失败: {}", e);
+                    DataFlareError::Io(e)
+                })?;
+            }
         }
 
-        // 根据写入模式决定如何打开文件
-        let file = match mode {
-            WriteMode::Append => {
-                // 追加模式
-                if !self.file_opened {
-                    let file = File::options()
-                        .append(true)
-                        .create(true)
-                        .truncate(false)
-                        .open(file_path)
-                        .map_err(DataFlareError::Io)?;
-
-                    self.file_opened = true;
-                    file
-                } else {
-                    std::fs::OpenOptions::new()
-                        
-                        .append(true)
-                        .open(file_path)
-                        .map_err(DataFlareError::Io)?
-                }
-            },
-            WriteMode::Overwrite => {
-                // 覆盖模式
-                let file = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .open(file_path)
-                    .map_err(DataFlareError::Io)?;
-
-                self.file_opened = true;
-                self.records_written = 0; // 重置记录计数
-                file
-            },
+        // 根据写入模式确定是否附加到现有文件
+        let append = match mode {
+            WriteMode::Append => true,
+            WriteMode::Overwrite => false,
             _ => {
-                // 其他模式不支持
+                error!("CSV目标连接器: 不支持的写入模式 {:?}", mode);
                 return Err(DataFlareError::Config(format!(
                     "Modo de escritura no soportado para CSV: {:?}", mode
                 )));
             }
         };
 
-        // 创建 CSV writer
-        let mut writer = csv::WriterBuilder::new()
-            .delimiter(self.delimiter as u8)
-            .from_writer(file);
+        // 创建写入器
+        let mut writer = if append && file_path.exists() && !self.file_opened {
+            info!("CSV目标连接器: 附加到现有文件 {:?}", file_path);
+            // 附加到现有文件
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .append(true)
+                .open(file_path)
+                .map_err(|e| {
+                    error!("CSV目标连接器: 打开文件失败: {}", e);
+                    DataFlareError::Io(e)
+                })?;
 
-        // 如果是第一次写入且需要写入标题行
-        if self.records_written == 0 && self.write_header {
-            // 如果没有指定列名，从第一条记录中获取
-            if self.columns.is_empty() && !batch.records.is_empty() {
-                if let Value::Object(obj) = &batch.records[0].data {
-                    self.columns = obj.keys().cloned().collect();
+            // 附加模式不写标题
+            csv::WriterBuilder::new()
+                .delimiter(self.delimiter as u8)
+                .has_headers(false)
+                .from_writer(file)
+        } else {
+            // 创建新文件
+            info!("CSV目标连接器: 创建新文件 {:?}", file_path);
+            let file = std::fs::File::create(file_path).map_err(|e| {
+                error!("CSV目标连接器: 创建文件失败: {}", e);
+                DataFlareError::Io(e)
+            })?;
+
+            csv::WriterBuilder::new()
+                .delimiter(self.delimiter as u8)
+                .has_headers(self.write_header)
+                .from_writer(file)
+        };
+
+        self.file_opened = true;
+        
+        // 确定标题行
+        let headers = if !self.columns.is_empty() {
+            info!("CSV目标连接器: 使用配置的列名");
+            self.columns.clone()
+        } else if !batch.records.is_empty() {
+            // 从第一条记录中获取所有字段名
+            info!("CSV目标连接器: 从记录中推断列名");
+            let mut fields = Vec::new();
+            if let Some(first_record) = batch.records.first() {
+                if let Some(obj) = first_record.data.as_object() {
+                    fields = obj.keys().cloned().collect();
                 }
             }
+            fields
+        } else {
+            info!("CSV目标连接器: 记录为空，无法推断列名");
+            Vec::new()
+        };
 
+        // 如果配置为写入标题且处于覆盖模式，写入标题行
+        if self.write_header && !append {
+            info!("CSV目标连接器: 写入标题行: {:?}", headers);
             // 写入标题行
-            if !self.columns.is_empty() {
-                writer.write_record(&self.columns).map_err(|e| {
-                    DataFlareError::Csv(format!("Error al escribir encabezados CSV: {}", e))
-                })?;
-            }
+            writer.write_record(&headers).map_err(|e| {
+                error!("CSV目标连接器: 写入标题行失败: {}", e);
+                DataFlareError::Csv(format!("Error al escribir la cabecera: {}", e))
+            })?;
         }
 
-        // 写入记录
-        let mut records_written = 0;
-        let mut records_failed = 0;
+        // 写入每条记录
+        info!("CSV目标连接器: 开始写入记录，共 {} 条", batch.records.len());
+        let mut success_count = 0;
+        let mut error_count = 0;
         let mut bytes_written = 0;
+        let start = std::time::Instant::now();
 
-        for record in &batch.records {
-            if let Value::Object(obj) = &record.data {
-                // 如果列名为空，使用所有字段
-                let columns = if self.columns.is_empty() {
-                    obj.keys().cloned().collect::<Vec<_>>()
-                } else {
-                    self.columns.clone()
-                };
+        for (i, record) in batch.records.iter().enumerate() {
+            let mut row = Vec::new();
 
-                // 创建记录
-                let record_values: Vec<String> = columns.iter()
-                    .map(|col| {
-                        match obj.get(col) {
-                            Some(Value::String(s)) => s.clone(),
-                            Some(Value::Number(n)) => n.to_string(),
-                            Some(Value::Bool(b)) => b.to_string(),
-                            Some(Value::Null) => String::new(),
-                            Some(v) => v.to_string(),
-                            None => String::new(),
-                        }
-                    })
-                    .collect();
+            // 按照标题的顺序提取每个字段的值
+            for field in &headers {
+                let value = record.get_value(field)
+                    .map(|v| v.to_string())
+                    .unwrap_or_default();
+                row.push(value);
+            }
 
-                // 写入记录
-                match writer.write_record(&record_values) {
-                    Ok(_) => {
-                        records_written += 1;
-                        // 估算写入的字节数
-                        bytes_written += record_values.iter().map(|s| s.len() as u64).sum::<u64>();
-                    },
-                    Err(_) => {
-                        records_failed += 1;
+            // 估算写入的字节数
+            bytes_written += row.iter().map(|s| s.len()).sum::<usize>() as u64;
+
+            // 写入行
+            match writer.write_record(&row) {
+                Ok(_) => {
+                    success_count += 1;
+                    if i == 0 || i % 1000 == 0 {
+                        debug!("CSV目标连接器: 成功写入第 {} 条记录", i+1);
                     }
+                },
+                Err(e) => {
+                    error_count += 1;
+                    error!("CSV目标连接器: 写入第 {} 条记录失败: {}", i+1, e);
                 }
-            } else {
-                records_failed += 1;
             }
         }
 
         // 刷新写入器
         writer.flush().map_err(|e| {
-            DataFlareError::Io(e)
+            error!("CSV目标连接器: 刷新写入器失败: {}", e);
+            DataFlareError::Csv(format!("Error al finalizar la escritura: {}", e))
         })?;
-
-        // 更新写入的记录数
-        self.records_written += records_written;
 
         // 计算写入时间
         let write_time_ms = start.elapsed().as_millis() as u64;
+        
+        info!("CSV目标连接器: 完成写入，成功: {}，失败: {}，字节数: {}，耗时: {}ms", 
+            success_count, error_count, bytes_written, write_time_ms);
 
-        // 返回写入统计
+        // 更新记录计数
+        self.records_written += success_count as u64;
+
         Ok(WriteStats {
-            records_written,
-            records_failed,
+            records_written: success_count as u64,
+            records_failed: error_count as u64,
             bytes_written,
             write_time_ms,
         })
