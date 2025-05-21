@@ -6,16 +6,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use async_trait::async_trait;
-use futures::Stream;
 use serde_json::{Value, json};
-use tokio_postgres::{NoTls, Row};
-use chrono::{DateTime, Utc};
-use log::{debug, info, warn};
+use chrono::Utc;
+use log::{debug, info};
 
 use dataflare_core::{
     error::{DataFlareError, Result},
     message::{DataRecord, DataRecordBatch},
-    model::{Schema, Field, DataType},
+    model::Schema,
     state::SourceState,
     connector::{
         Connector, BatchSourceConnector, 
@@ -200,7 +198,7 @@ impl PostgresCDCConnector {
             .map(|lsn| lsn.to_string());
             
         // Build SQL query to read changes
-        let query = if let Some(lsn) = lsn_position {
+        let query = if let Some(_lsn) = lsn_position {
             format!(
                 "SELECT * FROM pg_logical_slot_get_changes('{}', NULL, NULL, 'include-lsn', '1', 'include-timestamp', '1', 'skip-empty-xacts', '1', 'limit', '{}')",
                 self.slot_name, max_changes

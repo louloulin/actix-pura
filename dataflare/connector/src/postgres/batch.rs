@@ -5,16 +5,16 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use async_trait::async_trait;
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use serde_json::{Value, json};
-use tokio_postgres::{NoTls, Row};
+use tokio_postgres::Row;
 use chrono::{DateTime, Utc};
-use log::{debug, error, info, warn};
+use log::{debug, warn};
 
 use dataflare_core::{
     error::{DataFlareError, Result},
     message::{DataRecord, DataRecordBatch},
-    model::{Schema, Field, DataType},
+    model::Schema,
     state::SourceState,
     connector::{
         Connector, BatchSourceConnector, 
@@ -245,9 +245,7 @@ impl BatchSourceConnector for PostgresBatchSourceConnector {
         self.base.discover_schema().await
     }
     
-    async fn read_batch(&mut self, max_size: usize) -> Result<DataRecordBatch> {
-        // Adjust batch size if needed (using max_size directly)
-        
+    async fn read_batch(&mut self, _max_size: usize) -> Result<DataRecordBatch> {
         // Ensure we have connection
         if self.base.client.is_none() {
             self.base.connect().await?;

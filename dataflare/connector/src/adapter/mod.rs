@@ -7,7 +7,7 @@ use std::sync::Arc;
 use dataflare_core::{
     error::Result,
     connector::{
-        Connector, SourceConnector, DestinationConnector,
+        SourceConnector, DestinationConnector,
         BatchSourceConnector, BatchDestinationConnector
     }
 };

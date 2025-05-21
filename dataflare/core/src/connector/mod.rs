@@ -239,7 +239,7 @@ pub trait BatchDestinationConnector: Connector {
     fn get_supported_write_modes(&self) -> Vec<WriteMode>;
     
     /// Record compatibility layer (default implementation uses batch with single record)
-    async fn write_record(&mut self, record: DataRecord, mode: WriteMode) -> Result<WriteStats> {
+    async fn write_record(&mut self, record: DataRecord, _mode: WriteMode) -> Result<WriteStats> {
         // Create a single-record batch and call write_batch
         let batch = DataRecordBatch::new(vec![record]);
         self.write_batch(batch).await

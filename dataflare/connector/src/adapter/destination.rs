@@ -7,17 +7,16 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use async_trait::async_trait;
-use log::{debug, warn};
 use chrono::Utc;
 use serde_json::Value;
 
 use dataflare_core::{
-    error::{DataFlareError, Result},
+    error::Result,
     message::{DataRecord, DataRecordBatch},
     model::Schema,
     connector::{
         Connector, DestinationConnector, BatchDestinationConnector,
-        WriteMode, WriteStats, WriteState, Position
+        WriteMode, WriteStats, WriteState
     },
     connector::ConnectorCapabilities
 };
