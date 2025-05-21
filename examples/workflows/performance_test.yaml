@@ -1,0 +1,58 @@
+id: performance-test
+name: 性能测试工作流
+description: 处理大型CSV数据集的性能测试
+version: 1.0.0
+
+# 数据源配置
+sources:
+  csv_source:
+    type: csv
+    config:
+      file_path: "/Users/louloulin/mastra_docs/actix/examples/data/large_test.csv"
+      has_header: true
+      delimiter: ","
+    collection_mode: full
+
+# 转换配置
+transformations:
+  # 过滤年龄大于20的记录
+  filter_records:
+    inputs:
+      - csv_source
+    type: filter
+    config:
+      condition: "age > 20"
+
+  # 数据转换
+  transform_data:
+    inputs:
+      - filter_records
+    type: mapping
+    config:
+      mappings:
+        - source: id
+          destination: user_id
+        - source: name
+          destination: full_name
+        - source: email
+          destination: email_address
+          transform: lowercase
+        - source: age
+          destination: user_age
+
+# 目标配置
+destinations:
+  csv_output:
+    inputs:
+      - transform_data
+    type: csv
+    config:
+      file_path: "/Users/louloulin/mastra_docs/actix/examples/data/performance_output.csv"
+      delimiter: ","
+      write_header: true
+
+# 元数据
+metadata:
+  owner: admin
+  department: performance
+  created: "2023-07-01" 
