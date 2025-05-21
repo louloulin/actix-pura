@@ -8,7 +8,10 @@ use std::sync::{Arc, RwLock};
 use serde_json::Value;
 
 use dataflare_core::error::{DataFlareError, Result};
-use dataflare_core::connector::{SourceConnector, DestinationConnector};
+use dataflare_core::connector::{
+    SourceConnector, DestinationConnector, 
+    BatchSourceConnector, BatchDestinationConnector
+};
 
 /// Tipo de fábrica de conectores
 pub type ConnectorFactory<T> = Arc<dyn Fn(Value) -> Result<Box<T>> + Send + Sync>;
@@ -103,6 +106,16 @@ pub fn get_registered_source_connectors() -> Vec<String> {
 /// Obtiene los nombres de todos los conectores de destino registrados
 pub fn get_registered_destination_connectors() -> Vec<String> {
     get_connector_names::<dyn DestinationConnector>()
+}
+
+/// Obtiene los nombres de todos los conectores de origen por lotes registrados
+pub fn get_registered_batch_source_connectors() -> Vec<String> {
+    get_connector_names::<dyn BatchSourceConnector>()
+}
+
+/// Obtiene los nombres de todos los conectores de destino por lotes registrados
+pub fn get_registered_batch_destination_connectors() -> Vec<String> {
+    get_connector_names::<dyn BatchDestinationConnector>()
 }
 
 #[cfg(test)]

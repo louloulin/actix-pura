@@ -518,13 +518,13 @@ pub struct RocksDBStateBackend {
 
 #### 4.1.3 连接器接口重构（2周）
 
-- [ ] **任务1.6**: 设计统一连接器接口层次结构（1周）
-  - 创建基础`Connector`特性
-  - 设计`BatchSourceConnector`和`BatchDestinationConnector`接口
+- [x] **任务1.6**: 设计统一连接器接口层次结构（1周）
+  - [x] 创建基础`Connector`特性
+  - [x] 设计`BatchSourceConnector`和`BatchDestinationConnector`接口
 
-- [ ] **任务1.7**: 实现连接器注册和工厂系统（1周）
-  - 开发插件式连接器注册机制
-  - 实现连接器版本兼容性检查
+- [x] **任务1.7**: 实现连接器注册和工厂系统（1周）
+  - [x] 开发插件式连接器注册机制
+  - [x] 实现连接器版本兼容性检查
 
 ### 4.2 阶段2：连接器优化（4周）
 

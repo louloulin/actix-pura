@@ -7,12 +7,15 @@
 #![warn(missing_docs)]
 #![warn(rustdoc::missing_doc_code_examples)]
 
+pub mod registry;
+pub mod factory;
 pub mod source;
 pub mod destination;
-pub mod registry;
-pub mod postgres;
+pub mod adapter;
+
+// Re-export existing connector modules
 pub mod csv;
-pub mod hybrid;
+pub mod postgres;
 pub mod mongodb;
 
 // Re-exports for convenience
@@ -63,3 +66,42 @@ mod tests {
         assert!(!VERSION.is_empty());
     }
 }
+
+/// Initialize all connector modules
+pub fn initialize() -> dataflare_core::error::Result<()> {
+    // Register default connectors
+    source::register_default_sources();
+    destination::register_default_destinations();
+    
+    // Register CSV connectors
+    csv::register_csv_connectors();
+    
+    // Register PostgreSQL connectors
+    postgres::register_postgres_connectors();
+    
+    // Register MongoDB connectors
+    mongodb::register_mongodb_connectors();
+    
+    // Initialize the factory with registered connectors
+    factory::initialize()?;
+    
+    Ok(())
+}
+
+// Re-export main factory functions
+pub use factory::{
+    initialize as initialize_factory,
+    create_source_connector,
+    create_destination_connector,
+    get_factory,
+};
+
+// Re-export adapter utilities
+pub use adapter::{
+    adapt_source,
+    adapt_destination,
+    register_adapted_source_connector,
+    register_adapted_destination_connector,
+    BatchSourceAdapter,
+    BatchDestinationAdapter,
+};
