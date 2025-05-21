@@ -7,7 +7,6 @@ use std::time::Instant;
 use clap::{Parser, Subcommand};
 use dataflare_runtime::workflow::{YamlWorkflowParser, WorkflowExecutor};
 use log::{info, debug, error, warn, LevelFilter};
-use env_logger::Builder;
 
 #[derive(Parser)]
 #[command(name = "dataflare")]
@@ -61,27 +60,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 解析命令行参数
     let cli = Cli::parse();
 
-    // 设置日志级别
-    let log_level = match cli.log_level.to_lowercase().as_str() {
-        "error" => LevelFilter::Error,
-        "warn" => LevelFilter::Warn,
-        "info" => LevelFilter::Info,
-        "debug" => LevelFilter::Debug,
-        "trace" => LevelFilter::Trace,
-        _ => LevelFilter::Info,
-    };
+    // 设置环境变量，让env_logger使用对应的日志级别
+    std::env::set_var("RUST_LOG", cli.log_level.clone());
 
-    // 初始化日志
-    Builder::new()
-        .filter_level(log_level)
-        .format_timestamp_secs()
-        .init();
-
-    // 初始化 DataFlare
+    // 初始化 DataFlare (包含了日志初始化)
     dataflare_cli::init()?;
     
     info!("DataFlare CLI 启动");
-    debug!("日志级别: {:?}", log_level);
+    debug!("日志级别: {}", cli.log_level);
 
     // 处理命令
     match &cli.command {

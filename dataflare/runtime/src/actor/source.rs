@@ -186,7 +186,7 @@ impl Handler<GetStatus> for SourceActor {
 impl Handler<StartExtraction> for SourceActor {
     type Result = ResponseActFuture<Self, Result<()>>;
 
-    fn handle(&mut self, msg: StartExtraction, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: StartExtraction, ctx: &mut Self::Context) -> Self::Result {
         info!("Iniciando extracción para workflow {} en fuente {}", msg.workflow_id, msg.source_id);
 
         // Verificar que el actor esté inicializado
@@ -217,31 +217,101 @@ impl Handler<StartExtraction> for SourceActor {
 
         // Crear una copia de los valores necesarios para el futuro
         let workflow_id = msg.workflow_id.clone();
+        let mut connector = self.connector.clone();
+        let state = self.source_state.clone();
+        let batch_size = self.batch_size;
+        let output_addr = match msg.output_addr {
+            Some(addr) => addr,
+            None => {
+                return Box::pin(async move {
+                    Err(DataFlareError::Actor("No output address provided for extraction".to_string()))
+                }.into_actor(self));
+            }
+        };
 
         // Iniciar la extracción en un futuro
         let fut = async move {
-            // Aquí se implementaría la lógica real de extracción
-            // Por ahora, simulamos la extracción con un lote de ejemplo
-
-            // En una implementación real, esto llamaría a connector.read() y procesaría
-            // los resultados en lotes
-
-            // Simulamos un lote de datos
-            let records = (0..10).map(|i| {
-                dataflare_core::message::DataRecord::new(serde_json::json!({
-                    "id": i,
-                    "name": format!("Record {}", i),
-                    "value": i * 10
-                }))
-            }).collect::<Vec<_>>();
-
-            let batch = DataRecordBatch::new(records);
-
-            // En una implementación real, esto se enviaría al ProcessorActor
-            // Por ahora, simplemente reportamos que se ha procesado el lote
-            log::info!("Lote extraído con {} registros", batch.records.len());
-
-            // Reportar finalización de extracción
+            info!("Iniciando lectura de datos desde el conector para workflow {}", workflow_id);
+            
+            // Leer registros desde el conector
+            let mut stream = match connector.read(state).await {
+                Ok(s) => s,
+                Err(e) => {
+                    error!("Error al iniciar lectura desde conector: {}", e);
+                    return Err(DataFlareError::Connector(format!("Error al leer datos: {}", e)));
+                }
+            };
+            
+            // Procesar registros en lotes
+            let mut records = Vec::with_capacity(batch_size);
+            let mut total_records = 0;
+            let mut num_batches = 0;
+            
+            // Indicar progreso
+            info!("Comenzando procesamiento de registros para workflow {}", workflow_id);
+            
+            // Crear lotes a partir del stream
+            use futures::StreamExt;
+            while let Some(record_result) = stream.next().await {
+                match record_result {
+                    Ok(record) => {
+                        records.push(record);
+                        total_records += 1;
+                        
+                        // Si alcanzamos el tamaño del lote, procesamos
+                        if records.len() >= batch_size {
+                            let batch = DataRecordBatch::new(records);
+                            
+                            // Enviar el lote al siguiente actor
+                            info!("Enviando lote #{} con {} registros", num_batches + 1, batch.records.len());
+                            
+                            // Crear mensaje SendBatch
+                            let send_result = output_addr.send(crate::actor::SendBatch {
+                                workflow_id: workflow_id.clone(),
+                                batch: batch,
+                            }).await;
+                            
+                            if let Err(e) = send_result {
+                                error!("Error al enviar lote al siguiente actor: {}", e);
+                                return Err(DataFlareError::Actor(format!("Error al enviar lote: {}", e)));
+                            }
+                            
+                            // Reiniciar para el siguiente lote
+                            records = Vec::with_capacity(batch_size);
+                            num_batches += 1;
+                            
+                            // Reportar progreso
+                            // Asumimos que no sabemos cuántos registros hay en total, así que usamos progreso indeterminado
+                            info!("Progreso: {} registros procesados, {} lotes", total_records, num_batches);
+                        }
+                    },
+                    Err(e) => {
+                        error!("Error al procesar registro: {}", e);
+                    }
+                }
+            }
+            
+            // Procesar el último lote (si queda alguno)
+            if !records.is_empty() {
+                let batch = DataRecordBatch::new(records);
+                info!("Enviando lote final #{} con {} registros", num_batches + 1, batch.records.len());
+                
+                // Enviar el último lote
+                let send_result = output_addr.send(crate::actor::SendBatch {
+                    workflow_id: workflow_id.clone(),
+                    batch: batch,
+                }).await;
+                
+                if let Err(e) = send_result {
+                    error!("Error al enviar lote final: {}", e);
+                    return Err(DataFlareError::Actor(format!("Error al enviar lote final: {}", e)));
+                }
+                
+                num_batches += 1;
+            }
+            
+            info!("Extracción completada para workflow {}. Total de registros: {}, lotes: {}", 
+                 workflow_id, total_records, num_batches);
             Ok(())
         };
 
@@ -250,6 +320,7 @@ impl Handler<StartExtraction> for SourceActor {
                 Ok(_) => {
                     actor.report_progress(&workflow_id, WorkflowPhase::Extracting, 1.0, "Extracción completada");
                     actor.status = ActorStatus::Initialized;
+                    actor.records_processed += 1;
                     Ok(())
                 },
                 Err(e) => {
