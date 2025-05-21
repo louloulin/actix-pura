@@ -1,6 +1,7 @@
-//! 混合模式提取实现
+//! Hybrid extraction mode utilities for DataFlare
 //!
-//! 提供混合模式（Hybrid Mode）数据提取功能，支持初始全量提取后切换到 CDC 或增量模式。
+//! Provides functionality for supporting hybrid extraction modes,
+//! combining full, incremental, and CDC extraction methods.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,17 +25,17 @@ pub enum HybridState {
     Completed,
 }
 
-/// 混合模式配置
+/// Configuration for hybrid extraction mode
 #[derive(Debug, Clone)]
 pub struct HybridConfig {
-    /// 初始提取模式
+    /// Initial extraction mode
     pub initial_mode: ExtractionMode,
-    /// 持续提取模式
+    
+    /// Ongoing extraction mode after initial load
     pub ongoing_mode: ExtractionMode,
-    /// 转换条件
-    pub transition_after: TransitionCondition,
-    /// 当前状态
-    pub state: HybridState,
+    
+    /// Grace period between initial and ongoing extraction (in seconds)
+    pub grace_period_seconds: u64,
 }
 
 /// 转换条件
@@ -49,54 +50,41 @@ pub enum TransitionCondition {
 }
 
 impl HybridConfig {
-    /// 从 JSON 配置创建混合模式配置
+    /// Create a new hybrid config from JSON configuration
     pub fn from_config(config: &Value) -> Result<Self> {
-        // 获取混合模式配置
-        let hybrid_config = config.get("hybrid").ok_or_else(|| {
-            DataFlareError::Config("混合模式需要 'hybrid' 配置部分".to_string())
-        })?;
-
-        // 解析初始模式
-        let initial_mode = if let Some(mode) = hybrid_config.get("initial_mode").and_then(|m| m.as_str()) {
-            match mode {
-                "full" => ExtractionMode::Full,
-                "incremental" => ExtractionMode::Incremental,
-                "cdc" => ExtractionMode::CDC,
-                _ => return Err(DataFlareError::Config(format!("无效的初始提取模式: {}", mode))),
-            }
+        if let Some(hybrid) = config.get("hybrid") {
+            let initial_mode = hybrid.get("initial_mode")
+                .and_then(|v| v.as_str())
+                .map(|s| match s {
+                    "full" => ExtractionMode::Full,
+                    "incremental" => ExtractionMode::Incremental,
+                    "cdc" => ExtractionMode::CDC,
+                    _ => ExtractionMode::Full,
+                })
+                .unwrap_or(ExtractionMode::Full);
+                
+            let ongoing_mode = hybrid.get("ongoing_mode")
+                .and_then(|v| v.as_str())
+                .map(|s| match s {
+                    "full" => ExtractionMode::Full,
+                    "incremental" => ExtractionMode::Incremental,
+                    "cdc" => ExtractionMode::CDC,
+                    _ => ExtractionMode::Incremental,
+                })
+                .unwrap_or(ExtractionMode::Incremental);
+                
+            let grace_period_seconds = hybrid.get("grace_period_seconds")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(60);
+                
+            Ok(Self {
+                initial_mode,
+                ongoing_mode,
+                grace_period_seconds,
+            })
         } else {
-            ExtractionMode::Full // 默认为全量模式
-        };
-
-        // 解析持续模式
-        let ongoing_mode = if let Some(mode) = hybrid_config.get("ongoing_mode").and_then(|m| m.as_str()) {
-            match mode {
-                "incremental" => ExtractionMode::Incremental,
-                "cdc" => ExtractionMode::CDC,
-                _ => return Err(DataFlareError::Config(format!("无效的持续提取模式: {}", mode))),
-            }
-        } else {
-            ExtractionMode::CDC // 默认为 CDC 模式
-        };
-
-        // 解析转换条件
-        let transition_after = if let Some(transition) = hybrid_config.get("transition_after").and_then(|t| t.as_str()) {
-            match transition {
-                "completion" => TransitionCondition::Completion,
-                "never" => TransitionCondition::Never,
-                ts if ts.starts_with("20") => TransitionCondition::Timestamp(ts.to_string()),
-                _ => return Err(DataFlareError::Config(format!("无效的转换条件: {}", transition))),
-            }
-        } else {
-            TransitionCondition::Completion // 默认为完成后转换
-        };
-
-        Ok(Self {
-            initial_mode,
-            ongoing_mode,
-            transition_after,
-            state: HybridState::Initial,
-        })
+            Err(DataFlareError::Config("Missing hybrid configuration".to_string()))
+        }
     }
 
     /// 检查是否应该转换到持续模式
@@ -287,7 +275,7 @@ mod tests {
             "hybrid": {
                 "initial_mode": "full",
                 "ongoing_mode": "cdc",
-                "transition_after": "completion"
+                "grace_period_seconds": 60
             }
         });
 
@@ -297,8 +285,7 @@ mod tests {
         // 验证配置
         assert_eq!(hybrid_config.initial_mode, ExtractionMode::Full);
         assert_eq!(hybrid_config.ongoing_mode, ExtractionMode::CDC);
-        assert_eq!(hybrid_config.transition_after, TransitionCondition::Completion);
-        assert_eq!(hybrid_config.state, HybridState::Initial);
+        assert_eq!(hybrid_config.grace_period_seconds, 60);
     }
 
     #[tokio::test]
@@ -323,8 +310,7 @@ mod tests {
         let config = HybridConfig {
             initial_mode: ExtractionMode::Full,
             ongoing_mode: ExtractionMode::CDC,
-            transition_after: TransitionCondition::Completion,
-            state: HybridState::Initial,
+            grace_period_seconds: 60,
         };
 
         // 创建混合流
@@ -389,8 +375,7 @@ mod tests {
         let config = HybridConfig {
             initial_mode: ExtractionMode::Full,
             ongoing_mode: ExtractionMode::CDC,
-            transition_after: TransitionCondition::Timestamp("2023-01-02T12:00:00Z".to_string()),
-            state: HybridState::Initial,
+            grace_period_seconds: 60,
         };
 
         // 创建混合流
@@ -457,8 +442,7 @@ mod tests {
         let config = HybridConfig {
             initial_mode: ExtractionMode::Full,
             ongoing_mode: ExtractionMode::CDC,
-            transition_after: TransitionCondition::Never,
-            state: HybridState::Initial,
+            grace_period_seconds: 60,
         };
 
         // 创建混合流

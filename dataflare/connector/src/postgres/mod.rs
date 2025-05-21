@@ -24,6 +24,10 @@ use dataflare_core::{
 use crate::source::SourceConnector;
 use crate::hybrid::HybridConfig;
 
+pub mod batch;
+
+pub use self::batch::PostgresBatchSourceConnector;
+
 /// Conector de fuente PostgreSQL
 pub struct PostgresSourceConnector {
     /// Configuración del conector
@@ -674,8 +678,6 @@ impl PostgresSourceConnector {
         Ok(schema)
     }
 
-
-
     async fn read(&mut self, state: Option<SourceState>) -> Result<Box<dyn Stream<Item = Result<DataRecord>> + Send + Unpin>> {
         // Si no hay cliente, conectar
         if self.client.is_none() {
@@ -969,4 +971,13 @@ pub fn register_postgres_connector() {
             Ok(Box::new(PostgresSourceConnector::new(config)))
         }),
     );
+}
+
+/// Registra los conectores PostgreSQL
+pub fn register_postgres_connectors() {
+    // Registrar conector PostgreSQL tradicional
+    register_postgres_connector();
+    
+    // Registrar conector PostgreSQL optimizado para lotes
+    batch::register_postgres_batch_connector();
 }

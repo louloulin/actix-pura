@@ -12,6 +12,7 @@ pub mod factory;
 pub mod source;
 pub mod destination;
 pub mod adapter;
+pub mod hybrid;
 
 // Re-export existing connector modules
 pub mod csv;
@@ -80,7 +81,7 @@ pub fn initialize() -> dataflare_core::error::Result<()> {
     postgres::register_postgres_connectors();
     
     // Register MongoDB connectors
-    mongodb::register_mongodb_connectors();
+    mongodb::register_mongodb_connector();
     
     // Initialize the factory with registered connectors
     factory::initialize()?;

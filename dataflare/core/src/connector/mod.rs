@@ -12,7 +12,39 @@ use futures::Stream;
 use crate::error::Result;
 use crate::message::{DataRecord, DataRecordBatch};
 use crate::model::Schema;
-use crate::state::{SourceState, Position};
+use crate::state::SourceState;
+
+/// Position data for tracking connector progress
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Position {
+    /// Position data as key-value pairs
+    data: HashMap<String, String>,
+}
+
+impl Position {
+    /// Create a new empty position
+    pub fn new() -> Self {
+        Self {
+            data: HashMap::new(),
+        }
+    }
+    
+    /// Add a key-value pair to the position
+    pub fn with_data<K: Into<String>, V: Into<String>>(mut self, key: K, value: V) -> Self {
+        self.data.insert(key.into(), value.into());
+        self
+    }
+    
+    /// Get a position data value
+    pub fn get_data(&self, key: &str) -> Option<&String> {
+        self.data.get(key)
+    }
+    
+    /// Get all position data
+    pub fn data(&self) -> &HashMap<String, String> {
+        &self.data
+    }
+}
 
 /// Extraction mode for source connectors
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -210,6 +242,6 @@ pub trait BatchDestinationConnector: Connector {
     async fn write_record(&mut self, record: DataRecord, mode: WriteMode) -> Result<WriteStats> {
         // Create a single-record batch and call write_batch
         let batch = DataRecordBatch::new(vec![record]);
-        self.write_batch(batch)
+        self.write_batch(batch).await
     }
 }
