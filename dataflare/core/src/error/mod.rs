@@ -125,6 +125,18 @@ pub enum DataFlareError {
     /// Funcionalidad no implementada
     #[error("No implementado: {0}")]
     NotImplemented(String),
+
+    /// Error de máximo de reintentos excedido
+    #[error("Máximo de reintentos excedido: {0}")]
+    MaxRetriesExceeded(String),
+
+    /// Error de tarea abortada
+    #[error("Tarea abortada: {0}")]
+    TaskAborted(String),
+
+    /// Error de recuperación
+    #[error("Error de recuperación: {0}")]
+    Recovery(String),
 }
 
 impl From<actix::MailboxError> for DataFlareError {

@@ -8,8 +8,9 @@ use std::fmt;
 use std::sync::{Arc, Mutex};
 use log::{debug, warn, error};
 use serde::{Serialize, Deserialize};
-use dataflare_core::message::WorkflowProgress;
+use dataflare_core::message::{WorkflowProgress, WorkflowPhase};
 use dataflare_core::error::{Result, DataFlareError};
+use futures::StreamExt;
 use actix::prelude::*;
 use reqwest;
 use futures::channel::mpsc::{channel, Sender, Receiver};
@@ -159,7 +160,7 @@ impl ProgressReporter {
         let mut inner = self.inner.lock().map_err(|e| {
             DataFlareError::Workflow(format!("Failed to lock progress reporter: {}", e))
         })?;
-        
+
         inner.function_callbacks.push(Box::new(callback));
         Ok(())
     }
@@ -169,10 +170,10 @@ impl ProgressReporter {
         let mut inner = self.inner.lock().map_err(|e| {
             DataFlareError::Workflow(format!("Failed to lock progress reporter: {}", e))
         })?;
-        
+
         let (sender, receiver) = channel(100); // Buffer size of 100
         inner.event_stream_senders.push(sender);
-        
+
         Ok(ProgressEventStream { receiver })
     }
 
@@ -181,7 +182,7 @@ impl ProgressReporter {
         let mut inner = self.inner.lock().map_err(|e| {
             DataFlareError::Workflow(format!("Failed to lock progress reporter: {}", e))
         })?;
-        
+
         inner.webhooks.push(config);
         Ok(())
     }
@@ -191,12 +192,12 @@ impl ProgressReporter {
         let inner = self.inner.lock().map_err(|e| {
             DataFlareError::Workflow(format!("Failed to lock progress reporter: {}", e))
         })?;
-        
+
         // Call function callbacks
         for callback in &inner.function_callbacks {
             callback(progress.clone());
         }
-        
+
         // Send to event streams
         for sender in &inner.event_stream_senders {
             // Try to send but don't block if receiver is full
@@ -204,24 +205,24 @@ impl ProgressReporter {
                 debug!("Failed to send progress to event stream: {}", e);
             }
         }
-        
+
         // Send to webhooks (drop lock before async operations)
         let webhooks = inner.webhooks.clone();
         let http_client = inner.http_client.clone();
-        
+
         // Release the mutex lock before async operations
         drop(inner);
-        
+
         // Send to webhooks concurrently
         for webhook in webhooks {
             if let Err(e) = self.send_webhook(&http_client, &webhook, &progress).await {
                 warn!("Failed to send webhook: {}", e);
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Send progress to webhook
     async fn send_webhook(&self, http_client: &reqwest::Client, webhook: &WebhookConfig, progress: &WorkflowProgress) -> Result<()> {
         // Manual JSON formatting since WorkflowProgress doesn't implement Serialize here
@@ -232,31 +233,31 @@ impl ProgressReporter {
             "message": progress.message,
             "timestamp": progress.timestamp
         }).to_string();
-        
+
         // Prepare request
         let mut request_builder = match webhook.method.to_uppercase().as_str() {
             "POST" => http_client.post(&webhook.url),
             "PUT" => http_client.put(&webhook.url),
             _ => return Err(DataFlareError::Workflow(format!("Unsupported webhook method: {}", webhook.method))),
         };
-        
+
         // Add headers
         request_builder = request_builder.header("Content-Type", "application/json");
-        
+
         // Add custom headers
         for (key, value) in &webhook.headers {
             request_builder = request_builder.header(key, value);
         }
-        
+
         // Add auth token if provided
         if let Some(token) = &webhook.auth_token {
             request_builder = request_builder.header("Authorization", format!("Bearer {}", token));
         }
-        
+
         // Send the request
         let mut retry_count = 0;
         let mut last_error = None;
-        
+
         while retry_count < webhook.retry_count {
             match request_builder.try_clone().unwrap().body(payload.clone()).send().await {
                 Ok(response) => {
@@ -267,17 +268,17 @@ impl ProgressReporter {
                         // Server responded with an error
                         let status = response.status();
                         let text = response.text().await.unwrap_or_else(|_| "Could not read response body".to_string());
-                        
+
                         // For certain status codes, don't retry
                         if status.as_u16() >= 400 && status.as_u16() < 500 && status.as_u16() != 429 {
                             return Err(DataFlareError::Workflow(format!(
-                                "Webhook server responded with client error: {} - {}", 
+                                "Webhook server responded with client error: {} - {}",
                                 status, text
                             )));
                         }
-                        
+
                         last_error = Some(DataFlareError::Workflow(format!(
-                            "Webhook server responded with error: {} - {}", 
+                            "Webhook server responded with error: {} - {}",
                             status, text
                         )));
                     }
@@ -292,38 +293,38 @@ impl ProgressReporter {
                     };
                 }
             }
-            
+
             // Exponential backoff before retrying
             let delay = std::time::Duration::from_millis(100 * 2u64.pow(retry_count));
             tokio::time::sleep(delay).await;
-            
+
             retry_count += 1;
         }
-        
+
         // Return the last error if all retries failed
         Err(last_error.unwrap_or_else(|| {
             DataFlareError::Connection("Failed to send webhook after retries".to_string())
         }))
     }
-    
+
     /// Clear all progress callbacks and webhooks
     pub fn clear(&self) -> Result<()> {
         let mut inner = self.inner.lock().map_err(|e| {
             DataFlareError::Workflow(format!("Failed to lock progress reporter: {}", e))
         })?;
-        
+
         // Clear function callbacks
         inner.function_callbacks.clear();
-        
+
         // Close event stream senders
         for sender in inner.event_stream_senders.drain(..) {
             // Close the sender - this will notify all receivers that no more messages will be sent
             drop(sender);
         }
-        
+
         // Clear webhooks
         inner.webhooks.clear();
-        
+
         Ok(())
     }
 }
@@ -362,7 +363,7 @@ impl Handler<WorkflowProgress> for ProgressActor {
                 error!("Failed to report progress: {}", e);
             }
         };
-        
+
         // Spawn the future
         let fut = actix::fut::wrap_future::<_, Self>(fut);
         ctx.spawn(fut);
@@ -394,13 +395,13 @@ mod tests {
     async fn test_function_callback() {
         let progress_counter = Arc::new(Mutex::new(0));
         let progress_counter_clone = progress_counter.clone();
-        
+
         let reporter = ProgressReporter::new();
         reporter.add_function_callback(move |_| {
             let mut counter = progress_counter_clone.lock().unwrap();
             *counter += 1;
         }).unwrap();
-        
+
         // Create test progress
         let progress = WorkflowProgress {
             workflow_id: "test-workflow".to_string(),
@@ -409,9 +410,9 @@ mod tests {
             message: "Test progress".to_string(),
             timestamp: chrono::Utc::now()
         };
-        
+
         reporter.report(progress).await.unwrap();
-        
+
         let counter = progress_counter.lock().unwrap();
         assert_eq!(*counter, 1);
     }
@@ -420,7 +421,7 @@ mod tests {
     async fn test_event_stream() {
         let reporter = ProgressReporter::new();
         let mut stream = reporter.create_event_stream().unwrap();
-        
+
         // Create test progress
         let progress = WorkflowProgress {
             workflow_id: "test-workflow".to_string(),
@@ -429,22 +430,22 @@ mod tests {
             message: "Test progress".to_string(),
             timestamp: chrono::Utc::now()
         };
-        
+
         // Spawn a task to report progress after a short delay
         let reporter_clone = reporter.clone();
         let progress_clone = progress.clone();
-        
+
         // 创建单独的任务并执行
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
-                sleep(Duration::from_millis(100)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 if let Err(e) = reporter_clone.report(progress_clone).await {
                     error!("Error reporting progress: {}", e);
                 }
             });
         });
-        
+
         // Wait for progress update from stream
         if let Some(received) = stream.next().await {
             assert_eq!(received.workflow_id, progress.workflow_id);
@@ -455,4 +456,4 @@ mod tests {
             panic!("No progress received from stream");
         }
     }
-} 
+}

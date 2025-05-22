@@ -27,6 +27,8 @@ use crate::actor::{
     DestinationActor
 };
 
+use crate::actor::task::ErrorStrategy;
+
 /// Workflow stage execution status
 #[derive(Debug, Clone)]
 pub enum StageStatus {
@@ -125,11 +127,21 @@ pub struct AddDownstream {
     pub task_id: String,
 }
 
-/// Message to add a downstream task
+/// Message to update workflow stats
 #[derive(Message, Clone)]
 #[rtype(result = "()")]
 pub struct UpdateWorkflowStats {
     pub workflow_id: String,
+}
+
+/// Message to set workflow failure strategy
+#[derive(Message, Clone)]
+#[rtype(result = "()")]
+pub struct SetFailureStrategy {
+    /// Workflow ID
+    pub workflow_id: String,
+    /// Failure strategy to set
+    pub strategy: FailureStrategy,
 }
 
 /// Message to execute a workflow
@@ -140,6 +152,20 @@ pub struct ExecuteWorkflow {
     pub workflow_id: String,
     /// Optional execution parameters
     pub parameters: Option<serde_json::Value>,
+}
+
+/// Message to notify workflow of task failure
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct TaskFailed {
+    /// Workflow ID
+    pub workflow_id: String,
+    /// Task ID
+    pub task_id: String,
+    /// Error message
+    pub error_message: String,
+    /// Whether to retry the task
+    pub should_retry: bool,
 }
 
 /// Failure strategy for workflows
@@ -166,7 +192,7 @@ pub struct WorkflowActor {
 
     /// Workflow name
     name: String,
-    
+
     /// Status
     status: ActorStatus,
 
@@ -178,45 +204,60 @@ pub struct WorkflowActor {
 
     /// Task kinds
     task_kinds: HashMap<String, TaskKind>,
-    
+
     /// Actor registry for accessing other actors
     registry: Option<Arc<ActorRegistry>>,
 
     /// Message router for direct messaging
     router: Option<MessageRouter>,
-    
+
     /// Progress subscribers
     subscribers: HashMap<Uuid, Recipient<WorkflowProgress>>,
-    
+
     /// Workflow execution statistics
     stats: WorkflowStats,
 
     /// Execution start time
     start_time: Option<Instant>,
-    
+
     /// DAG relationships (task_id -> downstream task_ids)
     dag: HashMap<String, Vec<String>>,
 
     /// Completed tasks
     completed_tasks: HashSet<String>,
-    
+
     /// Failed tasks
     failed_tasks: HashSet<String>,
-    
+
     /// Failure strategy
     failure_strategy: FailureStrategy,
 
     /// Source actors
     source_actors: HashMap<String, Addr<SourceActor>>,
-    
+
     /// Destination actors
     destination_actors: HashMap<String, Addr<DestinationActor>>,
+
+    /// Task retry counts
+    task_retry_counts: HashMap<String, usize>,
+
+    /// Maximum number of task failures allowed before workflow fails
+    max_task_failures: usize,
+
+    /// Default error strategy for tasks
+    default_error_strategy: ErrorStrategy,
+
+    /// Recovery in progress flag
+    recovery_in_progress: bool,
+
+    /// Tasks in recovery
+    tasks_in_recovery: HashSet<String>,
 }
 
 // Message handler for adding downstream tasks to a TaskActor
 impl Handler<AddDownstream> for TaskActor {
     type Result = ();
-    
+
     fn handle(&mut self, msg: AddDownstream, _ctx: &mut Self::Context) -> Self::Result {
         // In a real implementation, this would store the task ID and set up connections
         debug!("Adding downstream task: {}", msg.task_id);
@@ -244,6 +285,11 @@ impl WorkflowActor {
             failure_strategy: FailureStrategy::default(),
             source_actors: HashMap::new(),
             destination_actors: HashMap::new(),
+            task_retry_counts: HashMap::new(),
+            max_task_failures: 3, // 默认最多允许3个任务失败
+            default_error_strategy: ErrorStrategy::Continue, // 默认继续执行
+            recovery_in_progress: false,
+            tasks_in_recovery: HashSet::new(),
         }
     }
 
@@ -252,24 +298,24 @@ impl WorkflowActor {
         self.registry = Some(registry.clone());
         self.router = Some(MessageRouter::new(registry));
     }
-    
+
     /// Initialize the workflow from configuration
     fn init_from_config(&mut self, config: Workflow, ctx: &mut <Self as Actor>::Context) -> Result<()> {
         info!("Initializing workflow {} from configuration", self.id);
-        
+
         // Store the configuration
         self.name = config.name.clone();
-        
+
         // Create source tasks
         for (id, source_config) in &config.sources {
             let task_id = format!("{}.source.{}", self.id, id);
             let task = TaskActor::new(&format!("Source: {}", id), TaskKind::Source);
             let addr = task.start();
-            
+
             self.tasks.insert(task_id.clone(), addr.clone());
             self.task_kinds.insert(task_id.clone(), TaskKind::Source);
             self.dag.insert(task_id.clone(), vec![]);
-            
+
             // Initialize source task
             let task_config = serde_json::json!({
                 "id": task_id.clone(),
@@ -281,7 +327,7 @@ impl WorkflowActor {
                 workflow_id: self.id.clone(),
                 config: task_config,
             });
-            
+
             let task_id_clone = task_id.clone();
             ctx.wait(fut.into_actor(self).map(move |res, actor, _ctx| {
                 match res {
@@ -307,11 +353,11 @@ impl WorkflowActor {
             let task_id = format!("{}.processor.{}", self.id, id);
             let task = TaskActor::new(&format!("Processor: {}", id), TaskKind::Processor);
             let addr = task.start();
-            
+
             self.tasks.insert(task_id.clone(), addr.clone());
             self.task_kinds.insert(task_id.clone(), TaskKind::Processor);
             self.dag.insert(task_id.clone(), vec![]);
-            
+
             // Initialize processor task
             let task_config = serde_json::json!({
                 "id": task_id.clone(),
@@ -323,7 +369,7 @@ impl WorkflowActor {
                 workflow_id: self.id.clone(),
                 config: task_config,
             });
-            
+
             let task_id_clone = task_id.clone();
             ctx.wait(fut.into_actor(self).map(move |res, actor, _ctx| {
                 match res {
@@ -349,11 +395,11 @@ impl WorkflowActor {
             let task_id = format!("{}.destination.{}", self.id, id);
             let task = TaskActor::new(&format!("Destination: {}", id), TaskKind::Destination);
             let addr = task.start();
-            
+
             self.tasks.insert(task_id.clone(), addr.clone());
             self.task_kinds.insert(task_id.clone(), TaskKind::Destination);
             self.dag.insert(task_id.clone(), vec![]);
-            
+
             // Initialize destination task
             let task_config = serde_json::json!({
                 "id": task_id.clone(),
@@ -365,7 +411,7 @@ impl WorkflowActor {
                 workflow_id: self.id.clone(),
                 config: task_config,
             });
-            
+
             let task_id_clone = task_id.clone();
             ctx.wait(fut.into_actor(self).map(move |res, actor, _ctx| {
                 match res {
@@ -389,18 +435,18 @@ impl WorkflowActor {
         // Build DAG relationships from inputs
         for (id, proc_config) in &config.transformations {
             let proc_id = format!("{}.processor.{}", self.id, id);
-            
+
             for input in &proc_config.inputs {
                 // Determine if input is a source or another processor
                 let source_id = format!("{}.source.{}", self.id, input);
                 let upstream_proc_id = format!("{}.processor.{}", self.id, input);
-                
+
                 if self.tasks.contains_key(&source_id) {
                     // Add this processor as downstream of the source
                     if let Some(downstream) = self.dag.get_mut(&source_id) {
                         downstream.push(proc_id.clone());
                     }
-                    
+
                     // Connect the actors for direct message passing
                     if let Some(source_addr) = self.tasks.get(&source_id) {
                         if let Some(_proc_addr) = self.tasks.get(&proc_id) {
@@ -414,7 +460,7 @@ impl WorkflowActor {
                     if let Some(downstream) = self.dag.get_mut(&upstream_proc_id) {
                         downstream.push(proc_id.clone());
                     }
-                    
+
                     // Connect the actors for direct message passing
                     if let Some(upstream_addr) = self.tasks.get(&upstream_proc_id) {
                         if let Some(_proc_addr) = self.tasks.get(&proc_id) {
@@ -428,22 +474,22 @@ impl WorkflowActor {
                 }
             }
         }
-        
+
         // Connect processors to destinations
         for (id, dest_config) in &config.destinations {
             let dest_id = format!("{}.destination.{}", self.id, id);
-            
+
             for input in &dest_config.inputs {
                 // Determine if input is a source or processor
                 let source_id = format!("{}.source.{}", self.id, input);
                 let proc_id = format!("{}.processor.{}", self.id, input);
-                
+
                 if self.tasks.contains_key(&proc_id) {
                     // Add this destination as downstream of the processor
                     if let Some(downstream) = self.dag.get_mut(&proc_id) {
                         downstream.push(dest_id.clone());
                     }
-                    
+
                     // Connect the actors for direct message passing
                     if let Some(proc_addr) = self.tasks.get(&proc_id) {
                         if let Some(_dest_addr) = self.tasks.get(&dest_id) {
@@ -457,7 +503,7 @@ impl WorkflowActor {
                     if let Some(downstream) = self.dag.get_mut(&source_id) {
                         downstream.push(dest_id.clone());
                     }
-                    
+
                     // Connect the actors for direct message passing
                     if let Some(source_addr) = self.tasks.get(&source_id) {
                         if let Some(_dest_addr) = self.tasks.get(&dest_id) {
@@ -471,13 +517,13 @@ impl WorkflowActor {
                 }
             }
         }
-        
+
         self.config = Some(config);
         self.status = ActorStatus::Initialized;
-        
+
         Ok(())
     }
-    
+
     /// Broadcast a progress update to all subscribers
     fn broadcast_progress(&self, phase: WorkflowPhase, progress: f64, message: &str) {
         // Create a progress message using the proper fields from WorkflowProgress in dataflare_core::message
@@ -493,19 +539,19 @@ impl WorkflowActor {
                 let _ = recipient.do_send(progress_msg.clone());
             }
         }
-    
+
     /// Update workflow statistics based on task statistics
     async fn update_stats(&mut self) -> Result<()> {
         let mut total_records = 0;
         let mut total_bytes = 0;
         let mut tasks_with_errors = 0;
-        
+
         for (id, addr) in &self.tasks {
             if let Ok(stats) = addr.send(GetTaskStats).await {
                 if let Ok(task_stats) = stats {
                     total_records += task_stats.records_processed;
                     total_bytes += task_stats.bytes_processed;
-                    
+
                     if task_stats.errors > 0 {
                         tasks_with_errors += 1;
                         if self.stats.last_error.is_none() {
@@ -515,11 +561,11 @@ impl WorkflowActor {
                 }
             }
         }
-        
+
         self.stats.records_processed = total_records;
         self.stats.bytes_processed = total_bytes;
         self.stats.error_count = tasks_with_errors;
-        
+
         // Calculate records per second
         if let Some(start) = self.start_time {
             let elapsed = start.elapsed().as_secs_f64();
@@ -527,7 +573,7 @@ impl WorkflowActor {
                 self.stats.records_per_second = total_records as f64 / elapsed;
             }
         }
-        
+
         Ok(())
     }
 
@@ -536,29 +582,29 @@ impl WorkflowActor {
         // Convert address to string identifier and store it
         let addr_str = format!("{:?}", addr);
         debug!("Adding source actor: {} with addr: {}", id, addr_str);
-        
+
         // The actual interaction will happen through the actor system message passing
         self.task_kinds.insert(id.clone(), TaskKind::Source);
         self.dag.insert(id, vec![]);
     }
-    
+
     /// Add a processor actor to the workflow
     pub fn add_processor_actor<A: Actor>(&mut self, id: String, addr: Addr<A>) {
         // Convert address to string identifier and store it
         let addr_str = format!("{:?}", addr);
         debug!("Adding processor actor: {} with addr: {}", id, addr_str);
-        
+
         // The actual interaction will happen through the actor system message passing
         self.task_kinds.insert(id.clone(), TaskKind::Processor);
         self.dag.insert(id, vec![]);
     }
-    
+
     /// Add a destination actor to the workflow
     pub fn add_destination_actor<A: Actor>(&mut self, id: String, addr: Addr<A>) {
         // Convert address to string identifier and store it
         let addr_str = format!("{:?}", addr);
         debug!("Adding destination actor: {} with addr: {}", id, addr_str);
-        
+
         // The actual interaction will happen through the actor system message passing
         self.task_kinds.insert(id.clone(), TaskKind::Destination);
         self.dag.insert(id, vec![]);
@@ -574,7 +620,7 @@ impl Actor for WorkflowActor {
 
     fn stopped(&mut self, _ctx: &mut Self::Context) {
         info!("WorkflowActor {} stopped", self.id);
-        
+
         // Update end time in statistics
         self.stats.end_time = Some(chrono::Utc::now());
     }
@@ -594,7 +640,7 @@ impl Handler<Initialize> for WorkflowActor {
                 return Err(DataFlareError::Config(format!("Invalid workflow configuration: {}", e)));
     }
         };
-        
+
         self.init_from_config(config, ctx)
     }
 }
@@ -604,14 +650,14 @@ impl Handler<Finalize> for WorkflowActor {
 
     fn handle(&mut self, _msg: Finalize, _ctx: &mut Self::Context) -> Self::Result {
         info!("Finalizing workflow {}", self.id);
-        
+
         // Finalize all task actors
         for (id, addr) in &self.tasks {
             let _ = addr.do_send(Finalize {
                 workflow_id: self.id.clone(),
             });
         }
-        
+
         self.status = ActorStatus::Stopped;
         Ok(())
     }
@@ -622,7 +668,7 @@ impl Handler<StartWorkflow> for WorkflowActor {
 
     fn handle(&mut self, _msg: StartWorkflow, ctx: &mut Self::Context) -> Self::Result {
         info!("Starting workflow {}", self.id);
-        
+
         // Use pattern matching for status comparison
         match self.status {
             ActorStatus::Running => return Ok(()),
@@ -631,11 +677,11 @@ impl Handler<StartWorkflow> for WorkflowActor {
                 self.status = ActorStatus::Running;
                 self.stats.start_time = Some(chrono::Utc::now());
                 self.start_time = Some(Instant::now());
-                
+
                 // Reset the completed and failed tasks for a new run
                 self.completed_tasks.clear();
                 self.failed_tasks.clear();
-                
+
                 // First, resume all tasks
                 for (id, addr) in &self.tasks {
                     info!("Resuming task {}", id);
@@ -643,14 +689,14 @@ impl Handler<StartWorkflow> for WorkflowActor {
                             workflow_id: self.id.clone(),
                         });
                     }
-                
+
                 // Connect SourceActors to their corresponding TaskActors
                 for (source_id, source_addr) in &self.source_actors {
                     // Find a matching source task (with matching ID or prefix)
                     for (task_id, task_addr) in &self.tasks {
                         if task_id.contains(source_id) && self.task_kinds.get(task_id) == Some(&TaskKind::Source) {
                             info!("Connecting source actor {} to task {}", source_id, task_id);
-                            
+
                             // Send the ConnectToTask message to establish the connection
                             source_addr.do_send(ConnectToTask {
                                 task_addr: task_addr.clone(),
@@ -659,14 +705,14 @@ impl Handler<StartWorkflow> for WorkflowActor {
                         }
                     }
                 }
-                
+
                 // Connect DestinationActors to their corresponding TaskActors
                 for (dest_id, dest_addr) in &self.destination_actors {
                     // Find a matching destination task (with matching ID or prefix)
                     for (task_id, task_addr) in &self.tasks {
                         if task_id.contains(dest_id) && self.task_kinds.get(task_id) == Some(&TaskKind::Destination) {
                             info!("Connecting destination actor {} to task {}", dest_id, task_id);
-                            
+
                             // Send the ConnectToTask message to establish the connection
                             dest_addr.do_send(ConnectToTask {
                                 task_addr: task_addr.clone(),
@@ -675,7 +721,7 @@ impl Handler<StartWorkflow> for WorkflowActor {
                         }
                     }
                 }
-                
+
                 // Start all source tasks - broadcast to all source tasks
                 let source_tasks: Vec<_> = self.tasks.iter()
                     .filter(|(id, _)| {
@@ -687,7 +733,7 @@ impl Handler<StartWorkflow> for WorkflowActor {
                     })
                     .map(|(id, addr)| (id.clone(), addr.clone()))
                     .collect();
-                
+
                 for (task_id, task_addr) in source_tasks {
                     info!("Starting source task {}", task_id);
                     let _ = task_addr.do_send(StartExtraction {
@@ -699,7 +745,7 @@ impl Handler<StartWorkflow> for WorkflowActor {
                         state: None,
                     });
                 }
-                
+
                 // Start all source actors - directly start the source extraction
                 for (source_id, source_addr) in &self.source_actors {
                     info!("Starting source actor {}", source_id);
@@ -712,15 +758,15 @@ impl Handler<StartWorkflow> for WorkflowActor {
                         state: None,
                     });
                 }
-                
+
                 // Send initial progress update
                 self.broadcast_progress(WorkflowPhase::Initializing, 0.0, "Workflow started");
-                
+
                 // Set up a timer to periodically update progress based on task status
                 ctx.run_interval(Duration::from_secs(5), move |actor, _ctx| {
                     actor.broadcast_progress(WorkflowPhase::Extracting, 0.5, "Workflow running");
                 });
-                
+
         Ok(())
             }
             _ => Err(DataFlareError::Workflow(format!("Workflow is in wrong state for starting: {:?}", self.status))),
@@ -733,7 +779,7 @@ impl Handler<StopWorkflow> for WorkflowActor {
 
     fn handle(&mut self, _msg: StopWorkflow, _ctx: &mut Self::Context) -> Self::Result {
         info!("Stopping workflow {}", self.id);
-        
+
         // Use pattern matching for status comparison
         match self.status {
             ActorStatus::Running => {
@@ -743,10 +789,10 @@ impl Handler<StopWorkflow> for WorkflowActor {
                         workflow_id: self.id.clone(),
                     });
                 }
-                
+
                 self.status = ActorStatus::Stopped;
                 self.broadcast_progress(WorkflowPhase::Completed, 1.0, "Workflow stopped");
-                
+
         Ok(())
             },
             _ => Ok(()),
@@ -772,11 +818,11 @@ impl Handler<GetWorkflowStats> for WorkflowActor {
 
 impl Handler<SubscribeProgress> for WorkflowActor {
     type Result = Result<()>;
-    
+
     fn handle(&mut self, msg: SubscribeProgress, _ctx: &mut Self::Context) -> Self::Result {
         let id = Uuid::new_v4();
         self.subscribers.insert(id, msg.recipient.clone());
-        
+
         // Forward subscription to all task actors (use clone() explicitly)
         for (_id, addr) in &self.tasks {
             let _ = addr.do_send(SubscribeProgress {
@@ -784,18 +830,18 @@ impl Handler<SubscribeProgress> for WorkflowActor {
                 recipient: msg.recipient.clone(),
             });
         }
-        
+
         Ok(())
     }
 }
 
 impl Handler<UnsubscribeProgress> for WorkflowActor {
     type Result = Result<()>;
-    
+
     fn handle(&mut self, msg: UnsubscribeProgress, _ctx: &mut Self::Context) -> Self::Result {
         // Remove by value since we don't have the UUID
         self.subscribers.retain(|_, r| r != &msg.recipient);
-        
+
         // Forward unsubscription to all task actors (use clone() explicitly)
         for (_id, addr) in &self.tasks {
             let _ = addr.do_send(UnsubscribeProgress {
@@ -810,23 +856,23 @@ impl Handler<UnsubscribeProgress> for WorkflowActor {
 
 impl Handler<CheckWorkflow> for WorkflowActor {
     type Result = Result<ActorStatus>;
-    
+
     fn handle(&mut self, _msg: CheckWorkflow, ctx: &mut Self::Context) -> Self::Result {
         // Convenience method to check if workflow is finished
         // by checking all task statuses
-        
+
         // Clone status before spawning any futures
         let status = self.status.clone();
         let addr = ctx.address();
         let workflow_id = self.id.clone();
-        
+
         // Spawn a future that will update stats asynchronously without returning a result
-        ctx.spawn(async move { 
-            addr.do_send(UpdateWorkflowStats { 
+        ctx.spawn(async move {
+            addr.do_send(UpdateWorkflowStats {
                 workflow_id: workflow_id
             });
         }.into_actor(self));
-        
+
         // Return the cloned status
         Ok(status)
     }
@@ -839,17 +885,17 @@ impl Handler<UpdateWorkflowStats> for WorkflowActor {
         if msg.workflow_id != self.id {
             return;
         }
-        
+
         let addr = ctx.address();
-        
+
         let fut = async move {
             // 发送另一个消息回到actor以获取状态更新
             let _ = addr.send(InternalUpdateStats).await;
-            
+
             // 返回单元值，不是Result
             ()
         };
-        
+
         ctx.spawn(fut.into_actor(self));
     }
 }
@@ -874,17 +920,17 @@ impl Handler<InternalUpdateStats> for WorkflowActor {
 
 // For TaskActor to reference the workflow actor
 impl Handler<ProcessBatch> for WorkflowActor {
-    type Result = ResponseFuture<Result<DataRecordBatch>>;
-    
+    type Result = ResponseFuture<Result<()>>;
+
     fn handle(&mut self, msg: ProcessBatch, _ctx: &mut Self::Context) -> Self::Result {
         // Workflows don't process batches directly but route them
         // This helps in testing and monitoring
-        info!("Workflow {} received batch with {} records", 
+        info!("Workflow {} received batch with {} records",
               self.id, msg.batch.records.len());
-        
-        // Just return the batch as-is
+
+        // Just acknowledge receipt
         Box::pin(async move {
-            Ok(msg.batch)
+            Ok(())
         })
     }
 }
@@ -894,7 +940,7 @@ impl Handler<ExecuteWorkflow> for WorkflowActor {
 
     fn handle(&mut self, msg: ExecuteWorkflow, ctx: &mut Self::Context) -> Self::Result {
         info!("Executing workflow {}", msg.workflow_id);
-        
+
         // If the workflow is already initialized, start it
         if self.id == msg.workflow_id && self.status == ActorStatus::Initialized {
             // Include any parameters if provided
@@ -902,17 +948,17 @@ impl Handler<ExecuteWorkflow> for WorkflowActor {
                 debug!("Workflow execution parameters: {:?}", params);
                 // Store parameters for later use if needed
             }
-            
+
             // Start the workflow
             return self.handle(StartWorkflow, ctx);
         } else if self.id != msg.workflow_id {
-            return Err(DataFlareError::Workflow(format!("Workflow ID mismatch: expected {}, got {}", 
+            return Err(DataFlareError::Workflow(format!("Workflow ID mismatch: expected {}, got {}",
                 self.id, msg.workflow_id)));
         } else if self.status != ActorStatus::Initialized {
-            return Err(DataFlareError::Workflow(format!("Workflow {} is not in initialized state (current: {:?})", 
+            return Err(DataFlareError::Workflow(format!("Workflow {} is not in initialized state (current: {:?})",
                 self.id, self.status)));
         }
-        
+
         Err(DataFlareError::Workflow(format!("Failed to execute workflow {}", msg.workflow_id)))
     }
 }
@@ -920,77 +966,93 @@ impl Handler<ExecuteWorkflow> for WorkflowActor {
 /// Handler for TaskCompleted message
 impl Handler<TaskCompleted> for WorkflowActor {
     type Result = ();
-    
+
     fn handle(&mut self, msg: TaskCompleted, _ctx: &mut Self::Context) -> Self::Result {
         if msg.success {
-            info!("Task {} completed in workflow {}, processed {} records", 
+            info!("Task {} completed in workflow {}, processed {} records",
                  msg.task_id, msg.workflow_id, msg.records_processed);
-            
+
             // Update statistics
             self.stats.records_processed += msg.records_processed;
-            
+
             // Mark task as completed
             self.completed_tasks.insert(msg.task_id.clone());
+
+            // Remove from recovery set if it was in recovery
+            self.tasks_in_recovery.remove(&msg.task_id);
+
+            // Check if all tasks in recovery are now completed
+            if self.recovery_in_progress && self.tasks_in_recovery.is_empty() {
+                info!("All tasks in recovery have completed for workflow {}", self.id);
+                self.recovery_in_progress = false;
+
+                // Broadcast recovery completion
+                self.broadcast_progress(
+                    WorkflowPhase::Transforming,
+                    0.5,
+                    &format!("Workflow {} recovered from failures", self.id)
+                );
+            }
         } else {
-            error!("Task {} failed in workflow {}: {}", 
-                  msg.task_id, msg.workflow_id, 
+            error!("Task {} failed in workflow {}: {}",
+                  msg.task_id, msg.workflow_id,
                   msg.error_message.unwrap_or_else(|| "Unknown error".to_string()));
-            
+
             // Mark task as failed
             self.failed_tasks.insert(msg.task_id.clone());
-            
+
             // If abort strategy is configured, stop the workflow
             if self.failure_strategy == FailureStrategy::Abort {
                 self.status = ActorStatus::Failed;
                 self.stats.end_time = Some(chrono::Utc::now());
-                
+
                 // Broadcast workflow failure event
                 self.broadcast_progress(
-                    WorkflowPhase::Error, 
-                    1.0, 
-                    &format!("Workflow {} failed due to task {}", 
+                    WorkflowPhase::Error,
+                    1.0,
+                    &format!("Workflow {} failed due to task {}",
                             self.id, msg.task_id)
                 );
-                
+
                 return;
             }
         }
-        
+
         // Check if all tasks are completed or failed
         let total_task_count = self.tasks.len();
         let completed_count = self.completed_tasks.len();
         let failed_count = self.failed_tasks.len();
-        
+
         let all_tasks_processed = (completed_count + failed_count) >= total_task_count;
-        
+
         if all_tasks_processed {
             // Set final workflow status based on failed task count
             if failed_count == 0 {
                 info!("All tasks completed successfully for workflow {}", self.id);
                 self.status = ActorStatus::Completed;
-                
+
                 // Broadcast workflow completion event
                 self.broadcast_progress(
-                    WorkflowPhase::Completed, 
-                    1.0, 
+                    WorkflowPhase::Completed,
+                    1.0,
                     &format!("Workflow {} completed successfully", self.id)
                 );
             } else {
                 info!("Workflow {} completed with {} failed tasks", self.id, failed_count);
                 self.status = ActorStatus::CompletedWithErrors;
-                
+
                 // Broadcast workflow partial completion event
                 self.broadcast_progress(
-                    WorkflowPhase::Error, 
-                    1.0, 
-                    &format!("Workflow {} completed with {} failed tasks", 
+                    WorkflowPhase::Error,
+                    1.0,
+                    &format!("Workflow {} completed with {} failed tasks",
                             self.id, failed_count)
                 );
             }
-            
+
             // Record end time
             self.stats.end_time = Some(chrono::Utc::now());
-            
+
             // Calculate and record execution time
             if let Some(start_time) = self.start_time {
                 let duration = start_time.elapsed();
@@ -1001,9 +1063,9 @@ impl Handler<TaskCompleted> for WorkflowActor {
             // Update progress
             let progress = (completed_count as f64) / (total_task_count as f64);
             self.broadcast_progress(
-                WorkflowPhase::Transforming, 
-                progress, 
-                &format!("Workflow {} progress: {:.1}%", 
+                WorkflowPhase::Transforming,
+                progress,
+                &format!("Workflow {} progress: {:.1}%",
                         self.id, progress * 100.0)
             );
         }
@@ -1013,16 +1075,16 @@ impl Handler<TaskCompleted> for WorkflowActor {
 /// Handler for RegisterTask message
 impl Handler<RegisterTask> for WorkflowActor {
     type Result = ();
-    
+
     fn handle(&mut self, msg: RegisterTask, _ctx: &mut Self::Context) -> Self::Result {
         info!("Registering task {} with workflow {}", msg.task_id, self.id);
-        
+
         // Store the task actor address
         self.tasks.insert(msg.task_id.clone(), msg.task_addr.clone());
-        
+
         // Store the task kind
         self.task_kinds.insert(msg.task_id.clone(), msg.task_kind);
-        
+
         // Set the workflow actor reference in the task
         msg.task_addr.do_send(Initialize {
             workflow_id: self.id.clone(),
@@ -1031,7 +1093,7 @@ impl Handler<RegisterTask> for WorkflowActor {
                 "workflow_id": self.id
             }),
         });
-        
+
         // Provide the workflow actor reference to the task for completion notification
         if let Ok(addr) = _ctx.address().try_into() {
             msg.task_addr.do_send(crate::actor::task::SetWorkflowActor {
@@ -1044,13 +1106,13 @@ impl Handler<RegisterTask> for WorkflowActor {
 /// Handler for RegisterSourceActor message
 impl Handler<RegisterSourceActor> for WorkflowActor {
     type Result = ();
-    
+
     fn handle(&mut self, msg: RegisterSourceActor, _ctx: &mut Self::Context) -> Self::Result {
         info!("Registering source actor {} with workflow {}", msg.source_id, self.id);
-        
+
         // Store the source actor in a separate map
         self.source_actors.insert(msg.source_id.clone(), msg.source_addr.clone());
-        
+
         // Get the actual source configuration from workflow config if available
         let source_config = if let Some(workflow_config) = &self.config {
             if let Some(source_cfg) = workflow_config.sources.get(&msg.source_id) {
@@ -1070,7 +1132,7 @@ impl Handler<RegisterSourceActor> for WorkflowActor {
                 "workflow_id": self.id
             })
         };
-        
+
         // Initialize the source actor with this workflow and proper configuration
         msg.source_addr.do_send(Initialize {
             workflow_id: self.id.clone(),
@@ -1082,13 +1144,13 @@ impl Handler<RegisterSourceActor> for WorkflowActor {
 /// Handler for RegisterDestinationActor message
 impl Handler<RegisterDestinationActor> for WorkflowActor {
     type Result = ();
-    
+
     fn handle(&mut self, msg: RegisterDestinationActor, _ctx: &mut Self::Context) -> Self::Result {
         info!("Registering destination actor {} with workflow {}", msg.destination_id, self.id);
-        
+
         // Store the destination actor in the destination actors map
         self.destination_actors.insert(msg.destination_id.clone(), msg.destination_addr.clone());
-        
+
         // Get the actual destination configuration from workflow config if available
         let dest_config = if let Some(workflow_config) = &self.config {
             if let Some(dest_cfg) = workflow_config.destinations.get(&msg.destination_id) {
@@ -1108,12 +1170,151 @@ impl Handler<RegisterDestinationActor> for WorkflowActor {
                 "workflow_id": self.id
             })
         };
-        
+
         // Initialize the destination actor with this workflow and proper configuration
         msg.destination_addr.do_send(Initialize {
             workflow_id: self.id.clone(),
             config: dest_config,
         });
+    }
+}
+
+/// Handler for TaskFailed message
+impl Handler<SetFailureStrategy> for WorkflowActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: SetFailureStrategy, _ctx: &mut Self::Context) -> Self::Result {
+        info!("Setting failure strategy for workflow {} to {:?}", self.id, msg.strategy);
+
+        if self.id == msg.workflow_id {
+            self.failure_strategy = msg.strategy;
+
+            // Apply the strategy to all tasks
+            for (task_id, task_addr) in &self.tasks {
+                // Set error strategy based on workflow failure strategy
+                let error_strategy = match msg.strategy {
+                    FailureStrategy::Continue => ErrorStrategy::Continue,
+                    FailureStrategy::Retry(max_retries) => ErrorStrategy::Retry(max_retries),
+                    FailureStrategy::Abort => ErrorStrategy::Abort,
+                };
+
+                // Send message to task
+                task_addr.do_send(crate::actor::task::SetErrorStrategy {
+                    strategy: error_strategy,
+                });
+
+                info!("Applied error strategy {:?} to task {}", error_strategy, task_id);
+            }
+        } else {
+            warn!("Workflow ID mismatch: expected {}, got {}", self.id, msg.workflow_id);
+        }
+    }
+}
+
+impl Handler<TaskFailed> for WorkflowActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: TaskFailed, ctx: &mut Self::Context) -> Self::Result {
+        error!("Task {} failed in workflow {}: {}", msg.task_id, msg.workflow_id, msg.error_message);
+
+        // Add to failed tasks
+        self.failed_tasks.insert(msg.task_id.clone());
+
+        // Update workflow statistics
+        self.stats.error_count += 1;
+        self.stats.last_error = Some(format!("Task {} failed: {}", msg.task_id, msg.error_message));
+
+        // Handle based on failure strategy
+        match self.failure_strategy {
+            FailureStrategy::Continue => {
+                warn!("Continuing workflow {} despite task failure", self.id);
+
+                // Broadcast progress update
+                self.broadcast_progress(
+                    WorkflowPhase::Error,
+                    0.0,
+                    &format!("Task {} failed but workflow continues: {}",
+                            msg.task_id, msg.error_message)
+                );
+            },
+            FailureStrategy::Retry(max_retries) => {
+                // Get current retry count and make a copy
+                let retry_count_entry = self.task_retry_counts
+                    .entry(msg.task_id.clone())
+                    .or_insert(0);
+
+                let current_retry_count = *retry_count_entry;
+
+                if current_retry_count < max_retries && msg.should_retry {
+                    // Increment retry count
+                    *retry_count_entry += 1;
+                    let new_retry_count = current_retry_count + 1;
+
+                    // Add to recovery set
+                    self.tasks_in_recovery.insert(msg.task_id.clone());
+                    self.recovery_in_progress = true;
+
+                    info!("Retrying task {} (attempt {}/{})",
+                          msg.task_id, new_retry_count, max_retries);
+
+                    // Broadcast retry progress
+                    self.broadcast_progress(
+                        WorkflowPhase::Transforming,
+                        0.0,
+                        &format!("Retrying task {} (attempt {}/{})",
+                                msg.task_id, new_retry_count, max_retries)
+                    );
+
+                    // Schedule task retry
+                    if let Some(task_addr) = self.tasks.get(&msg.task_id) {
+                        let task_addr_clone = task_addr.clone();
+                        let task_id_clone = msg.task_id.clone();
+
+                        // Exponential backoff
+                        let delay = 2u64.pow(new_retry_count as u32) * 100;
+
+                        ctx.run_later(Duration::from_millis(delay), move |_actor, _| {
+                            info!("Executing retry for task {}", task_id_clone);
+                            // Restart the task
+                            // In a real implementation, we would need to restore the task's state
+                            // and resume from the last checkpoint
+                        });
+                    }
+                } else {
+                    // Max retries exceeded or retry not requested
+                    error!("Max retries exceeded or retry not requested for task {}", msg.task_id);
+
+                    if self.failed_tasks.len() >= self.max_task_failures {
+                        // Too many failures, abort workflow
+                        error!("Too many task failures ({}/{}), aborting workflow {}",
+                               self.failed_tasks.len(), self.max_task_failures, self.id);
+
+                        self.status = ActorStatus::Failed;
+
+                        // Broadcast failure
+                        self.broadcast_progress(
+                            WorkflowPhase::Error,
+                            0.0,
+                            &format!("Workflow {} aborted due to too many task failures", self.id)
+                        );
+                    }
+                }
+            },
+            FailureStrategy::Abort => {
+                // Abort workflow immediately
+                error!("Aborting workflow {} due to task failure", self.id);
+
+                self.status = ActorStatus::Failed;
+
+                // Broadcast failure
+                self.broadcast_progress(
+                    WorkflowPhase::Error,
+                    0.0,
+                    &format!("Workflow {} aborted due to task failure: {}",
+                            self.id, msg.error_message)
+                );
+            }
+        }
     }
 }
 
@@ -1138,13 +1339,13 @@ mod tests {
         let status = addr.send(GetStatus).await.unwrap().unwrap();
         assert!(matches!(status, ActorStatus::Initialized));
     }
-    
+
     #[actix::test]
     async fn test_workflow_lifecycle() {
         // 创建一个完整的工作流及其任务
         let workflow_actor = WorkflowActor::new("test-workflow-lifecycle".to_string());
         let addr = workflow_actor.start();
-        
+
         // 初始化工作流
         let config = serde_json::json!({
             "name": "测试工作流",
@@ -1169,40 +1370,40 @@ mod tests {
                 }
             }
         });
-        
+
         let result = addr.send(Initialize {
             workflow_id: "test-workflow-lifecycle".to_string(),
             config,
         }).await.unwrap();
-        
+
         assert!(result.is_ok());
-        
+
         // 获取初始化后的状态
         let status = addr.send(GetStatus).await.unwrap().unwrap();
         assert!(matches!(status, ActorStatus::Initialized));
-        
+
         // 启动工作流
         let result = addr.send(StartWorkflow).await.unwrap();
         assert!(result.is_ok());
-        
+
         // 验证工作流已经启动
         let status = addr.send(GetStatus).await.unwrap().unwrap();
         assert!(matches!(status, ActorStatus::Running));
-        
+
         // 等待一段时间让工作流处理任务
         actix_rt::time::sleep(Duration::from_millis(100)).await;
-        
+
         // 获取工作流统计信息
         let stats = addr.send(GetWorkflowStats).await.unwrap().unwrap();
-        
+
         // 检查统计信息
         assert!(stats.start_time.is_some());
         assert!(stats.error_count == 0);
-        
+
         // 停止工作流
         let result = addr.send(StopWorkflow).await.unwrap();
         assert!(result.is_ok());
-        
+
         // 确认工作流已停止
         let status = addr.send(GetStatus).await.unwrap().unwrap();
         assert!(matches!(status, ActorStatus::Stopped));

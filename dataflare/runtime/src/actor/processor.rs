@@ -319,27 +319,58 @@ impl Handler<UnsubscribeProgress> for ProcessorActor {
 mod tests {
     use super::*;
     use actix::Actor;
-    use dataflare_core::data::{DataRecord, DataRecordBatch};
-    
+    use dataflare_core::message::{DataRecord, DataRecordBatch};
+    use dataflare_core::error::DataFlareError;
+    use dataflare_core::schema::Schema;
+    use dataflare_processor::processor::ProcessorState;
+    use std::pin::Pin;
+    use std::future::Future;
+
     // 简单的Mock处理器用于测试
     struct MockProcessor {}
-    
-    impl dataflare_core::processor::ProcessorTrait for MockProcessor {
-        fn process(&mut self, batch: &dataflare_core::data::DataRecordBatch) 
-            -> dataflare_core::error::Result<dataflare_core::data::DataRecordBatch> {
+
+    #[async_trait::async_trait]
+    impl dataflare_processor::processor::Processor for MockProcessor {
+        async fn initialize(&mut self) -> dataflare_core::error::Result<()> {
+            Ok(())
+        }
+
+        async fn process_batch(&mut self, batch: &DataRecordBatch)
+            -> dataflare_core::error::Result<DataRecordBatch> {
             // 简单地返回相同的批次
             Ok(batch.clone())
         }
-        
+
+        async fn process_record(&mut self, record: &DataRecord)
+            -> dataflare_core::error::Result<DataRecord> {
+            Ok(record.clone())
+        }
+
+        fn get_input_schema(&self) -> Option<Schema> {
+            None
+        }
+
+        fn get_output_schema(&self) -> Option<Schema> {
+            None
+        }
+
+        fn get_state(&self) -> ProcessorState {
+            ProcessorState::Ready
+        }
+
+        async fn finalize(&mut self) -> dataflare_core::error::Result<()> {
+            Ok(())
+        }
+
         fn configure(&mut self, _config: &serde_json::Value) -> dataflare_core::error::Result<()> {
             Ok(())
         }
-        
+
         fn name(&self) -> &str {
             "mock_processor"
         }
     }
-    
+
     #[test]
     fn test_processor_actor_creation() {
         let processor = Box::new(MockProcessor {});
