@@ -4,20 +4,17 @@
 
 use actix::prelude::*;
 use std::time::Duration;
-use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
-
-use dataflare_core::{
-    error::Result,
-    message::{DataRecord, DataRecordBatch, WorkflowPhase, WorkflowProgress},
-};
 
 use dataflare_runtime::actor::{
-    ActorRef, ActorRegistry, MessageRouter,
-    TaskActor, TaskKind, ClusterActor, ClusterConfig,
-    WorkflowActor, GetStatus, ActorStatus, GetWorkflowStats,
-    Initialize, Finalize, StartWorkflow, StopWorkflow,
+    ClusterActor, ClusterConfig, GetStatus, ActorStatus, Initialize
 };
+use dataflare_runtime::actor::workflow::{
+    WorkflowActor, GetWorkflowStats, StartWorkflow
+};
+use dataflare_runtime::actor::cluster::{
+    GetWorkflowStatus, WorkflowStatus, StopWorkflow
+};
+use dataflare_runtime::actor::DeployWorkflow;
 
 #[actix::test]
 async fn test_workflow_actor_initialization() {
@@ -99,32 +96,32 @@ async fn test_workflow_lifecycle() {
         workflow_id: "test-lifecycle".to_string(),
         config,
     }).await.unwrap();
-    
+
     assert!(result.is_ok());
-    
+
     // 检查工作流状态
     let status = addr.send(GetStatus).await.unwrap().unwrap();
     assert!(matches!(status, ActorStatus::Initialized));
-    
+
     // 启动工作流
     let result = addr.send(StartWorkflow).await.unwrap();
     assert!(result.is_ok());
-    
+
     // 检查工作流状态
     let status = addr.send(GetStatus).await.unwrap().unwrap();
     assert!(matches!(status, ActorStatus::Running));
-    
+
     // 让工作流运行一段时间
     tokio::time::sleep(Duration::from_millis(100)).await;
-    
+
     // 获取工作流统计信息
     let stats = addr.send(GetWorkflowStats).await.unwrap().unwrap();
     assert!(stats.start_time.is_some());
-    
+
     // 停止工作流
-    let result = addr.send(StopWorkflow).await.unwrap();
+    let result = addr.send(StopWorkflow { id: "test-lifecycle".to_string() }).await.unwrap();
     assert!(result.is_ok());
-    
+
     // 检查工作流状态
     let status = addr.send(GetStatus).await.unwrap().unwrap();
     assert!(matches!(status, ActorStatus::Stopped));
@@ -136,7 +133,7 @@ async fn test_three_layer_architecture() {
     let config = ClusterConfig::default();
     let cluster_actor = ClusterActor::new(config.clone());
     let cluster_addr = cluster_actor.start();
-    
+
     // 部署工作流 (中层)
     let workflow_id = "test-three-layer".to_string();
     let workflow_config = serde_json::json!({
@@ -162,36 +159,36 @@ async fn test_three_layer_architecture() {
             }
         }
     });
-    
+
     // 通过集群Actor部署工作流
     let result = cluster_addr.send(dataflare_runtime::actor::DeployWorkflow {
         id: workflow_id.clone(),
         config: workflow_config,
         node_id: None,
     }).await.unwrap();
-    
+
     assert!(result.is_ok());
-    
+
     // 检查工作流状态
-    let status = cluster_addr.send(dataflare_runtime::actor::GetWorkflowStatus {
+    let status = cluster_addr.send(GetWorkflowStatus {
         id: workflow_id.clone(),
     }).await.unwrap().unwrap();
-    
+
     // 应该是初始化状态
-    assert!(matches!(status, dataflare_runtime::actor::WorkflowStatus::Initialized));
-    
+    assert!(matches!(status, WorkflowStatus::Initialized));
+
     // 停止工作流
-    let result = cluster_addr.send(dataflare_runtime::actor::StopWorkflow {
+    let result = cluster_addr.send(StopWorkflow {
         id: workflow_id.clone(),
     }).await.unwrap();
-    
+
     assert!(result.is_ok());
-    
+
     // 检查工作流状态
-    let status = cluster_addr.send(dataflare_runtime::actor::GetWorkflowStatus {
+    let status = cluster_addr.send(GetWorkflowStatus {
         id: workflow_id,
     }).await.unwrap().unwrap();
-    
+
     // 应该是停止状态
-    assert!(matches!(status, dataflare_runtime::actor::WorkflowStatus::Stopped));
-} 
+    assert!(matches!(status, WorkflowStatus::Stopped));
+}

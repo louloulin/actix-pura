@@ -83,11 +83,10 @@ fn test_adaptive_batcher() {
         initial_size: 100,
         min_size: 10,
         max_size: 1000,
-        throughput_target: Some(1000), // 1000 records/s
-        latency_target_ms: Some(50),   // 50ms target latency
-        adaptation_rate: 0.5,          // Faster adaptation for testing
-        evaluation_interval: Duration::from_millis(10),
-        stability_threshold: 3,        // Only need 3 batches before adapting
+        throughput_target: 1000, // 1000 records/s
+        latency_target_ms: 50,   // 50ms target latency
+        adaptation_rate: 0.5,    // Faster adaptation for testing
+        stability_threshold: 3,  // Only need 3 batches before adapting
     };
 
     let mut batcher = AdaptiveBatcher::new(config);
@@ -130,6 +129,7 @@ fn test_backpressure_controller() {
         target_processing_time_ms: 50,
     };
 
+    let mode = config.mode; // 保存模式以便后续使用
     let mut controller = BackpressureController::new(config);
 
     // Request credits
@@ -151,7 +151,7 @@ fn test_backpressure_controller() {
     assert!(granted.is_some()); // Should have some credits after refill
 
     // Test adaptive mode
-    if config.mode == CreditMode::Adaptive {
+    if mode == CreditMode::Adaptive {
         // Simulate high load
         controller.update_stats(2000, Duration::from_millis(100));
 
