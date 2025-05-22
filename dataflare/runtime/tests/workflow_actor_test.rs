@@ -5,16 +5,19 @@
 use actix::prelude::*;
 use std::time::Duration;
 
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use chrono;
+
 use dataflare_runtime::actor::{
     ClusterActor, ClusterConfig, GetStatus, ActorStatus, Initialize
 };
 use dataflare_runtime::actor::workflow::{
-    WorkflowActor, GetWorkflowStats, StartWorkflow
+    WorkflowActor, GetWorkflowStats, StartWorkflow, StopWorkflow
 };
 use dataflare_runtime::actor::cluster::{
-    GetWorkflowStatus, WorkflowStatus, StopWorkflow
+    GetWorkflowStatus, WorkflowStatus, StopWorkflow as ClusterStopWorkflow
 };
-use dataflare_runtime::actor::DeployWorkflow;
 
 #[actix::test]
 async fn test_workflow_actor_initialization() {
@@ -24,7 +27,10 @@ async fn test_workflow_actor_initialization() {
 
     // 配置基本工作流
     let config = serde_json::json!({
+        "id": "test-workflow",
         "name": "测试工作流",
+        "description": "测试工作流初始化",
+        "version": "1.0.0",
         "sources": {
             "source1": {
                 "type": "test-source",
@@ -44,7 +50,10 @@ async fn test_workflow_actor_initialization() {
                 "type": "test-destination",
                 "config": { "test": "data" }
             }
-        }
+        },
+        "metadata": {},
+        "created_at": chrono::Utc::now().to_rfc3339(),
+        "updated_at": chrono::Utc::now().to_rfc3339()
     });
 
     // 初始化工作流
@@ -68,7 +77,10 @@ async fn test_workflow_lifecycle() {
 
     // 配置基本工作流
     let config = serde_json::json!({
+        "id": "test-lifecycle",
         "name": "生命周期测试",
+        "description": "测试工作流生命周期",
+        "version": "1.0.0",
         "sources": {
             "source1": {
                 "type": "test-source",
@@ -88,7 +100,10 @@ async fn test_workflow_lifecycle() {
                 "type": "test-destination",
                 "config": { "test": "data" }
             }
-        }
+        },
+        "metadata": {},
+        "created_at": chrono::Utc::now().to_rfc3339(),
+        "updated_at": chrono::Utc::now().to_rfc3339()
     });
 
     // 初始化工作流
@@ -119,7 +134,7 @@ async fn test_workflow_lifecycle() {
     assert!(stats.start_time.is_some());
 
     // 停止工作流
-    let result = addr.send(StopWorkflow { id: "test-lifecycle".to_string() }).await.unwrap();
+    let result = addr.send(StopWorkflow).await.unwrap();
     assert!(result.is_ok());
 
     // 检查工作流状态
@@ -178,7 +193,7 @@ async fn test_three_layer_architecture() {
     assert!(matches!(status, WorkflowStatus::Initialized));
 
     // 停止工作流
-    let result = cluster_addr.send(StopWorkflow {
+    let result = cluster_addr.send(ClusterStopWorkflow {
         id: workflow_id.clone(),
     }).await.unwrap();
 
