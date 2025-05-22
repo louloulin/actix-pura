@@ -25,7 +25,8 @@ mod tests {
             "username": "test_user",
             "password": "test_pass",
             "table": "test_data",
-            "batch_size": 1000
+            "batch_size": 1000,
+            "query": "SELECT * FROM test_data"
         })
     }
     
@@ -33,13 +34,7 @@ mod tests {
     fn create_mock_data(count: usize) -> Vec<DataRecord> {
         let mut records = Vec::with_capacity(count);
         for i in 0..count {
-            let record = DataRecord::new(json!({
-                "id": i,
-                "name": format!("test{}", i),
-                "value": i * 10,
-                "created_at": chrono::Utc::now().to_rfc3339(),
-            }));
-            records.push(record);
+            records.push(DataRecord::new(json!({"id": i})));
         }
         records
     }
@@ -50,7 +45,8 @@ mod tests {
         let connector = PostgresBatchSourceConnector::new(config.clone());
         
         // 验证批处理大小
-        assert_eq!(connector.batch_size, 1000);
+        let metadata = connector.get_metadata();
+        assert_eq!(metadata.get("batch_size"), Some(&"1000".to_string()));
         
         // 验证提取模式
         assert_eq!(connector.get_extraction_mode(), ExtractionMode::Full);
@@ -70,9 +66,9 @@ mod tests {
         let mut connector = PostgresBatchSourceConnector::new(config);
         
         // 创建测试位置
-        let mut position = Position::new();
-        position.add_data("cursor", "100");
-        position.add_data("timestamp", "2023-01-01T00:00:00Z");
+        let position = Position::new()
+            .with_data("cursor", "100")
+            .with_data("timestamp", "2023-01-01T00:00:00Z");
         
         // 测试位置操作
         let rt = Runtime::new().unwrap();
@@ -134,8 +130,8 @@ mod tests {
         assert_eq!(slice.records.len(), 300);
         
         // 验证切片内容
-        assert_eq!(slice.records[0].get::<i64>("id").unwrap(), 200);
-        assert_eq!(slice.records[299].get::<i64>("id").unwrap(), 499);
+        assert_eq!(slice.records[0].as_i64("id").unwrap(), 200);
+        assert_eq!(slice.records[299].as_i64("id").unwrap(), 499);
         
         // 验证切片保留了原始批次的元数据
         assert_eq!(slice.metadata, original_batch.metadata);
@@ -155,7 +151,9 @@ mod tests {
             
             for size in &test_sizes {
                 // 设置批大小
-                connector.batch_size = *size;
+                let mut config = create_test_config();
+                config["batch_size"] = json!(*size);
+                connector.configure(&config).unwrap();
                 
                 // 测量读取时间
                 let start_time = Instant::now();
@@ -227,13 +225,19 @@ mod tests {
         let rt = Runtime::new().unwrap();
         rt.block_on(async {
             // 测试读取空批次
-            connector.batch_size = 0;
+            let mut zero_config = create_test_config();
+            zero_config["batch_size"] = json!(0);
+            connector.configure(&zero_config).unwrap();
+            
             let result = connector.read_batch(0).await;
             assert!(result.is_ok(), "应该能处理零大小的批处理请求");
             assert_eq!(result.unwrap().records.len(), 0, "空批处理应该返回零记录");
             
             // 测试极大批大小
-            connector.batch_size = usize::MAX / 2;
+            let mut large_config = create_test_config();
+            large_config["batch_size"] = json!(usize::MAX / 2);
+            connector.configure(&large_config).unwrap();
+            
             let result = connector.read_batch(usize::MAX).await;
             // 这个测试应该能处理或至少优雅地失败
             if result.is_ok() {

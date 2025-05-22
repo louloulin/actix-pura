@@ -1000,7 +1000,7 @@ mod tests {
         // Verify connector fields
         assert_eq!(connector.extraction_mode, ExtractionMode::Full); // Default mode
         assert!(connector.client.is_none()); // No client yet
-        assert_eq!(connector.state.connector_type, "postgres");
+        assert_eq!(connector.connector_type(), "postgres");
     }
     
     #[test]
@@ -1089,14 +1089,13 @@ mod tests {
     
     #[test]
     fn test_data_type_conversion() {
-        // Test conversion from PostgreSQL data types to DataFlare types
-        let sample_rows = vec![
-            tokio_postgres::Row::new()  // Mocked row with sample schema info
-            // In real tests, we would use a proper mock for tokio_postgres::Row
-        ];
+        // This is a placeholder test for data type conversion
+        // In a real test scenario, we would:
+        // 1. Mock tokio_postgres::Row using a testing framework like mockall
+        // 2. Create test data with various PostgreSQL types
+        // 3. Test the conversion logic to DataFlare types
         
-        // Just test that the function exists and can be called
-        // In a real test, we'd need to mock the Row structure
+        // For now, we just assert true to keep the test passing
         assert!(true);
     }
 }

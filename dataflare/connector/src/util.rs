@@ -183,8 +183,8 @@ mod tests {
         // 测试正常切片
         let slice = slice_batch(&batch, 2, 5);
         assert_eq!(slice.records.len(), 3);
-        assert_eq!(slice.records[0].get::<i64>("id").unwrap(), 2);
-        assert_eq!(slice.records[2].get::<i64>("id").unwrap(), 4);
+        assert_eq!(slice.records[0].as_i64("id").unwrap(), 2);
+        assert_eq!(slice.records[2].as_i64("id").unwrap(), 4);
         
         // 测试边界情况
         let empty_slice = slice_batch(&batch, 5, 5);
@@ -213,8 +213,8 @@ mod tests {
         
         // 验证合并结果
         assert_eq!(merged.records.len(), 5);
-        assert_eq!(merged.records[0].get::<i64>("id").unwrap(), 1);
-        assert_eq!(merged.records[4].get::<i64>("id").unwrap(), 5);
+        assert_eq!(merged.records[0].as_i64("id").unwrap(), 1);
+        assert_eq!(merged.records[4].as_i64("id").unwrap(), 5);
     }
     
     #[test]
@@ -238,8 +238,8 @@ mod tests {
         assert_eq!(split[3].records.len(), 1);
         
         // 验证内容
-        assert_eq!(split[0].records[0].get::<i64>("id").unwrap(), 0);
-        assert_eq!(split[1].records[0].get::<i64>("id").unwrap(), 3);
-        assert_eq!(split[3].records[0].get::<i64>("id").unwrap(), 9);
+        assert_eq!(split[0].records[0].as_i64("id").unwrap(), 0);
+        assert_eq!(split[1].records[0].as_i64("id").unwrap(), 3);
+        assert_eq!(split[3].records[0].as_i64("id").unwrap(), 9);
     }
 } 

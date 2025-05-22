@@ -6,8 +6,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use dataflare_runtime::{
     workflow::YamlWorkflowParser, 
-    executor::WorkflowExecutor,
-    RuntimeMode,
+    executor::{WorkflowExecutor, RuntimeMode},
     progress::WebhookConfig,
 };
 use futures::StreamExt;
