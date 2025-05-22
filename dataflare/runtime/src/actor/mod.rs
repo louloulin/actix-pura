@@ -17,7 +17,7 @@ pub mod cluster;
 pub mod task;
 
 // Re-exports
-pub use source::SourceActor;
+pub use source::{SourceActor, ReportExtractionCompletion};
 pub use processor::ProcessorActor;
 pub use destination::DestinationActor;
 pub use workflow::WorkflowActor;

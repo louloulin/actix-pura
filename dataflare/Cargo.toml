@@ -15,6 +15,7 @@ dataflare-state = { path = "state" }
 dataflare-cli = { path = "cli" }
 
 actix = { path = "../actix" }
+actix-rt = "2.8"
 clap = { version = "4.4", features = ["derive"] }
 rustc_version_runtime = "0.2.1"
 serde = { version = "1.0", features = ["derive"] }

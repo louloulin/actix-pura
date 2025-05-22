@@ -11,8 +11,9 @@ use uuid::Uuid;
 use std::time::{Duration, Instant};
 
 use dataflare_core::error::{DataFlareError, Result};
-use dataflare_core::message::{DataRecordBatch, WorkflowPhase, WorkflowProgress};
+use dataflare_core::message::{DataRecord, DataRecordBatch, WorkflowPhase, WorkflowProgress, StartExtraction};
 use dataflare_core::config::TaskConfig;
+use dataflare_core::state::SourceState;
 
 use crate::actor::{
     ActorStatus, DataFlareActor, GetStatus, Initialize, Finalize, Pause, Resume,
@@ -93,6 +94,14 @@ pub struct TaskStats {
 #[derive(Message)]
 #[rtype(result = "Result<TaskStats>")]
 pub struct GetTaskStats;
+
+/// Message to add a downstream task
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct AddDownstream {
+    /// Task actor address to add as downstream
+    pub actor_addr: Addr<TaskActor>,
+}
 
 /// Base actor for all data processing tasks
 pub struct TaskActor {
@@ -428,36 +437,60 @@ impl Handler<ProcessBatch> for TaskActor {
 }
 
 impl Handler<SendBatch> for TaskActor {
-    type Result = ResponseFuture<Result<()>>;
+    type Result = Result<()>;
     
     fn handle(&mut self, msg: SendBatch, _ctx: &mut Self::Context) -> Self::Result {
-        debug!("Task {} received batch to send", self.id);
-        
-        let start_time = Instant::now();
-        let batch = msg.batch;
-        let self_id = self.id.clone();
-        let downstream = self.downstream.clone();
-        
-        Box::pin(async move {
-            // Start with the current batch
-            let processed_batch = batch;
-            
-            // Forward to downstream tasks
-            for task in downstream {
-                let send_result = task.send(ProcessBatch {
-                    workflow_id: msg.workflow_id.clone(),
-                    batch: processed_batch.clone(),
-                }).await;
+        match self.kind {
+            TaskKind::Source => {
+                info!("TaskActor(源) {} 收到批次，包含 {} 条记录", 
+                      self.id, msg.batch.len());
                 
-                if let Err(e) = send_result {
-                    error!("Task {} failed to send batch to downstream task: {}", self_id, e);
-                    return Err(DataFlareError::Actor(format!("Failed to send batch to downstream task: {}", e)));
+                // 为源任务，需要转发到下游
+                if let Some(down_addr) = self.downstream.get(0) {
+                    // 记录处理的记录数
+                    self.stats.records_processed += msg.batch.len();
+                    
+                    // 转发批次到下游任务
+                    debug!("转发批次到下游任务 {:?}", down_addr);
+                    
+                    // do_send返回()，不需要匹配Result
+                    down_addr.do_send(msg);
+                    Ok(())
+                } else {
+                    error!("源任务 {} 没有下游任务配置", self.id);
+                    Err(DataFlareError::Actor(format!("La tarea de origen {} no tiene tareas descendentes configuradas", self.id)))
                 }
+            },
+            TaskKind::Processor => {
+                info!("TaskActor(处理器) {} 收到批次，包含 {} 条记录", 
+                      self.id, msg.batch.len());
+                
+                // 处理器任务，需要先处理数据然后转发
+                if let Some(down_addr) = self.downstream.get(0) {
+                    // 记录处理的记录数
+                    self.stats.records_processed += msg.batch.len();
+                    
+                    // 转发批次到下游任务
+                    debug!("转发批次到下游任务 {:?}", down_addr);
+                    
+                    // do_send返回()，不需要匹配Result
+                    down_addr.do_send(msg);
+                    Ok(())
+                } else {
+                    error!("处理器任务 {} 没有下游任务配置", self.id);
+                    Err(DataFlareError::Actor(format!("La tarea de procesador {} no tiene tareas descendentes configuradas", self.id)))
+                }
+            },
+            TaskKind::Destination => {
+                info!("TaskActor(目标) {} 收到批次，包含 {} 条记录", 
+                      self.id, msg.batch.len());
+                
+                // 目标任务，处理数据但不需要转发
+                self.stats.records_processed += msg.batch.len();
+                
+                Ok(())
             }
-            
-            debug!("Task {} forwarded batch in {:?}", self_id, start_time.elapsed());
-            Ok(())
-        })
+        }
     }
 }
 
@@ -525,6 +558,46 @@ impl Handler<GetTaskStats> for TaskActor {
     
     fn handle(&mut self, _msg: GetTaskStats, _ctx: &mut Self::Context) -> Self::Result {
         Ok(self.stats.clone())
+    }
+}
+
+impl Handler<StartExtraction> for TaskActor {
+    type Result = ResponseFuture<Result<()>>;
+    
+    fn handle(&mut self, msg: StartExtraction, _ctx: &mut Self::Context) -> Self::Result {
+        // 只有源任务才应该处理这种消息
+        if self.kind != TaskKind::Source {
+            return Box::pin(async move {
+                Err(DataFlareError::Actor(format!(
+                    "任务 {} 不是源任务，无法处理StartExtraction消息", 
+                    msg.source_id
+                )))
+            });
+        }
+        
+        info!("TaskActor(源) {} 开始数据提取，工作流: {}", self.id, msg.workflow_id);
+        
+        // 只是为了记录，我们将批处理大小从配置中提取出来
+        let batch_size = msg.config.get("batch_size")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1000) as usize;
+            
+        info!("使用批处理大小: {}", batch_size);
+        
+        // 我们将在未来实现实际的抽取逻辑
+        // 目前，只返回成功
+        Box::pin(async {
+            Ok(())
+        })
+    }
+}
+
+impl Handler<AddDownstream> for TaskActor {
+    type Result = ();
+    
+    fn handle(&mut self, msg: AddDownstream, _ctx: &mut Self::Context) -> Self::Result {
+        debug!("Task {} adding downstream task", self.id);
+        self.downstream.push(msg.actor_addr);
     }
 }
 

@@ -3,19 +3,22 @@
 //! Implementa el actor responsable de extraer datos de las fuentes.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use actix::prelude::*;
-use log::{error, info, debug, warn};
+use log::{error, info, debug};
 use chrono::Utc;
+use std::cell::RefCell;
+use futures::StreamExt;
 
 use dataflare_core::{
     error::{DataFlareError, Result},
     message::{DataRecordBatch, StartExtraction, WorkflowPhase, WorkflowProgress},
     state::SourceState,
 };
-use dataflare_connector::source::SourceConnector;
+use dataflare_connector::source::{SourceConnector, ExtractionMode};
 
 use crate::actor::{DataFlareActor, Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus, 
-                  SubscribeProgress, UnsubscribeProgress, SendBatch, ReportExtractionCompletion};
+                  SubscribeProgress, UnsubscribeProgress, SendBatch};
 
 /// Actor que gestiona la extracción de datos de una fuente
 pub struct SourceActor {
@@ -23,7 +26,7 @@ pub struct SourceActor {
     id: String,
 
     /// Conector de origen
-    connector: Box<dyn SourceConnector>,
+    connector: Arc<RefCell<Box<dyn SourceConnector>>>,
 
     /// Estado actual del actor
     status: ActorStatus,
@@ -49,7 +52,7 @@ impl SourceActor {
     pub fn new<S: Into<String>>(id: S, connector: Box<dyn SourceConnector>) -> Self {
         Self {
             id: id.into(),
-            connector,
+            connector: Arc::new(RefCell::new(connector)),
             status: ActorStatus::Initialized,
             config: None,
             source_state: None,
@@ -133,7 +136,7 @@ impl Handler<Initialize> for SourceActor {
 
         // 配置连接器
         info!("开始配置源连接器...");
-        self.connector.configure(&msg.config)
+        self.connector.borrow_mut().configure(&msg.config)
             .map_err(|e| {
                 error!("配置源连接器失败: {}", e);
                 DataFlareError::Config(format!("Error al configurar conector: {}", e))
@@ -194,7 +197,7 @@ impl Handler<GetStatus> for SourceActor {
 impl Handler<StartExtraction> for SourceActor {
     type Result = ResponseActFuture<Self, Result<()>>;
 
-    fn handle(&mut self, msg: StartExtraction, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: StartExtraction, ctx: &mut Self::Context) -> Self::Result {
         info!("开始提取数据: 工作流 {} 源 {}", msg.workflow_id, msg.source_id);
 
         // 验证Actor状态
@@ -210,106 +213,133 @@ impl Handler<StartExtraction> for SourceActor {
 
         // 更新状态
         self.status = ActorStatus::Running;
-        info!("SourceActor状态更新为Running");
-        
-        // 获取Actor自身的地址，用于消息传递
-        let actor_addr = _ctx.address();
+        info!("SourceActor {} 开始提取数据, 批次大小: {}", self.id, self.batch_size);
+
+        // 从配置中获取批次大小
+        if let Some(batch_size) = msg.config.get("batch_size").and_then(|v| v.as_u64()) {
+            self.batch_size = batch_size as usize;
+        }
+
+        // 克隆需要的值
+        let self_id = self.id.clone();
         let workflow_id = msg.workflow_id.clone();
         let batch_size = self.batch_size;
-        let source_id = msg.source_id.clone();
-        
-        // 保存对连接器的引用
-        let mut connector_ref = &mut self.connector;
-        
-        debug!("开始异步提取任务, 批处理大小: {}", batch_size);
-        
-        // 执行异步提取操作
+        let addr = ctx.address();
+        let connector = self.connector.clone();
+
+        // 创建异步任务处理数据读取和转发
         Box::pin(async move {
-            info!("开始从源 {} 提取数据", source_id);
+            // 打开连接器中的流
+            let mut connector_ref = connector.borrow_mut();
+            let stream_result = connector_ref.read(msg.state).await;
             
-            // 创建数据流
-            let state_option = None; // 假设这里不使用状态
-            let mut stream = match connector_ref.read(state_option).await {
-                Ok(stream) => {
-                    info!("成功创建数据流");
-                    stream
-                },
-                Err(e) => {
-                    error!("创建数据流失败: {}", e);
-                    return Err(e);
-                }
-            };
-            
-            // 跟踪进度
-            let mut total_records = 0;
-            let mut current_batch = Vec::new();
-            
-            // 处理记录流
-            use futures::StreamExt;
-            info!("开始处理记录流");
-            while let Some(record_result) = stream.next().await {
-                match record_result {
-                    Ok(record) => {
-                        // 添加到当前批次
-                        current_batch.push(record);
-                        total_records += 1;
-                        
-                        // 达到批处理大小时发送批次
-                        if current_batch.len() >= batch_size {
-                            let batch = DataRecordBatch::new(current_batch);
-                            current_batch = Vec::new();
-                            
-                            info!("发送批次 #{}，记录数: {}", total_records / batch_size, batch.records.len());
-                            if let Err(e) = actor_addr.send(SendBatch {
-                                workflow_id: workflow_id.clone(),
-                                batch,
-                            }).await {
-                                error!("发送批次失败: {}", e);
-                                return Err(DataFlareError::Actor(format!("Error al enviar lote: {}", e)));
-                            }
-                            
-                            // 报告进度 (假设总进度为100%，每个批次递增)
-                            // 注意：在实际实现中，你应该有一个更好的方式来估算总记录数
-                            if total_records % (batch_size * 10) == 0 {
-                                info!("处理进度: {} 记录", total_records);
+            match stream_result {
+                Ok(mut stream) => {
+                    info!("SourceActor {} 成功打开数据流", self_id);
+                    
+                    // 收集批次数据
+                    let mut batch_records = Vec::with_capacity(batch_size);
+                    let mut total_records = 0;
+                    let mut batch_number = 0;
+                    
+                    // 处理流中的每条记录
+                    while let Some(record_result) = stream.next().await {
+                        match record_result {
+                            Ok(record) => {
+                                batch_records.push(record);
+                                
+                                // 如果批次已满，发送并重置
+                                if batch_records.len() >= batch_size {
+                                    batch_number += 1;
+                                    let record_count = batch_records.len();
+                                    total_records += record_count;
+                                    
+                                    // 创建批次
+                                    let batch = DataRecordBatch::new(
+                                        std::mem::take(&mut batch_records)
+                                    );
+                                    
+                                    // 发送批次
+                                    debug!("SourceActor {} 发送批次 {}: {} 条记录", 
+                                          self_id, batch_number, record_count);
+                                    
+                                    let send_result = addr.send(SendBatch {
+                                        workflow_id: workflow_id.clone(),
+                                        batch,
+                                    }).await;
+                                    
+                                    if let Err(e) = send_result {
+                                        error!("发送批次时出错: {}", e);
+                                        return Err(DataFlareError::Actor(
+                                            format!("Error al enviar lote: {}", e)
+                                        ));
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                error!("读取记录时出错: {}", e);
+                                // 继续处理，不中断流
                             }
                         }
-                    },
-                    Err(e) => {
-                        error!("读取记录失败: {}", e);
-                        return Err(e);
                     }
+                    
+                    // 处理最后一个可能不完整的批次
+                    if !batch_records.is_empty() {
+                        batch_number += 1;
+                        let record_count = batch_records.len();
+                        total_records += record_count;
+                        
+                        // 创建批次
+                        let batch = DataRecordBatch::new(
+                            std::mem::take(&mut batch_records)
+                        );
+                        
+                        // 发送批次
+                        debug!("SourceActor {} 发送最后批次 {}: {} 条记录", 
+                              self_id, batch_number, record_count);
+                        
+                        let send_result = addr.send(SendBatch {
+                            workflow_id: workflow_id.clone(),
+                            batch,
+                        }).await;
+                        
+                        if let Err(e) = send_result {
+                            error!("发送最后批次时出错: {}", e);
+                            return Err(DataFlareError::Actor(
+                                format!("Error al enviar último lote: {}", e)
+                            ));
+                        }
+                    }
+                    
+                    // 发送提取完成报告
+                    let completion_result = addr.send(ReportExtractionCompletion {
+                        workflow_id: workflow_id.clone(),
+                        records_processed: total_records as u64,
+                        success: true,
+                        error: None,
+                    }).await;
+                    
+                    if let Err(e) = completion_result {
+                        error!("发送提取完成报告时出错: {}", e);
+                    }
+                    
+                    info!("SourceActor {} 完成数据提取，总共处理了 {} 条记录", self_id, total_records);
+                    Ok(())
+                },
+                Err(e) => {
+                    error!("SourceActor {} 打开数据流失败: {}", self_id, e);
+                    
+                    // 报告提取失败
+                    let _ = addr.send(ReportExtractionCompletion {
+                        workflow_id: workflow_id.clone(),
+                        records_processed: 0,
+                        success: false,
+                        error: Some(format!("{}", e)),
+                    }).await;
+                    
+                    Err(e)
                 }
             }
-            
-            // 发送最后一个不完整的批次
-            if !current_batch.is_empty() {
-                let batch = DataRecordBatch::new(current_batch);
-                info!("发送最后一个批次，记录数: {}", batch.records.len());
-                if let Err(e) = actor_addr.send(SendBatch {
-                    workflow_id: workflow_id.clone(),
-                    batch,
-                }).await {
-                    error!("发送最后批次失败: {}", e);
-                    return Err(DataFlareError::Actor(format!("Error al enviar último lote: {}", e)));
-                }
-            }
-            
-            // 发送完成通知
-            info!("完成提取，总记录数: {}", total_records);
-            let result: Result<()> = Ok(());
-            
-            // 发送消息通知Actor
-            if let Err(e) = actor_addr.send(ReportExtractionCompletion {
-                workflow_id: workflow_id.clone(),
-                records_processed: total_records as u64,
-                success: result.is_ok(),
-                error: result.as_ref().err().map(|e: &DataFlareError| e.to_string()),
-            }).await {
-                error!("发送完成通知失败: {}", e);
-            }
-            
-            Ok(())
         }.into_actor(self))
     }
 }
@@ -317,11 +347,11 @@ impl Handler<StartExtraction> for SourceActor {
 /// Mensaje para reportar finalización de extracción
 #[derive(Message)]
 #[rtype(result = "()")]
-struct ReportExtractionCompletion {
-    workflow_id: String,
-    records_processed: u64,
-    success: bool,
-    error: Option<String>,
+pub struct ReportExtractionCompletion {
+    pub workflow_id: String,
+    pub records_processed: u64,
+    pub success: bool,
+    pub error: Option<String>,
 }
 
 /// Handler para ReportExtractionCompletion
@@ -375,13 +405,42 @@ impl Handler<UnsubscribeProgress> for SourceActor {
     }
 }
 
+/// 实现SendBatch消息处理器
+impl Handler<SendBatch> for SourceActor {
+    type Result = Result<()>;
+
+    fn handle(&mut self, msg: SendBatch, _ctx: &mut Self::Context) -> Self::Result {
+        // 增加处理的记录数
+        self.records_processed += msg.batch.len() as u64;
+        
+        // 记录处理信息
+        info!("SourceActor {} 收到数据批次: {} 条记录, 工作流 {}", 
+              self.id, msg.batch.len(), msg.workflow_id);
+        
+        // 记录批次处理进度
+        if self.records_processed % 10000 == 0 {
+            self.report_progress(
+                &msg.workflow_id, 
+                WorkflowPhase::Extracting,
+                0.5,  // 假设50%进度，实际应根据估算总数计算
+                &format!("已处理 {} 条记录", self.records_processed)
+            );
+        }
+        
+        // 批次处理成功
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use actix::Actor;
     use std::sync::{Arc, Mutex};
-    use dataflare_core::data::{DataRecord, DataRecordBatch, Schema};
     use futures::stream::BoxStream;
+    use dataflare_core::message::{DataRecord, DataRecordBatch};
+    use dataflare_core::model::Schema;
+    use dataflare_connector::source::{SourceConnector, ExtractionMode};
     
     // 简单的Mock源连接器用于测试
     struct MockSourceConnector {
@@ -396,28 +455,45 @@ mod tests {
         }
     }
     
-    impl dataflare_core::connector::SourceConnector for MockSourceConnector {
-        fn configure(&mut self, _config: serde_json::Value) -> dataflare_core::error::Result<()> {
+    #[async_trait::async_trait]
+    impl SourceConnector for MockSourceConnector {
+        fn configure(&mut self, config: &serde_json::Value) -> Result<()> {
             Ok(())
         }
         
-        fn check_connection(&self) -> dataflare_core::error::Result<()> {
-            Ok(())
+        async fn check_connection(&self) -> Result<bool> {
+            Ok(true)
         }
         
-        fn discover_schema(&self) -> dataflare_core::error::Result<Schema> {
-            Ok(Schema::empty())
+        async fn discover_schema(&self) -> Result<Schema> {
+            Ok(Schema::new())
         }
         
-        fn stream_records(&mut self, _state: Option<dataflare_core::connector::SourceState>) 
-            -> dataflare_core::error::Result<BoxStream<'static, dataflare_core::error::Result<DataRecordBatch>>> {
+        async fn read(&mut self, _state: Option<SourceState>) -> Result<Box<dyn futures::Stream<Item = Result<DataRecord>> + Send + Unpin>> {
             let records = self.records.lock().unwrap().clone();
-            let batch = DataRecordBatch::new("test", None, records);
-            Ok(Box::pin(futures::stream::once(async move { Ok(batch) })))
+            let stream = futures::stream::iter(records.into_iter().map(Ok));
+            Ok(Box::new(stream))
         }
         
-        fn get_state(&self) -> dataflare_core::error::Result<dataflare_core::connector::SourceState> {
-            Ok(dataflare_core::connector::SourceState::empty())
+        fn get_state(&self) -> Result<SourceState> {
+            Ok(SourceState::new("mock"))
+        }
+        
+        fn get_extraction_mode(&self) -> ExtractionMode {
+            ExtractionMode::Full
+        }
+        
+        async fn estimate_record_count(&self, _state: Option<SourceState>) -> Result<u64> {
+            Ok(self.records.lock().unwrap().len() as u64)
+        }
+    }
+    
+    // 实现Clone特性以满足Actor要求
+    impl Clone for MockSourceConnector {
+        fn clone(&self) -> Self {
+            Self {
+                records: Arc::clone(&self.records),
+            }
         }
     }
     

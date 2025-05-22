@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use dataflare_core::{
     error::{DataFlareError, Result},
-    message::{DataRecordBatch, WorkflowPhase, WorkflowProgress},
+    message::{DataRecordBatch, WorkflowPhase, WorkflowProgress, StartExtraction},
 };
 
 // Import the correct workflow config from crate module
@@ -223,7 +223,12 @@ impl WorkflowActor {
             self.dag.insert(task_id.clone(), vec![]);
             
             // Initialize source task
-            let task_config = source_config.config.clone();
+            let task_config = serde_json::json!({
+                "id": task_id.clone(),
+                "name": format!("Source: {}", id),
+                "task_type": "source",
+                "config": source_config.config.clone()
+            });
             let fut = addr.send(Initialize {
                 workflow_id: self.id.clone(),
                 config: task_config,
@@ -247,7 +252,7 @@ impl WorkflowActor {
                     }
                 }
             }));
-    }
+        }
 
         // Create processor tasks
         for (id, proc_config) in &config.transformations {
@@ -260,7 +265,12 @@ impl WorkflowActor {
             self.dag.insert(task_id.clone(), vec![]);
             
             // Initialize processor task
-            let task_config = proc_config.config.clone();
+            let task_config = serde_json::json!({
+                "id": task_id.clone(),
+                "name": format!("Processor: {}", id),
+                "task_type": "processor",
+                "config": proc_config.config.clone()
+            });
             let fut = addr.send(Initialize {
                 workflow_id: self.id.clone(),
                 config: task_config,
@@ -284,7 +294,7 @@ impl WorkflowActor {
                     }
                 }
             }));
-    }
+        }
 
         // Create destination tasks
         for (id, dest_config) in &config.destinations {
@@ -297,7 +307,12 @@ impl WorkflowActor {
             self.dag.insert(task_id.clone(), vec![]);
             
             // Initialize destination task
-            let task_config = dest_config.config.clone();
+            let task_config = serde_json::json!({
+                "id": task_id.clone(),
+                "name": format!("Destination: {}", id),
+                "task_type": "destination",
+                "config": dest_config.config.clone()
+            });
             let fut = addr.send(Initialize {
                 workflow_id: self.id.clone(),
                 config: task_config,
@@ -321,7 +336,7 @@ impl WorkflowActor {
                     }
                 }
             }));
-    }
+        }
 
         // Build DAG relationships from inputs
         for (id, proc_config) in &config.transformations {
@@ -573,8 +588,21 @@ impl Handler<StartWorkflow> for WorkflowActor {
                 for (id, addr) in &self.tasks {
                     if let Some(&TaskKind::Source) = self.task_kinds.get(id) {
                         info!("Starting source task {}", id);
+                        // 1. 首先发送Resume消息
                         let _ = addr.do_send(Resume {
                             workflow_id: self.id.clone(),
+                        });
+                        
+                        // 2. 发送StartExtraction消息以启动数据提取
+                        let _ = addr.do_send(StartExtraction {
+                            workflow_id: self.id.clone(),
+                            source_id: id.clone(),
+                            config: serde_json::json!({
+                                "batch_size": 1000,  // 设置批次大小
+                                "timeout": 30000,   // 30秒超时
+                                "max_batches": 0,   // 0表示不限制批次数量
+                            }),
+                            state: None,           // 无初始状态，进行全量提取
                         });
                     }
                 }
