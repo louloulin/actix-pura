@@ -184,22 +184,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let runtime = tokio::runtime::Runtime::new()?;
             let local = tokio::task::LocalSet::new();
             local.block_on(&runtime, async {
-                // 初始化执行器
+            // 初始化执行器
                 info!("初始化执行器");
-                executor.initialize()?;
+            executor.initialize()?;
 
-                // 设置进度回调
-                let mut executor = executor.with_progress_callback(Box::new(|progress| {
+            // 设置进度回调
+            let mut executor = executor.with_progress_callback(Box::new(|progress| {
                     info!("工作流进度更新: {:?}", progress);
-                }));
+            }));
 
-                // 准备工作流
+            // 准备工作流
                 info!("准备工作流");
-                executor.prepare(&workflow)?;
+            executor.prepare(&workflow)?;
 
-                // 执行工作流
+            // 执行工作流
                 info!("开始执行工作流");
-                let start = Instant::now();
+            let start = Instant::now();
                 match executor.execute(&workflow).await {
                     Ok(_) => {
                         info!("工作流执行成功");
@@ -209,7 +209,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         return Err(Box::new(e) as Box<dyn std::error::Error>);
                     }
                 }
-                let duration = start.elapsed();
+            let duration = start.elapsed();
 
                 info!("工作流执行完成，耗时 {:.2} 秒", duration.as_secs_f64());
 

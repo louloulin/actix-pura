@@ -308,8 +308,8 @@ impl SourceConnector for CsvSourceConnector {
                                 if i == 0 || i % 1000 == 0 {
                                     debug!("CSV源连接器: 成功读取第 {} 行", i+1);
                                 }
-                                let row = record.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-                                self.create_record_from_row(&row)
+                            let row = record.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+                            self.create_record_from_row(&row)
                             },
                             Err(e) => {
                                 error!("CSV源连接器: 读取第 {} 行时出错: {}", i+1, e);
@@ -343,13 +343,13 @@ impl SourceConnector for CsvSourceConnector {
                                 if (i - start_row) == 0 || (i - start_row) % 1000 == 0 {
                                     debug!("CSV源连接器: 成功读取第 {} 行 (跳过 {} 行后)", i+1, start_row);
                                 }
-                                let row = record.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-                                let mut data_record = self.create_record_from_row(&row)?;
+                            let row = record.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+                            let mut data_record = self.create_record_from_row(&row)?;
 
-                                // 添加行号作为元数据
-                                data_record.metadata.insert("row_number".to_string(), (i + 1).to_string());
+                            // 添加行号作为元数据
+                            data_record.metadata.insert("row_number".to_string(), (i + 1).to_string());
 
-                                Ok(data_record)
+                            Ok(data_record)
                             },
                             Err(e) => {
                                 error!("CSV源连接器: 读取第 {} 行时出错: {}", i+1, e);
@@ -538,11 +538,11 @@ impl DestinationConnector for CsvDestinationConnector {
         if let Some(parent) = file_path.parent() {
             if !parent.exists() {
                 info!("CSV目标连接器: 创建目录 {:?}", parent);
-                std::fs::create_dir_all(parent).map_err(|e| {
+            std::fs::create_dir_all(parent).map_err(|e| {
                     error!("CSV目标连接器: 创建目录失败: {}", e);
-                    DataFlareError::Io(e)
-                })?;
-            }
+                DataFlareError::Io(e)
+            })?;
+        }
         }
 
         // 根据写入模式确定是否附加到现有文件
@@ -584,7 +584,7 @@ impl DestinationConnector for CsvDestinationConnector {
             })?;
 
             csv::WriterBuilder::new()
-                .delimiter(self.delimiter as u8)
+            .delimiter(self.delimiter as u8)
                 .has_headers(self.write_header)
                 .from_writer(file)
         };
@@ -617,7 +617,7 @@ impl DestinationConnector for CsvDestinationConnector {
             writer.write_record(&headers).map_err(|e| {
                 error!("CSV目标连接器: 写入标题行失败: {}", e);
                 DataFlareError::Csv(format!("Error al escribir la cabecera: {}", e))
-            })?;
+                })?;
         }
 
         // 写入每条记录
@@ -643,12 +643,12 @@ impl DestinationConnector for CsvDestinationConnector {
 
             // 写入行
             match writer.write_record(&row) {
-                Ok(_) => {
+                    Ok(_) => {
                     success_count += 1;
                     if i == 0 || i % 1000 == 0 {
                         debug!("CSV目标连接器: 成功写入第 {} 条记录", i+1);
                     }
-                },
+                    },
                 Err(e) => {
                     error_count += 1;
                     error!("CSV目标连接器: 写入第 {} 条记录失败: {}", i+1, e);
@@ -664,7 +664,7 @@ impl DestinationConnector for CsvDestinationConnector {
 
         // 计算写入时间
         let write_time_ms = start.elapsed().as_millis() as u64;
-        
+
         info!("CSV目标连接器: 完成写入，成功: {}，失败: {}，字节数: {}，耗时: {}ms", 
             success_count, error_count, bytes_written, write_time_ms);
 

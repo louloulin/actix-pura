@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use actix::prelude::*;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use uuid::Uuid;
 use std::time::{Duration, Instant};
 
@@ -46,12 +46,14 @@ pub struct TaskState {
 
 /// Message to process a batch of data
 #[derive(Message)]
-#[rtype(result = "Result<DataRecordBatch>")]
+#[rtype(result = "Result<()>")]
 pub struct ProcessBatch {
+    /// Batch of data
+    pub batch: DataRecordBatch,
+    /// Is this the last batch
+    pub is_last_batch: bool,
     /// Workflow ID
     pub workflow_id: String,
-    /// Batch of data to process
-    pub batch: DataRecordBatch,
 }
 
 /// Message to request the current task state
@@ -94,6 +96,14 @@ pub struct TaskStats {
 #[derive(Message)]
 #[rtype(result = "Result<TaskStats>")]
 pub struct GetTaskStats;
+
+/// Message to set the workflow actor for task completion notification
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct SetWorkflowActor {
+    /// Workflow actor address
+    pub workflow_actor: Addr<crate::actor::workflow::WorkflowActor>,
+}
 
 /// Message to add a downstream task
 #[derive(Message)]
@@ -193,7 +203,7 @@ impl TaskActor {
         
         for (workflow_id, recipients) in &self.progress_subscribers {
             for recipient in recipients {
-                let _ = recipient.do_send(progress_msg.clone());
+            let _ = recipient.do_send(progress_msg.clone());
             }
         }
     }
@@ -257,6 +267,7 @@ impl TaskActor {
             let send_result = task.send(ProcessBatch {
                 workflow_id: self.workflow_id.clone(),
                 batch: batch.clone(),
+                is_last_batch: false,
             }).await;
             
             if let Err(e) = send_result {
@@ -333,7 +344,7 @@ impl DataFlareActor for TaskActor {
         
         if let Some(recipients) = self.progress_subscribers.get(workflow_id) {
             for recipient in recipients {
-                let _ = recipient.do_send(progress_msg.clone());
+            let _ = recipient.do_send(progress_msg.clone());
             }
         }
     }
@@ -414,150 +425,202 @@ impl Handler<GetStatus> for TaskActor {
     }
 }
 
+/// Handler for ProcessBatch message
 impl Handler<ProcessBatch> for TaskActor {
-    type Result = ResponseFuture<Result<DataRecordBatch>>;
+    type Result = Result<()>;
     
-    fn handle(&mut self, msg: ProcessBatch, _ctx: &mut Self::Context) -> Self::Result {
-        // Clone all values we need to move into the async block
-        let current_status = self.status.clone();
-        let task_id = self.id.clone();
-        let batch = msg.batch.clone(); // Clone the batch
-        let start_time = Instant::now();
+    fn handle(&mut self, msg: ProcessBatch, ctx: &mut Self::Context) -> Self::Result {
+        debug!("TaskActor {} processing batch of {} records", self.id, msg.batch.records.len());
         
-        // Create a completely independent future with no self references
-        Box::pin(async move {
-            // Check if we're running
-            if current_status != ActorStatus::Running {
-                return Err(DataFlareError::Actor(format!("Task is not running: {:?}", current_status)));
+        let start = Instant::now();
+        
+        // Record the batch processing start
+        if self.kind == TaskKind::Processor {
+            // For processors, we would apply transformations here
+            debug!("Processing batch with {} records in processor task", msg.batch.records.len());
+        }
+        
+        // Simple pass-through for source and destination tasks
+        if self.kind == TaskKind::Source || self.kind == TaskKind::Destination {
+            debug!("Passing through batch with {} records in {} task", 
+                  msg.batch.records.len(), if self.kind == TaskKind::Source { "source" } else { "destination" });
+        }
+        
+        // Calculate processing time
+        let processing_time = start.elapsed();
+        debug!("Batch processed in {:?}", processing_time);
+        
+        // Update processing stats
+        self.stats.records_processed += msg.batch.records.len() as u64;
+        
+        // Forward to downstream tasks - use a future to avoid blocking
+        if !self.downstream.is_empty() {
+            info!("转发批次到 {} 个下游任务", self.downstream.len());
+            
+            for task in &self.downstream {
+                debug!("Forwarding batch to downstream task {}", task.id());
+        
+                // Clone what we need for the future
+                let task_addr_clone = task.clone();
+                let batch_clone = msg.batch.clone();
+                let workflow_id_clone = msg.workflow_id.clone();
+                let is_last_batch = msg.is_last_batch;
+        
+                // Create future
+                let fut = async move {
+                    match task_addr_clone.send(SendBatch {
+                        workflow_id: workflow_id_clone,
+                        batch: batch_clone,
+                        is_last_batch,
+                    }).await {
+                        Ok(result) => {
+                            match result {
+                                Ok(_) => debug!("Successfully forwarded batch to downstream task"),
+                                Err(e) => error!("Error forwarding batch to downstream task: {}", e),
+                            }
+                        },
+                        Err(e) => error!("Mailbox error when forwarding batch: {}", e),
+                    }
+                };
+                
+                // Spawn the future
+                ctx.spawn(fut.into_actor(self));
             }
+        } else if self.kind == TaskKind::Destination && msg.batch.records.len() > 0 {
+            // If we're a destination task, send the batch to any connected destination actors
+            info!("发送批次到目标连接器");
             
-            // Simulate the processing that would happen in process_data
-            // In a real implementation we'd call actual processing logic
-            tokio::time::sleep(Duration::from_millis(5)).await;
-            
-            let processing_time = start_time.elapsed();
-            debug!("Task {} processed batch in {:?}", task_id, processing_time);
-            
-            // Return the batch (in a real impl, this would be processed data)
-            Ok(batch)
-        })
+            // If we have any destination actors connected, send them the batch
+            if let Some(dest_task) = &self.workflow_actor {
+                let dest_addr = dest_task.clone();
+                let batch_clone = msg.batch.clone();
+                let workflow_id_clone = msg.workflow_id.clone();
+                
+                // Create future for destination load
+                let fut = async move {
+                    let load_result = dest_addr.send(dataflare_core::message::LoadBatch {
+                        workflow_id: workflow_id_clone.clone(),
+                        destination_id: "csv-destination".to_string(), // TODO: Get from config
+                        batch: batch_clone,
+                        config: serde_json::json!({}),
+                    }).await;
+                    
+                    match load_result {
+                        Ok(result) => {
+                            match result {
+                                Ok(_) => info!("Successfully loaded batch to destination"),
+                                Err(e) => error!("Error loading batch to destination: {}", e),
+                            }
+                        },
+                        Err(e) => error!("Mailbox error when loading batch to destination: {}", e),
+                    }
+                };
+                
+                // Spawn the future
+                ctx.spawn(fut.into_actor(self));
+            } else {
+                warn!("目标任务没有连接到目标连接器");
+            }
+        }
+        
+        Ok(())
     }
 }
 
+/// Handler for SendBatch message
 impl Handler<SendBatch> for TaskActor {
     type Result = Result<()>;
     
-    fn handle(&mut self, msg: SendBatch, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: SendBatch, ctx: &mut Self::Context) -> Self::Result {
+        info!("TaskActor {} received batch with {} records", self.id, msg.batch.records.len());
+        
+        // Process the batch
         match self.kind {
             TaskKind::Source => {
-                info!("TaskActor(源) {} 收到批次，包含 {} 条记录", 
-                      self.id, msg.batch.len());
+                info!("Source task forwarding batch of {} records", msg.batch.records.len());
                 
-                // 为源任务，需要转发到下游
-                if !self.downstream.is_empty() {
-                    // 记录处理的记录数
-                    self.stats.records_processed += msg.batch.len();
-                    
-                    // 转发批次到下游任务
-                    debug!("转发批次到 {} 个下游任务", self.downstream.len());
-                    
-                    for down_addr in &self.downstream {
-                        // 转发消息，包括是否为最后一批的标志
-                        down_addr.do_send(SendBatch {
-                            workflow_id: msg.workflow_id.clone(),
-                            batch: msg.batch.clone(),
-                            is_last_batch: msg.is_last_batch,
-                        });
-                    }
-
-                    // 如果是最后一批数据，通知工作流任务已完成
-                    if msg.is_last_batch {
-                        if let Some(workflow_actor) = &self.workflow_actor {
-                            info!("TaskActor {} 完成处理，总共处理 {} 条记录", 
-                                  self.id, self.stats.records_processed);
-                                  
-                            workflow_actor.do_send(TaskCompleted {
-                                workflow_id: self.workflow_id.clone(),
-                                task_id: self.id.clone(),
-                                records_processed: self.stats.records_processed,
-                                success: true,
-                                error_message: None,
-                            });
-                        }
-                    }
-                    
-                    Ok(())
-                } else {
-                    error!("源任务 {} 没有下游任务配置", self.id);
-                    Err(DataFlareError::Actor(format!("Source task {} has no downstream tasks configured", self.id)))
+                // Process the batch (just pass-through for source)
+                let process_result = self.handle(ProcessBatch {
+                    batch: msg.batch.clone(),
+                    is_last_batch: msg.is_last_batch,
+                    workflow_id: msg.workflow_id.clone(),
+                }, ctx);
+                
+                if let Err(e) = process_result {
+                    error!("Error processing batch in source task: {}", e);
+                    return Err(e);
                 }
             },
             TaskKind::Processor => {
-                debug!("处理器任务 {} 收到批次，包含 {} 条记录", 
-                      self.id, msg.batch.len());
+                info!("Processor task processing batch of {} records", msg.batch.records.len());
+            
+                // Process the batch with any transformations
+                let process_result = self.handle(ProcessBatch {
+                    batch: msg.batch.clone(), 
+                    is_last_batch: msg.is_last_batch,
+                    workflow_id: msg.workflow_id.clone(),
+                }, ctx);
                 
-                // 处理数据并转发
-                let batch_size = msg.batch.len();
-                
-                // 更新统计信息
-                self.stats.records_processed += batch_size;
-                
-                // 转发到下游
-                for down_addr in &self.downstream {
-                    down_addr.do_send(SendBatch {
-                        workflow_id: msg.workflow_id.clone(),
-                        batch: msg.batch.clone(),
-                        is_last_batch: msg.is_last_batch,
-                    });
+                if let Err(e) = process_result {
+                    error!("Error processing batch in processor task: {}", e);
+                    return Err(e);
                 }
-                
-                // 如果是最后一批，发送完成通知
-                if msg.is_last_batch {
-                    if let Some(workflow_actor) = &self.workflow_actor {
-                        info!("处理器任务 {} 完成处理，总共处理 {} 条记录", 
-                             self.id, self.stats.records_processed);
-                        
-                        workflow_actor.do_send(TaskCompleted {
-                            workflow_id: self.workflow_id.clone(),
-                            task_id: self.id.clone(),
-                            records_processed: self.stats.records_processed,
-                            success: true,
-                            error_message: None,
-                        });
-                    }
-                }
-                
-                Ok(())
             },
             TaskKind::Destination => {
-                info!("目标任务 {} 收到批次，包含 {} 条记录", 
-                      self.id, msg.batch.len());
+                info!("Destination task processing batch of {} records", msg.batch.records.len());
                 
-                // 将数据写入目标
-                let batch_size = msg.batch.len();
-                
-                // 更新统计信息
-                self.stats.records_processed += batch_size;
-                
-                // 如果是最后一批，发送完成通知
-                if msg.is_last_batch {
-                    if let Some(workflow_actor) = &self.workflow_actor {
-                        info!("目标任务 {} 完成处理，总共处理 {} 条记录", 
-                             self.id, self.stats.records_processed);
+                // For destination tasks, forward to any connected destination actor
+                if let Some(dest_task) = &self.workflow_actor {
+                    let dest_addr = dest_task.clone();
+                    let batch_clone = msg.batch.clone();
+                    let workflow_id_clone = msg.workflow_id.clone();
+                    
+                    info!("Forwarding batch to destination actor");
+                    
+                    // Create future for destination load
+                    let fut = async move {
+                        let load_result = dest_addr.send(dataflare_core::message::LoadBatch {
+                            workflow_id: workflow_id_clone.clone(),
+                            destination_id: "csv-destination".to_string(), // TODO: Get from config
+                            batch: batch_clone,
+                            config: serde_json::json!({}),
+                        }).await;
                         
-                        workflow_actor.do_send(TaskCompleted {
-                            workflow_id: self.workflow_id.clone(),
-                            task_id: self.id.clone(),
-                            records_processed: self.stats.records_processed,
-                            success: true,
-                            error_message: None,
-                        });
-                    }
+                        match load_result {
+                            Ok(result) => {
+                                match result {
+                                    Ok(_) => info!("Successfully loaded batch to destination"),
+                                    Err(e) => error!("Error loading batch to destination: {}", e),
+                                }
+                            },
+                            Err(e) => error!("Mailbox error when loading batch to destination: {}", e),
                 }
-                
-                Ok(())
+                    };
+                    
+                    // Spawn the future
+                    ctx.spawn(fut.into_actor(self));
+                } else {
+                    warn!("Destination task has no connected destination actor");
+                }
             }
         }
+        
+        // If this is the last batch, notify the workflow
+        if msg.is_last_batch {
+            if let Some(workflow_actor) = &self.workflow_actor {
+                info!("Task {} completed processing, total records: {}", self.id, self.stats.records_processed);
+                
+                workflow_actor.do_send(TaskCompleted {
+                    workflow_id: msg.workflow_id.clone(),
+                    task_id: self.id.clone(),
+                    records_processed: self.stats.records_processed as usize,
+                    success: true,
+                    error_message: None,
+                });
+            }
+        }
+        
+            Ok(())
     }
 }
 
@@ -628,6 +691,15 @@ impl Handler<GetTaskStats> for TaskActor {
     }
 }
 
+impl Handler<SetWorkflowActor> for TaskActor {
+    type Result = ();
+    
+    fn handle(&mut self, msg: SetWorkflowActor, _ctx: &mut Self::Context) -> Self::Result {
+        debug!("Setting workflow actor for task {}", self.id);
+        self.workflow_actor = Some(msg.workflow_actor);
+    }
+}
+
 impl Handler<StartExtraction> for TaskActor {
     type Result = ResponseFuture<Result<()>>;
     
@@ -663,8 +735,8 @@ impl Handler<AddDownstream> for TaskActor {
     type Result = ();
     
     fn handle(&mut self, msg: AddDownstream, _ctx: &mut Self::Context) -> Self::Result {
-        debug!("Task {} adding downstream task", self.id);
         self.downstream.push(msg.actor_addr);
+        debug!("Added downstream actor to task {}", self.id);
     }
 }
 
@@ -785,12 +857,16 @@ mod tests {
             DataRecord::new("test-record-2"),
             DataRecord::new("test-record-3"),
         ];
-        let batch = DataRecordBatch::new("test-batch", None, records);
+        
+        // Fix the DataRecordBatch::new call to match the correct signature
+        // Assuming DataRecordBatch now takes a vector of DataRecords directly
+        let batch = DataRecordBatch::from_records(records);
         
         // Process batch
         let result = addr.send(ProcessBatch {
             workflow_id: "test-workflow".into(),
             batch: batch.clone(),
+            is_last_batch: false,
         }).await.unwrap();
         
         assert!(result.is_ok());
@@ -828,10 +904,11 @@ mod tests {
             recipient: collector_addr.recipient(),
         }).await.unwrap().unwrap();
         
-        // Report progress
+        // Report progress - fix SendBatch to include is_last_batch
         addr.do_send(crate::actor::SendBatch {
             workflow_id: "test-workflow".into(),
-            batch: DataRecordBatch::new("test", None, vec![DataRecord::new("test")]),
+            batch: DataRecordBatch::from_records(vec![DataRecord::new("test")]),
+            is_last_batch: false,
         });
         
         // Wait a moment for progress to be reported
@@ -845,7 +922,8 @@ mod tests {
             
             task_addr.do_send(crate::actor::SendBatch {
                 workflow_id: "test-workflow".into(),
-                batch: DataRecordBatch::new("test", None, vec![DataRecord::new("test")]),
+                batch: DataRecordBatch::from_records(vec![DataRecord::new("test")]),
+                is_last_batch: true,
             });
         });
         

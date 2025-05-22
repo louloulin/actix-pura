@@ -23,7 +23,8 @@ use crate::actor::{
     TaskActor, TaskKind, GetTaskStats,
     Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus,
     SubscribeProgress, UnsubscribeProgress,
-    TaskCompleted
+    TaskCompleted, RegisterTask, RegisterSourceActor, SourceActor, ConnectToTask, RegisterDestinationActor,
+    DestinationActor
 };
 
 /// Workflow stage execution status
@@ -204,6 +205,12 @@ pub struct WorkflowActor {
     
     /// Failure strategy
     failure_strategy: FailureStrategy,
+
+    /// Source actors
+    source_actors: HashMap<String, Addr<SourceActor>>,
+    
+    /// Destination actors
+    destination_actors: HashMap<String, Addr<DestinationActor>>,
 }
 
 // Message handler for adding downstream tasks to a TaskActor
@@ -235,6 +242,8 @@ impl WorkflowActor {
             completed_tasks: HashSet::new(),
             failed_tasks: HashSet::new(),
             failure_strategy: FailureStrategy::default(),
+            source_actors: HashMap::new(),
+            destination_actors: HashMap::new(),
         }
     }
 
@@ -291,7 +300,7 @@ impl WorkflowActor {
                     }
                 }
             }));
-        }
+    }
 
         // Create processor tasks
         for (id, proc_config) in &config.transformations {
@@ -333,7 +342,7 @@ impl WorkflowActor {
                     }
                 }
             }));
-        }
+    }
 
         // Create destination tasks
         for (id, dest_config) in &config.destinations {
@@ -375,7 +384,7 @@ impl WorkflowActor {
                     }
                 }
             }));
-        }
+    }
 
         // Build DAG relationships from inputs
         for (id, proc_config) in &config.transformations {
@@ -623,47 +632,98 @@ impl Handler<StartWorkflow> for WorkflowActor {
                 self.stats.start_time = Some(chrono::Utc::now());
                 self.start_time = Some(Instant::now());
                 
-                // Start source tasks
+                // Reset the completed and failed tasks for a new run
+                self.completed_tasks.clear();
+                self.failed_tasks.clear();
+                
+                // First, resume all tasks
                 for (id, addr) in &self.tasks {
-                    if let Some(&TaskKind::Source) = self.task_kinds.get(id) {
-                        info!("Starting source task {}", id);
-                        // 1. 首先发送Resume消息
+                    info!("Resuming task {}", id);
                         let _ = addr.do_send(Resume {
                             workflow_id: self.id.clone(),
                         });
-                        
-                        // 2. 发送StartExtraction消息以启动数据提取
-                        let _ = addr.do_send(StartExtraction {
-                            workflow_id: self.id.clone(),
-                            source_id: id.clone(),
-                            config: serde_json::json!({
-                                "batch_size": 1000,  // 设置批次大小
-                                "timeout": 30000,   // 30秒超时
-                                "max_batches": 0,   // 0表示不限制批次数量
-                            }),
-                            state: None,           // 无初始状态，进行全量提取
-                        });
+                    }
+                
+                // Connect SourceActors to their corresponding TaskActors
+                for (source_id, source_addr) in &self.source_actors {
+                    // Find a matching source task (with matching ID or prefix)
+                    for (task_id, task_addr) in &self.tasks {
+                        if task_id.contains(source_id) && self.task_kinds.get(task_id) == Some(&TaskKind::Source) {
+                            info!("Connecting source actor {} to task {}", source_id, task_id);
+                            
+                            // Send the ConnectToTask message to establish the connection
+                            source_addr.do_send(ConnectToTask {
+                                task_addr: task_addr.clone(),
+                                task_id: task_id.clone(),
+                            });
+                        }
                     }
                 }
                 
-                // Clone what we need to avoid capturing self
-                let workflow_id = self.id.clone();
-                let addr = ctx.address();
+                // Connect DestinationActors to their corresponding TaskActors
+                for (dest_id, dest_addr) in &self.destination_actors {
+                    // Find a matching destination task (with matching ID or prefix)
+                    for (task_id, task_addr) in &self.tasks {
+                        if task_id.contains(dest_id) && self.task_kinds.get(task_id) == Some(&TaskKind::Destination) {
+                            info!("Connecting destination actor {} to task {}", dest_id, task_id);
+                            
+                            // Send the ConnectToTask message to establish the connection
+                            dest_addr.do_send(ConnectToTask {
+                                task_addr: task_addr.clone(),
+                                task_id: task_id.clone(),
+                            });
+                        }
+                    }
+                }
                 
-                // Schedule status updates without capturing self
-                ctx.run_interval(Duration::from_secs(5), move |_, ctx| {
-                    // Send a message back to self instead of capturing
-                    addr.do_send(UpdateWorkflowStats {
-                        workflow_id: workflow_id.clone(),
+                // Start all source tasks - broadcast to all source tasks
+                let source_tasks: Vec<_> = self.tasks.iter()
+                    .filter(|(id, _)| {
+                        // Check if this task ID exists in task_kinds and is a Source task
+                        match self.task_kinds.get(id.as_str()) {
+                            Some(kind) => *kind == TaskKind::Source,
+                            None => false
+                        }
+                    })
+                    .map(|(id, addr)| (id.clone(), addr.clone()))
+                    .collect();
+                
+                for (task_id, task_addr) in source_tasks {
+                    info!("Starting source task {}", task_id);
+                    let _ = task_addr.do_send(StartExtraction {
+                        workflow_id: self.id.clone(),
+                        source_id: task_id.clone(),
+                        config: serde_json::json!({
+                            "batch_size": 1000,
+                        }),
+                        state: None,
                     });
-                });
+                }
                 
-                // Use Initializing instead of Starting (which doesn't exist)
+                // Start all source actors - directly start the source extraction
+                for (source_id, source_addr) in &self.source_actors {
+                    info!("Starting source actor {}", source_id);
+                    let _ = source_addr.do_send(StartExtraction {
+                        workflow_id: self.id.clone(),
+                        source_id: source_id.clone(),
+                        config: serde_json::json!({
+                            "batch_size": 1000,
+                        }),
+                        state: None,
+                    });
+                }
+                
+                // Send initial progress update
                 self.broadcast_progress(WorkflowPhase::Initializing, 0.0, "Workflow started");
                 
+                // Set up a timer to periodically update progress based on task status
+                ctx.run_interval(Duration::from_secs(5), move |actor, _ctx| {
+                    actor.broadcast_progress(WorkflowPhase::Extracting, 0.5, "Workflow running");
+                });
+                
         Ok(())
-            },
-            _ => Err(DataFlareError::Workflow(format!("Workflow {} is not in initialized state", self.id))),
+            }
+            _ => Err(DataFlareError::Workflow(format!("Workflow is in wrong state for starting: {:?}", self.status))),
         }
     }
 }
@@ -947,6 +1007,113 @@ impl Handler<TaskCompleted> for WorkflowActor {
                         self.id, progress * 100.0)
             );
         }
+    }
+}
+
+/// Handler for RegisterTask message
+impl Handler<RegisterTask> for WorkflowActor {
+    type Result = ();
+    
+    fn handle(&mut self, msg: RegisterTask, _ctx: &mut Self::Context) -> Self::Result {
+        info!("Registering task {} with workflow {}", msg.task_id, self.id);
+        
+        // Store the task actor address
+        self.tasks.insert(msg.task_id.clone(), msg.task_addr.clone());
+        
+        // Store the task kind
+        self.task_kinds.insert(msg.task_id.clone(), msg.task_kind);
+        
+        // Set the workflow actor reference in the task
+        msg.task_addr.do_send(Initialize {
+            workflow_id: self.id.clone(),
+            config: serde_json::json!({
+                "task_id": msg.task_id,
+                "workflow_id": self.id
+            }),
+        });
+        
+        // Provide the workflow actor reference to the task for completion notification
+        if let Ok(addr) = _ctx.address().try_into() {
+            msg.task_addr.do_send(crate::actor::task::SetWorkflowActor {
+                workflow_actor: addr,
+            });
+        }
+    }
+}
+
+/// Handler for RegisterSourceActor message
+impl Handler<RegisterSourceActor> for WorkflowActor {
+    type Result = ();
+    
+    fn handle(&mut self, msg: RegisterSourceActor, _ctx: &mut Self::Context) -> Self::Result {
+        info!("Registering source actor {} with workflow {}", msg.source_id, self.id);
+        
+        // Store the source actor in a separate map
+        self.source_actors.insert(msg.source_id.clone(), msg.source_addr.clone());
+        
+        // Get the actual source configuration from workflow config if available
+        let source_config = if let Some(workflow_config) = &self.config {
+            if let Some(source_cfg) = workflow_config.sources.get(&msg.source_id) {
+                // Use the source's actual configuration from workflow
+                source_cfg.config.clone()
+            } else {
+                // Fallback to basic configuration
+                serde_json::json!({
+                    "source_id": msg.source_id,
+                    "workflow_id": self.id
+                })
+            }
+        } else {
+            // Fallback to basic configuration
+            serde_json::json!({
+                "source_id": msg.source_id,
+                "workflow_id": self.id
+            })
+        };
+        
+        // Initialize the source actor with this workflow and proper configuration
+        msg.source_addr.do_send(Initialize {
+            workflow_id: self.id.clone(),
+            config: source_config,
+        });
+    }
+}
+
+/// Handler for RegisterDestinationActor message
+impl Handler<RegisterDestinationActor> for WorkflowActor {
+    type Result = ();
+    
+    fn handle(&mut self, msg: RegisterDestinationActor, _ctx: &mut Self::Context) -> Self::Result {
+        info!("Registering destination actor {} with workflow {}", msg.destination_id, self.id);
+        
+        // Store the destination actor in the destination actors map
+        self.destination_actors.insert(msg.destination_id.clone(), msg.destination_addr.clone());
+        
+        // Get the actual destination configuration from workflow config if available
+        let dest_config = if let Some(workflow_config) = &self.config {
+            if let Some(dest_cfg) = workflow_config.destinations.get(&msg.destination_id) {
+                // Use the destination's actual configuration from workflow
+                dest_cfg.config.clone()
+            } else {
+                // Fallback to basic configuration
+                serde_json::json!({
+                    "destination_id": msg.destination_id,
+                    "workflow_id": self.id
+                })
+            }
+        } else {
+            // Fallback to basic configuration
+            serde_json::json!({
+                "destination_id": msg.destination_id,
+                "workflow_id": self.id
+            })
+        };
+        
+        // Initialize the destination actor with this workflow and proper configuration
+        msg.destination_addr.do_send(Initialize {
+            workflow_id: self.id.clone(),
+            config: dest_config,
+        });
     }
 }
 

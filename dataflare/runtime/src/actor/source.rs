@@ -136,7 +136,21 @@ impl Handler<Initialize> for SourceActor {
 
     fn handle(&mut self, msg: Initialize, _ctx: &mut Self::Context) -> Self::Result {
         info!("初始化 SourceActor {} 工作流 {}", self.id, msg.workflow_id);
-        debug!("配置内容: {:?}", msg.config);
+
+        // 更详细地记录配置内容
+        info!("配置内容: {}", serde_json::to_string_pretty(&msg.config).unwrap_or_default());
+        
+        if let Some(file_path) = msg.config.get("file_path") {
+            info!("找到文件路径: {}", file_path);
+        } else if let Some(config) = msg.config.get("config") {
+            if let Some(file_path) = config.get("file_path") {
+                info!("在config子对象中找到文件路径: {}", file_path);
+            } else {
+                error!("在config子对象中没有找到文件路径");
+            }
+        } else {
+            error!("配置中没有文件路径参数");
+        }
 
         // 配置连接器
         info!("开始配置源连接器...");
@@ -275,7 +289,7 @@ impl Handler<StartExtraction> for SourceActor {
                                         let batch = DataRecordBatch::new(
                                             std::mem::take(&mut batch_records)
                                         );
-                                        
+
                                         // 发送批次
                                         debug!("SourceActor {} 发送批次 {}: {} 条记录", 
                                               self_id, batch_number, record_count);
@@ -311,7 +325,7 @@ impl Handler<StartExtraction> for SourceActor {
                             let batch = DataRecordBatch::new(
                                 std::mem::take(&mut batch_records)
                             );
-                            
+
                             // 发送批次
                             debug!("SourceActor {} 发送最后批次 {}: {} 条记录", 
                                   self_id, batch_number, record_count);
@@ -343,9 +357,9 @@ impl Handler<StartExtraction> for SourceActor {
                         }
                         
                         info!("SourceActor {} 完成数据提取，总共处理了 {} 条记录", self_id, total_records);
-                        Ok(())
-                    },
-                    Err(e) => {
+                    Ok(())
+                },
+                Err(e) => {
                         error!("SourceActor {} 打开数据流失败: {}", self_id, e);
                         
                         // 报告提取失败
@@ -356,9 +370,9 @@ impl Handler<StartExtraction> for SourceActor {
                             error: Some(format!("{}", e)),
                         }).await;
                         
-                        Err(e)
-                    }
+                    Err(e)
                 }
+            }
             }.into_actor(self))
     }
 }

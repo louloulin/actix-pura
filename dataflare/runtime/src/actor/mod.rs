@@ -133,6 +133,38 @@ pub struct TaskCompleted {
     pub error_message: Option<String>,
 }
 
+/// Message to register a task with the workflow
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct RegisterTask {
+    /// Task ID
+    pub task_id: String,
+    /// Task actor address
+    pub task_addr: Addr<TaskActor>,
+    /// Task kind
+    pub task_kind: TaskKind,
+}
+
+/// Message to register a source actor with the workflow
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct RegisterSourceActor {
+    /// Source ID
+    pub source_id: String,
+    /// Source actor address
+    pub source_addr: Addr<SourceActor>,
+}
+
+/// Message to register a destination actor with the workflow
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct RegisterDestinationActor {
+    /// Destination ID
+    pub destination_id: String,
+    /// Destination actor address
+    pub destination_addr: Addr<DestinationActor>,
+}
+
 /// Message to subscribe to progress updates
 #[derive(Message)]
 #[rtype(result = "Result<()>")]

@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use actix::prelude::*;
-use log::{error, info};
+use log::{error, info, debug};
 use chrono::Utc;
 
 use dataflare_core::{
@@ -13,7 +13,7 @@ use dataflare_core::{
 };
 use dataflare_connector::destination::DestinationConnector;
 
-use crate::actor::{DataFlareActor, Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus, SendBatch, SubscribeProgress, UnsubscribeProgress};
+use crate::actor::{DataFlareActor, Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus, SendBatch, SubscribeProgress, UnsubscribeProgress, ConnectToTask, TaskActor};
 
 /// Actor que gestiona la carga de datos en un destino
 pub struct DestinationActor {
@@ -34,6 +34,9 @@ pub struct DestinationActor {
 
     /// Contador de registros procesados
     records_processed: u64,
+    
+    /// Associated TaskActor
+    associated_task: Option<(String, Addr<TaskActor>)>,
 }
 
 impl DestinationActor {
@@ -46,6 +49,7 @@ impl DestinationActor {
             config: None,
             progress_recipients: HashMap::new(),
             records_processed: 0,
+            associated_task: None,
         }
     }
 
@@ -189,39 +193,30 @@ impl Handler<LoadBatch> for DestinationActor {
         // Reportar inicio de carga
         self.report_progress(&msg.workflow_id, WorkflowPhase::Loading, 0.0, "Iniciando carga");
 
-        // Crear una copia de los valores necesarios para el futuro
-        let batch = msg.batch.clone();
-        let _config = msg.config.clone();
+        // Calcular el tamaño del lote antes de mover el mensaje
+        let batch_size = msg.batch.records.len() as u64;
+        let workflow_id = msg.workflow_id.clone();
 
-        // Iniciar la carga en un futuro
-        let fut = async move {
-            // Aquí se implementaría la lógica real de carga
-            // Por ahora, simulamos la carga
-
-            // En una implementación real, esto llamaría a connector.write() y procesaría
-            // los resultados
-
-            // Simulamos una carga exitosa
+        // Crear un futuro para la operación de escritura
+        Box::pin(async move {
+            // En una implementación real, aquí llamaríamos al conector
+            // Por ahora, simulamos una escritura exitosa
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             Ok(())
-        };
-
-        // Clonar workflow_id para el callback
-        let workflow_id_for_callback = msg.workflow_id.clone();
-        let batch_size = batch.records.len() as u64;
-
-        Box::pin(fut.into_actor(self).map(move |result: Result<()>, actor, _ctx| {
+        }
+        .into_actor(self)
+        .map(move |result, actor, _ctx| {
             match result {
                 Ok(_) => {
-                    actor.report_progress(&workflow_id_for_callback, WorkflowPhase::Loading, 1.0, "Carga completada");
+                    actor.report_progress(&workflow_id, WorkflowPhase::Loading, 1.0, "Carga completada");
                     actor.status = ActorStatus::Initialized;
                     actor.records_processed += batch_size;
                     Ok(())
                 },
                 Err(e) => {
                     error!("Error en carga: {}", e);
-                    actor.report_progress(&workflow_id_for_callback, WorkflowPhase::Error, 0.0, &format!("Error en carga: {}", e));
+                    actor.report_progress(&workflow_id, WorkflowPhase::Error, 0.0, &format!("Error en carga: {}", e));
                     actor.status = ActorStatus::Failed;
-                    error!("Write error: {}", e);
                     Err(e)
                 }
             }
@@ -285,31 +280,86 @@ impl Handler<UnsubscribeProgress> for DestinationActor {
     }
 }
 
+/// Implementación del handler para ConnectToTask
+impl Handler<ConnectToTask> for DestinationActor {
+    type Result = ();
+    
+    fn handle(&mut self, msg: ConnectToTask, _ctx: &mut Self::Context) -> Self::Result {
+        info!("DestinationActor {} connecting to task {}", self.id, msg.task_id);
+        self.associated_task = Some((msg.task_id, msg.task_addr));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::actor::message_bus::DataFlareMessage;
-    use actix::Actor;
+    use dataflare_connector::destination::{DestinationConnector, WriteMode};
+    use dataflare_core::error::Result;
+    use dataflare_core::message::{DataRecord, DataRecordBatch};
+    use dataflare_core::model::Schema;
+    use async_trait::async_trait;
     
     // 简单的Mock目标连接器用于测试
     struct MockDestinationConnector {
         records_written: usize,
     }
     
-    impl dataflare_core::connector::DestinationConnector for MockDestinationConnector {
-        fn write(&mut self, _batch: &dataflare_core::data::DataRecordBatch) -> dataflare_core::error::Result<()> {
-            self.records_written += 1;
+    impl MockDestinationConnector {
+        fn new() -> Self {
+            Self { records_written: 0 }
+        }
+    }
+    
+    #[async_trait]
+    impl DestinationConnector for MockDestinationConnector {
+        fn configure(&mut self, _config: &serde_json::Value) -> Result<()> {
             Ok(())
         }
         
-        fn close(&mut self) -> dataflare_core::error::Result<()> {
+        async fn check_connection(&self) -> Result<bool> {
+            Ok(true)
+        }
+        
+        async fn prepare_schema(&self, _schema: &Schema) -> Result<()> {
             Ok(())
+        }
+        
+        async fn write_batch(&mut self, _batch: &DataRecordBatch, _mode: WriteMode) -> Result<dataflare_connector::destination::WriteStats> {
+            self.records_written += 1;
+            Ok(dataflare_connector::destination::WriteStats {
+                records_written: 1,
+                records_failed: 0,
+                bytes_written: 100,
+                write_time_ms: 10,
+            })
+        }
+        
+        async fn write_record(&mut self, _record: &DataRecord, _mode: WriteMode) -> Result<dataflare_connector::destination::WriteStats> {
+            self.records_written += 1;
+            Ok(dataflare_connector::destination::WriteStats {
+                records_written: 1,
+                records_failed: 0,
+                bytes_written: 100,
+                write_time_ms: 10,
+            })
+        }
+        
+        async fn commit(&mut self) -> Result<()> {
+            Ok(())
+        }
+        
+        async fn rollback(&mut self) -> Result<()> {
+            Ok(())
+        }
+        
+        fn get_supported_write_modes(&self) -> Vec<WriteMode> {
+            vec![WriteMode::Append]
         }
     }
     
     #[test]
     fn test_destination_actor_creation() {
-        let connector = Box::new(MockDestinationConnector { records_written: 0 });
+        let connector = Box::new(MockDestinationConnector::new());
         let actor = DestinationActor::new("test_dest", connector);
         assert_eq!(actor.id, "test_dest");
     }
