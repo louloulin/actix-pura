@@ -1273,11 +1273,29 @@ impl Handler<TaskFailed> for WorkflowActor {
                         // Exponential backoff
                         let delay = 2u64.pow(new_retry_count as u32) * 100;
 
+                        // 创建 workflow_id 的副本，以便在闭包中使用
+                        let workflow_id_clone = msg.workflow_id.clone();
+
                         ctx.run_later(Duration::from_millis(delay), move |_actor, _| {
                             info!("Executing retry for task {}", task_id_clone);
-                            // Restart the task
-                            // In a real implementation, we would need to restore the task's state
-                            // and resume from the last checkpoint
+
+                            // 重置任务状态
+                            task_addr_clone.do_send(crate::actor::task::ResetTask {
+                                workflow_id: workflow_id_clone.clone(),
+                            });
+
+                            // 恢复任务执行
+                            task_addr_clone.do_send(Resume {
+                                workflow_id: workflow_id_clone.clone(),
+                            });
+
+                            // 如果是源任务，重新触发数据提取
+                            task_addr_clone.do_send(StartExtraction {
+                                workflow_id: workflow_id_clone.clone(),
+                                source_id: task_id_clone.clone(),
+                                config: serde_json::json!({}),
+                                state: None,
+                            });
                         });
                     }
                 } else {

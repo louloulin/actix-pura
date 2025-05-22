@@ -10,11 +10,9 @@ use serde_json::json;
 use dataflare_core::error::{DataFlareError, Result};
 use crate::actor::{
     ActorRef, ActorRegistry, MessageRouter,
-    Initialize, Finalize, GetStatus, ActorStatus,
-    ClusterActor, ClusterConfig, DeployWorkflow, StopWorkflow, GetWorkflowStatus
+    ClusterActor, ClusterConfig, DeployWorkflow, StopWorkflow
 };
-use crate::actor::actor_ref::ActorHandler;
-use crate::actor::cluster::WorkflowStatus;
+use crate::actor::cluster::{WorkflowStatus, GetWorkflowStatus};
 
 /// Test message
 #[derive(Message)]

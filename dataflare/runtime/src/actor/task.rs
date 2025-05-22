@@ -138,6 +138,14 @@ pub struct SetErrorStrategy {
     pub strategy: ErrorStrategy,
 }
 
+/// Message to reset task state for retry
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct ResetTask {
+    /// Workflow ID
+    pub workflow_id: String,
+}
+
 /// Base actor for all data processing tasks
 pub struct TaskActor {
     /// Task ID
@@ -907,6 +915,44 @@ impl Handler<SetErrorStrategy> for TaskActor {
     }
 }
 
+/// Handler for ResetTask message
+impl Handler<ResetTask> for TaskActor {
+    type Result = ();
+
+    fn handle(&mut self, _msg: ResetTask, _ctx: &mut Self::Context) -> Self::Result {
+        info!("Resetting task {} for retry", self.id);
+
+        // 重置重试计数
+        self.reset_retry_count();
+
+        // 重置任务状态
+        self.status = ActorStatus::Running;
+
+        // 清除上次错误
+        self.last_error = None;
+
+        // 重置任务状态数据
+        self.state = TaskState {
+            checkpoint: self.state.checkpoint.clone(),  // 保留检查点数据
+            records_processed: 0,                       // 重置处理记录计数
+            last_processed: Some(chrono::Utc::now()),   // 更新处理时间
+            properties: HashMap::new(),                 // 重置属性
+        };
+
+        // 发送进度更新
+        self.report_progress(
+            &self.workflow_id,
+            match self.kind {
+                TaskKind::Source => WorkflowPhase::Extracting,
+                TaskKind::Processor => WorkflowPhase::Transforming,
+                TaskKind::Destination => WorkflowPhase::Loading,
+            },
+            0.0,
+            &format!("Task {} reset for retry", self.id)
+        );
+    }
+}
+
 impl std::fmt::Display for TaskKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -1067,7 +1113,7 @@ mod tests {
         // Subscribe to progress
         addr.send(SubscribeProgress {
             workflow_id: "test-workflow".into(),
-            recipient: collector_addr.recipient(),
+            recipient: collector_addr.clone().recipient(),
         }).await.unwrap().unwrap();
 
         // Report progress - fix SendBatch to include is_last_batch
@@ -1100,7 +1146,7 @@ mod tests {
         // Unsubscribe from progress
         addr.send(UnsubscribeProgress {
             workflow_id: "test-workflow".into(),
-            recipient: collector_addr.recipient(),
+            recipient: collector_addr.clone().recipient(),
         }).await.unwrap().unwrap();
 
         // Finalize

@@ -21,31 +21,31 @@ fn test_shared_data_batch() {
         DataRecord::new_json(serde_json::json!({"id": 2, "name": "Test 2"})),
         DataRecord::new_json(serde_json::json!({"id": 3, "name": "Test 3"})),
     ];
-    
+
     // Create a shared batch
     let batch = SharedDataBatch::new(records);
-    
+
     // Test basic properties
     assert_eq!(batch.len(), 3);
     assert!(!batch.is_empty());
     assert_eq!(batch.watermark(), None);
-    
+
     // Test cloning (should be cheap, not deep copy)
     let batch2 = batch.clone();
     assert_eq!(batch2.len(), 3);
-    
+
     // Test slicing
     let slice = batch.slice(1, 3);
     assert_eq!(slice.len(), 2);
-    
+
     // Test metadata
-    let batch_with_meta = batch.with_metadata("source", "test_source");
+    let batch_with_meta = batch.clone().with_metadata("source", "test_source");
     assert_eq!(batch_with_meta.metadata().get("source").unwrap(), "test_source");
-    
+
     // Test watermark
-    let batch_with_watermark = batch.with_watermark(123456789);
+    let batch_with_watermark = batch.clone().with_watermark(123456789);
     assert_eq!(batch_with_watermark.watermark(), Some(123456789));
-    
+
     // Test map operation
     let mapped_batch = batch.map(|record| {
         let mut new_record = record.clone();
@@ -56,10 +56,10 @@ fn test_shared_data_batch() {
         }
         new_record
     });
-    
+
     assert_eq!(mapped_batch.len(), 3);
     assert!(mapped_batch.records()[0].as_str("name").unwrap().contains("_mapped"));
-    
+
     // Test filter operation
     let filtered_batch = batch.filter(|record| {
         if let Some(id) = record.as_i64("id") {
@@ -68,9 +68,9 @@ fn test_shared_data_batch() {
             false
         }
     });
-    
+
     assert_eq!(filtered_batch.len(), 2);
-    
+
     // Test merge operation
     let merged = SharedDataBatch::merge(&[batch.clone(), batch2.clone()]);
     assert_eq!(merged.len(), 6);
@@ -89,75 +89,73 @@ fn test_adaptive_batcher() {
         evaluation_interval: Duration::from_millis(10),
         stability_threshold: 3,        // Only need 3 batches before adapting
     };
-    
+
     let mut batcher = AdaptiveBatcher::new(config);
-    
+
     // Initial size should match configuration
-    assert_eq!(batcher.batch_size(), 100);
-    
+    assert_eq!(batcher.get_batch_size(), 100);
+
     // Simulate high throughput, low latency
     for _ in 0..5 {
-        batcher.record_batch(100, Duration::from_millis(10));
+        batcher.start_batch();
+        batcher.complete_batch(100);
     }
-    
+
     // Batch size should increase (high throughput, low latency)
-    assert!(batcher.batch_size() > 100);
-    
+    assert!(batcher.get_batch_size() > 100);
+
     // Reset
     batcher.reset();
-    assert_eq!(batcher.batch_size(), 100);
-    
+    assert_eq!(batcher.get_batch_size(), 100);
+
     // Simulate low throughput, high latency
     for _ in 0..5 {
-        batcher.record_batch(100, Duration::from_millis(200));
+        batcher.start_batch();
+        batcher.complete_batch(100);
     }
-    
+
     // Batch size should decrease (high latency)
-    assert!(batcher.batch_size() < 100);
+    assert!(batcher.get_batch_size() < 100);
 }
 
 #[test]
 fn test_backpressure_controller() {
     let config = CreditConfig {
-        mode: CreditMode::Dynamic,
-        initial_credits: 1000,
+        base_credits: 1000,
         min_credits: 100,
         max_credits: 5000,
-        refill_rate: 100.0,
-        refill_interval: Duration::from_millis(10),
-        memory_threshold: 0.7,
+        credit_interval_ms: 10,
+        mode: CreditMode::Adaptive,
+        target_queue_size: 1000,
+        target_processing_time_ms: 50,
     };
-    
+
     let mut controller = BackpressureController::new(config);
-    
-    // Register a task
-    controller.register_task("task1");
-    
+
     // Request credits
-    let granted = controller.request_credits("task1", 500);
-    assert_eq!(granted, 500);
-    
+    let granted = controller.request_credits(500);
+    assert_eq!(granted, Some(500));
+
     // Request more than available
-    let granted = controller.request_credits("task1", 600);
-    assert_eq!(granted, 500); // Only 500 left from initial 1000
-    
-    // Report fast processing
-    controller.report_processing("task1", 1000, Duration::from_millis(100));
-    
+    let granted = controller.request_credits(600);
+    assert_eq!(granted, Some(500)); // Only 500 left from initial 1000
+
+    // Update stats
+    controller.update_stats(1000, Duration::from_millis(100));
+
     // Wait for refill
     thread::sleep(Duration::from_millis(20));
-    
+
     // Request again after refill
-    let granted = controller.request_credits("task1", 100);
-    assert!(granted > 0); // Should have some credits after refill
-    
-    // Test memory pressure adaptation
+    let granted = controller.request_credits(100);
+    assert!(granted.is_some()); // Should have some credits after refill
+
+    // Test adaptive mode
     if config.mode == CreditMode::Adaptive {
-        // Simulate high memory pressure
-        controller.update_memory_pressure(0.9);
-        
-        // Expect credits to be reduced
-        let credits_after_pressure = controller.get_credits("task1");
-        assert!(credits_after_pressure.unwrap() < 1000);
+        // Simulate high load
+        controller.update_stats(2000, Duration::from_millis(100));
+
+        // Verify pressure increased
+        assert!(controller.current_pressure() > 0.0);
     }
-} 
+}

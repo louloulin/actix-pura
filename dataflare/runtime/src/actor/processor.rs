@@ -320,11 +320,8 @@ mod tests {
     use super::*;
     use actix::Actor;
     use dataflare_core::message::{DataRecord, DataRecordBatch};
-    use dataflare_core::error::DataFlareError;
-    use dataflare_core::schema::Schema;
-    use dataflare_processor::processor::ProcessorState;
-    use std::pin::Pin;
-    use std::future::Future;
+    use dataflare_core::model::Schema;
+    use dataflare_core::processor::ProcessorState;
 
     // 简单的Mock处理器用于测试
     struct MockProcessor {}
@@ -355,7 +352,7 @@ mod tests {
         }
 
         fn get_state(&self) -> ProcessorState {
-            ProcessorState::Ready
+            ProcessorState::new("mock_processor")
         }
 
         async fn finalize(&mut self) -> dataflare_core::error::Result<()> {
@@ -366,9 +363,7 @@ mod tests {
             Ok(())
         }
 
-        fn name(&self) -> &str {
-            "mock_processor"
-        }
+        // name 方法不再是 Processor trait 的一部分
     }
 
     #[test]

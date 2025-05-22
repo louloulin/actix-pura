@@ -45,7 +45,7 @@ impl Default for RuntimeMode {
 }
 
 #[cfg(test)]
-mod tests {
+mod version_tests {
     use super::*;
 
     #[test]
