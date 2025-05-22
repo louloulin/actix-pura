@@ -3,7 +3,7 @@
 //! Implements an actor responsible for coordinating the execution of workflows
 //! in the new flattened architecture.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use actix::prelude::*;
 use log::{debug, error, info, warn};
@@ -23,6 +23,7 @@ use crate::actor::{
     TaskActor, TaskKind, GetTaskStats,
     Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus,
     SubscribeProgress, UnsubscribeProgress,
+    TaskCompleted
 };
 
 /// Workflow stage execution status
@@ -74,6 +75,25 @@ pub struct WorkflowStats {
     pub error_count: usize,
     /// Last error
     pub last_error: Option<String>,
+    /// Execution time in milliseconds
+    pub execution_time_ms: Option<u64>,
+}
+
+impl Default for WorkflowStats {
+    fn default() -> Self {
+        Self {
+            start_time: None,
+            end_time: None,
+            records_processed: 0,
+            bytes_processed: 0,
+            records_per_second: 0.0,
+            current_stage: None,
+            stages: HashMap::new(),
+            error_count: 0,
+            last_error: None,
+            execution_time_ms: None,
+        }
+    }
 }
 
 /// Message to start a workflow
@@ -121,6 +141,23 @@ pub struct ExecuteWorkflow {
     pub parameters: Option<serde_json::Value>,
 }
 
+/// Failure strategy for workflows
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureStrategy {
+    /// Continue on task failure
+    Continue,
+    /// Abort workflow on task failure
+    Abort,
+    /// Retry failed tasks
+    Retry(usize), // Max retries
+}
+
+impl Default for FailureStrategy {
+    fn default() -> Self {
+        Self::Continue
+    }
+}
+
 /// Actor that manages workflow execution
 pub struct WorkflowActor {
     /// ID of the workflow
@@ -158,6 +195,15 @@ pub struct WorkflowActor {
     
     /// DAG relationships (task_id -> downstream task_ids)
     dag: HashMap<String, Vec<String>>,
+
+    /// Completed tasks
+    completed_tasks: HashSet<String>,
+    
+    /// Failed tasks
+    failed_tasks: HashSet<String>,
+    
+    /// Failure strategy
+    failure_strategy: FailureStrategy,
 }
 
 // Message handler for adding downstream tasks to a TaskActor
@@ -172,10 +218,10 @@ impl Handler<AddDownstream> for TaskActor {
 
 impl WorkflowActor {
     /// Create a new workflow actor
-    pub fn new(id: String) -> Self {
+    pub fn new(id: impl Into<String>) -> Self {
         Self {
-            id: id.clone(),
-            name: id,
+            id: id.into(),
+            name: String::new(),
             status: ActorStatus::Initialized,
             config: None,
             tasks: HashMap::new(),
@@ -183,19 +229,12 @@ impl WorkflowActor {
             registry: None,
             router: None,
             subscribers: HashMap::new(),
-            stats: WorkflowStats {
-                start_time: None,
-                end_time: None,
-                records_processed: 0,
-                bytes_processed: 0,
-                records_per_second: 0.0,
-                current_stage: None,
-                stages: HashMap::new(),
-                error_count: 0,
-                last_error: None,
-            },
+            stats: WorkflowStats::default(),
             start_time: None,
             dag: HashMap::new(),
+            completed_tasks: HashSet::new(),
+            failed_tasks: HashSet::new(),
+            failure_strategy: FailureStrategy::default(),
         }
     }
 
@@ -815,6 +854,99 @@ impl Handler<ExecuteWorkflow> for WorkflowActor {
         }
         
         Err(DataFlareError::Workflow(format!("Failed to execute workflow {}", msg.workflow_id)))
+    }
+}
+
+/// Handler for TaskCompleted message
+impl Handler<TaskCompleted> for WorkflowActor {
+    type Result = ();
+    
+    fn handle(&mut self, msg: TaskCompleted, _ctx: &mut Self::Context) -> Self::Result {
+        if msg.success {
+            info!("Task {} completed in workflow {}, processed {} records", 
+                 msg.task_id, msg.workflow_id, msg.records_processed);
+            
+            // Update statistics
+            self.stats.records_processed += msg.records_processed;
+            
+            // Mark task as completed
+            self.completed_tasks.insert(msg.task_id.clone());
+        } else {
+            error!("Task {} failed in workflow {}: {}", 
+                  msg.task_id, msg.workflow_id, 
+                  msg.error_message.unwrap_or_else(|| "Unknown error".to_string()));
+            
+            // Mark task as failed
+            self.failed_tasks.insert(msg.task_id.clone());
+            
+            // If abort strategy is configured, stop the workflow
+            if self.failure_strategy == FailureStrategy::Abort {
+                self.status = ActorStatus::Failed;
+                self.stats.end_time = Some(chrono::Utc::now());
+                
+                // Broadcast workflow failure event
+                self.broadcast_progress(
+                    WorkflowPhase::Error, 
+                    1.0, 
+                    &format!("Workflow {} failed due to task {}", 
+                            self.id, msg.task_id)
+                );
+                
+                return;
+            }
+        }
+        
+        // Check if all tasks are completed or failed
+        let total_task_count = self.tasks.len();
+        let completed_count = self.completed_tasks.len();
+        let failed_count = self.failed_tasks.len();
+        
+        let all_tasks_processed = (completed_count + failed_count) >= total_task_count;
+        
+        if all_tasks_processed {
+            // Set final workflow status based on failed task count
+            if failed_count == 0 {
+                info!("All tasks completed successfully for workflow {}", self.id);
+                self.status = ActorStatus::Completed;
+                
+                // Broadcast workflow completion event
+                self.broadcast_progress(
+                    WorkflowPhase::Completed, 
+                    1.0, 
+                    &format!("Workflow {} completed successfully", self.id)
+                );
+            } else {
+                info!("Workflow {} completed with {} failed tasks", self.id, failed_count);
+                self.status = ActorStatus::CompletedWithErrors;
+                
+                // Broadcast workflow partial completion event
+                self.broadcast_progress(
+                    WorkflowPhase::Error, 
+                    1.0, 
+                    &format!("Workflow {} completed with {} failed tasks", 
+                            self.id, failed_count)
+                );
+            }
+            
+            // Record end time
+            self.stats.end_time = Some(chrono::Utc::now());
+            
+            // Calculate and record execution time
+            if let Some(start_time) = self.start_time {
+                let duration = start_time.elapsed();
+                self.stats.execution_time_ms = Some(duration.as_millis() as u64);
+                info!("Workflow {} executed in {:?}", self.id, duration);
+            }
+        } else {
+            // Update progress
+            let progress = (completed_count as f64) / (total_task_count as f64);
+            self.broadcast_progress(
+                WorkflowPhase::Transforming, 
+                progress, 
+                &format!("Workflow {} progress: {:.1}%", 
+                        self.id, progress * 100.0)
+            );
+        }
     }
 }
 

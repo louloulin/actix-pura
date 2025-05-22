@@ -17,7 +17,7 @@ use dataflare_core::state::SourceState;
 
 use crate::actor::{
     ActorStatus, DataFlareActor, GetStatus, Initialize, Finalize, Pause, Resume,
-    SendBatch, SubscribeProgress, UnsubscribeProgress
+    SendBatch, SubscribeProgress, UnsubscribeProgress, TaskCompleted, WorkflowActor
 };
 
 /// Task kind indicating the role of a task actor
@@ -109,32 +109,34 @@ pub struct TaskActor {
     id: String,
     /// Task name
     name: String,
-    /// Kind of task
+    /// Task kind
     kind: TaskKind,
-    /// Status
-    status: ActorStatus,
-    /// Configuration
+    /// Task configuration
     config: TaskConfig,
-    /// Workflow ID
+    /// Current workflow ID
     workflow_id: String,
-    /// Task stats
-    stats: TaskStats,
-    /// Progress subscribers
-    progress_subscribers: HashMap<String, Vec<Recipient<WorkflowProgress>>>,
-    /// Task state for checkpointing and recovery
+    /// Task state
     state: TaskState,
+    /// Task status
+    status: ActorStatus,
+    /// Task statistics
+    stats: TaskStats,
     /// Upstream tasks
     upstream: Vec<Addr<TaskActor>>,
     /// Downstream tasks
     downstream: Vec<Addr<TaskActor>>,
-    /// Batch processing times (for calculating averages)
+    /// Progress subscribers by workflow ID
+    progress_subscribers: HashMap<String, Vec<Recipient<WorkflowProgress>>>,
+    /// Processing times for performance tracking
     processing_times: Vec<Duration>,
-    /// Max number of processing times to keep
+    /// Maximum number of processing times to track
     max_processing_times: usize,
     /// Start time for rate calculation
     rate_calculation_start: Option<Instant>,
-    /// Records processed since rate calculation started
+    /// Records processed since rate calculation start
     records_since_rate_start: usize,
+    /// WorkflowActor reference for completion notification
+    workflow_actor: Option<Addr<WorkflowActor>>,
 }
 
 impl TaskActor {
@@ -156,6 +158,7 @@ impl TaskActor {
             max_processing_times: 100,
             rate_calculation_start: None,
             records_since_rate_start: 0,
+            workflow_actor: None,
         }
     }
 
@@ -277,6 +280,11 @@ impl TaskActor {
             message: message.to_string(),
             timestamp: chrono::Utc::now(),
         }
+    }
+
+    /// Set the workflow actor reference
+    pub fn set_workflow_actor(&mut self, actor: Addr<WorkflowActor>) {
+        self.workflow_actor = Some(actor);
     }
 }
 
@@ -446,47 +454,106 @@ impl Handler<SendBatch> for TaskActor {
                       self.id, msg.batch.len());
                 
                 // 为源任务，需要转发到下游
-                if let Some(down_addr) = self.downstream.get(0) {
+                if !self.downstream.is_empty() {
                     // 记录处理的记录数
                     self.stats.records_processed += msg.batch.len();
                     
                     // 转发批次到下游任务
-                    debug!("转发批次到下游任务 {:?}", down_addr);
+                    debug!("转发批次到 {} 个下游任务", self.downstream.len());
                     
-                    // do_send返回()，不需要匹配Result
-                    down_addr.do_send(msg);
+                    for down_addr in &self.downstream {
+                        // 转发消息，包括是否为最后一批的标志
+                        down_addr.do_send(SendBatch {
+                            workflow_id: msg.workflow_id.clone(),
+                            batch: msg.batch.clone(),
+                            is_last_batch: msg.is_last_batch,
+                        });
+                    }
+
+                    // 如果是最后一批数据，通知工作流任务已完成
+                    if msg.is_last_batch {
+                        if let Some(workflow_actor) = &self.workflow_actor {
+                            info!("TaskActor {} 完成处理，总共处理 {} 条记录", 
+                                  self.id, self.stats.records_processed);
+                                  
+                            workflow_actor.do_send(TaskCompleted {
+                                workflow_id: self.workflow_id.clone(),
+                                task_id: self.id.clone(),
+                                records_processed: self.stats.records_processed,
+                                success: true,
+                                error_message: None,
+                            });
+                        }
+                    }
+                    
                     Ok(())
                 } else {
                     error!("源任务 {} 没有下游任务配置", self.id);
-                    Err(DataFlareError::Actor(format!("La tarea de origen {} no tiene tareas descendentes configuradas", self.id)))
+                    Err(DataFlareError::Actor(format!("Source task {} has no downstream tasks configured", self.id)))
                 }
             },
             TaskKind::Processor => {
-                info!("TaskActor(处理器) {} 收到批次，包含 {} 条记录", 
+                debug!("处理器任务 {} 收到批次，包含 {} 条记录", 
                       self.id, msg.batch.len());
                 
-                // 处理器任务，需要先处理数据然后转发
-                if let Some(down_addr) = self.downstream.get(0) {
-                    // 记录处理的记录数
-                    self.stats.records_processed += msg.batch.len();
-                    
-                    // 转发批次到下游任务
-                    debug!("转发批次到下游任务 {:?}", down_addr);
-                    
-                    // do_send返回()，不需要匹配Result
-                    down_addr.do_send(msg);
-                    Ok(())
-                } else {
-                    error!("处理器任务 {} 没有下游任务配置", self.id);
-                    Err(DataFlareError::Actor(format!("La tarea de procesador {} no tiene tareas descendentes configuradas", self.id)))
+                // 处理数据并转发
+                let batch_size = msg.batch.len();
+                
+                // 更新统计信息
+                self.stats.records_processed += batch_size;
+                
+                // 转发到下游
+                for down_addr in &self.downstream {
+                    down_addr.do_send(SendBatch {
+                        workflow_id: msg.workflow_id.clone(),
+                        batch: msg.batch.clone(),
+                        is_last_batch: msg.is_last_batch,
+                    });
                 }
+                
+                // 如果是最后一批，发送完成通知
+                if msg.is_last_batch {
+                    if let Some(workflow_actor) = &self.workflow_actor {
+                        info!("处理器任务 {} 完成处理，总共处理 {} 条记录", 
+                             self.id, self.stats.records_processed);
+                        
+                        workflow_actor.do_send(TaskCompleted {
+                            workflow_id: self.workflow_id.clone(),
+                            task_id: self.id.clone(),
+                            records_processed: self.stats.records_processed,
+                            success: true,
+                            error_message: None,
+                        });
+                    }
+                }
+                
+                Ok(())
             },
             TaskKind::Destination => {
-                info!("TaskActor(目标) {} 收到批次，包含 {} 条记录", 
+                info!("目标任务 {} 收到批次，包含 {} 条记录", 
                       self.id, msg.batch.len());
                 
-                // 目标任务，处理数据但不需要转发
-                self.stats.records_processed += msg.batch.len();
+                // 将数据写入目标
+                let batch_size = msg.batch.len();
+                
+                // 更新统计信息
+                self.stats.records_processed += batch_size;
+                
+                // 如果是最后一批，发送完成通知
+                if msg.is_last_batch {
+                    if let Some(workflow_actor) = &self.workflow_actor {
+                        info!("目标任务 {} 完成处理，总共处理 {} 条记录", 
+                             self.id, self.stats.records_processed);
+                        
+                        workflow_actor.do_send(TaskCompleted {
+                            workflow_id: self.workflow_id.clone(),
+                            task_id: self.id.clone(),
+                            records_processed: self.stats.records_processed,
+                            success: true,
+                            error_message: None,
+                        });
+                    }
+                }
                 
                 Ok(())
             }

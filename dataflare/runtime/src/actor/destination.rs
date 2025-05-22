@@ -220,7 +220,8 @@ impl Handler<LoadBatch> for DestinationActor {
                 Err(e) => {
                     error!("Error en carga: {}", e);
                     actor.report_progress(&workflow_id_for_callback, WorkflowPhase::Error, 0.0, &format!("Error en carga: {}", e));
-                    actor.status = ActorStatus::Error(e.to_string());
+                    actor.status = ActorStatus::Failed;
+                    error!("Write error: {}", e);
                     Err(e)
                 }
             }

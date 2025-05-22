@@ -18,7 +18,7 @@ use dataflare_core::{
 use dataflare_connector::source::{SourceConnector, ExtractionMode};
 
 use crate::actor::{DataFlareActor, Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus, 
-                  SubscribeProgress, UnsubscribeProgress, SendBatch};
+                  SubscribeProgress, UnsubscribeProgress, SendBatch, ConnectToTask, TaskActor};
 
 /// Actor que gestiona la extracción de datos de una fuente
 pub struct SourceActor {
@@ -45,6 +45,9 @@ pub struct SourceActor {
 
     /// Contador de registros procesados
     records_processed: u64,
+    
+    /// Associated TaskActor
+    associated_task: Option<(String, Addr<TaskActor>)>,
 }
 
 impl SourceActor {
@@ -59,6 +62,7 @@ impl SourceActor {
             progress_recipients: HashMap::new(),
             batch_size: 1000, // Valor predeterminado
             records_processed: 0,
+            associated_task: None,
         }
     }
 
@@ -226,121 +230,136 @@ impl Handler<StartExtraction> for SourceActor {
         let batch_size = self.batch_size;
         let addr = ctx.address();
         let connector = self.connector.clone();
+        let associated_task = self.associated_task.clone();
 
         // 创建异步任务处理数据读取和转发
-        Box::pin(async move {
-            // 打开连接器中的流
-            let mut connector_ref = connector.borrow_mut();
-            let stream_result = connector_ref.read(msg.state).await;
-            
-            match stream_result {
-                Ok(mut stream) => {
-                    info!("SourceActor {} 成功打开数据流", self_id);
-                    
-                    // 收集批次数据
-                    let mut batch_records = Vec::with_capacity(batch_size);
-                    let mut total_records = 0;
-                    let mut batch_number = 0;
-                    
-                    // 处理流中的每条记录
-                    while let Some(record_result) = stream.next().await {
-                        match record_result {
-                            Ok(record) => {
-                                batch_records.push(record);
-                                
-                                // 如果批次已满，发送并重置
-                                if batch_records.len() >= batch_size {
-                                    batch_number += 1;
-                                    let record_count = batch_records.len();
-                                    total_records += record_count;
+        Box::pin(
+            async move {
+                // Verify that we have an associated task to send data to
+                if associated_task.is_none() {
+                    error!("SourceActor {} has no associated task, cannot start extraction", self_id);
+                    return Err(DataFlareError::Actor(
+                        format!("SourceActor has no associated task")
+                    ));
+                }
+                
+                let (task_id, task_addr) = associated_task.unwrap();
+                info!("SourceActor {} will send data to task {}", self_id, task_id);
+
+                // 打开连接器中的流
+                let mut connector_ref = connector.borrow_mut();
+                let stream_result = connector_ref.read(msg.state).await;
+                
+                match stream_result {
+                    Ok(mut stream) => {
+                        info!("SourceActor {} 成功打开数据流", self_id);
+                        
+                        // 收集批次数据
+                        let mut batch_records = Vec::with_capacity(batch_size);
+                        let mut total_records = 0;
+                        let mut batch_number = 0;
+                        
+                        // 处理流中的每条记录
+                        while let Some(record_result) = stream.next().await {
+                            match record_result {
+                                Ok(record) => {
+                                    batch_records.push(record);
                                     
-                                    // 创建批次
-                                    let batch = DataRecordBatch::new(
-                                        std::mem::take(&mut batch_records)
-                                    );
-                                    
-                                    // 发送批次
-                                    debug!("SourceActor {} 发送批次 {}: {} 条记录", 
-                                          self_id, batch_number, record_count);
-                                    
-                                    let send_result = addr.send(SendBatch {
-                                        workflow_id: workflow_id.clone(),
-                                        batch,
-                                    }).await;
-                                    
-                                    if let Err(e) = send_result {
-                                        error!("发送批次时出错: {}", e);
-                                        return Err(DataFlareError::Actor(
-                                            format!("Error al enviar lote: {}", e)
-                                        ));
+                                    // 如果批次已满，发送并重置
+                                    if batch_records.len() >= batch_size {
+                                        batch_number += 1;
+                                        let record_count = batch_records.len();
+                                        total_records += record_count;
+                                        
+                                        // 创建批次
+                                        let batch = DataRecordBatch::new(
+                                            std::mem::take(&mut batch_records)
+                                        );
+                                        
+                                        // 发送批次
+                                        debug!("SourceActor {} 发送批次 {}: {} 条记录", 
+                                              self_id, batch_number, record_count);
+                                        
+                                        let send_result = addr.send(SendBatch {
+                                            workflow_id: workflow_id.clone(),
+                                            batch,
+                                            is_last_batch: false,
+                                        }).await;
+                                        
+                                        if let Err(e) = send_result {
+                                            error!("发送批次时出错: {}", e);
+                                            return Err(DataFlareError::Actor(
+                                                format!("Error al enviar lote: {}", e)
+                                            ));
+                                        }
                                     }
+                                },
+                                Err(e) => {
+                                    error!("读取记录时出错: {}", e);
+                                    // 继续处理，不中断流
                                 }
-                            },
-                            Err(e) => {
-                                error!("读取记录时出错: {}", e);
-                                // 继续处理，不中断流
                             }
                         }
-                    }
-                    
-                    // 处理最后一个可能不完整的批次
-                    if !batch_records.is_empty() {
-                        batch_number += 1;
-                        let record_count = batch_records.len();
-                        total_records += record_count;
                         
-                        // 创建批次
-                        let batch = DataRecordBatch::new(
-                            std::mem::take(&mut batch_records)
-                        );
+                        // 处理最后一个可能不完整的批次
+                        if !batch_records.is_empty() {
+                            batch_number += 1;
+                            let record_count = batch_records.len();
+                            total_records += record_count;
+                            
+                            // 创建批次
+                            let batch = DataRecordBatch::new(
+                                std::mem::take(&mut batch_records)
+                            );
+                            
+                            // 发送批次
+                            debug!("SourceActor {} 发送最后批次 {}: {} 条记录", 
+                                  self_id, batch_number, record_count);
+                            
+                            let send_result = addr.send(SendBatch {
+                                workflow_id: workflow_id.clone(),
+                                batch,
+                                is_last_batch: true,
+                            }).await;
+                            
+                            if let Err(e) = send_result {
+                                error!("发送最后批次时出错: {}", e);
+                                return Err(DataFlareError::Actor(
+                                    format!("Error al enviar último lote: {}", e)
+                                ));
+                            }
+                        }
                         
-                        // 发送批次
-                        debug!("SourceActor {} 发送最后批次 {}: {} 条记录", 
-                              self_id, batch_number, record_count);
-                        
-                        let send_result = addr.send(SendBatch {
+                        // 发送提取完成报告
+                        let completion_result = addr.send(ReportExtractionCompletion {
                             workflow_id: workflow_id.clone(),
-                            batch,
+                            records_processed: total_records as u64,
+                            success: true,
+                            error: None,
                         }).await;
                         
-                        if let Err(e) = send_result {
-                            error!("发送最后批次时出错: {}", e);
-                            return Err(DataFlareError::Actor(
-                                format!("Error al enviar último lote: {}", e)
-                            ));
+                        if let Err(e) = completion_result {
+                            error!("发送提取完成报告时出错: {}", e);
                         }
+                        
+                        info!("SourceActor {} 完成数据提取，总共处理了 {} 条记录", self_id, total_records);
+                        Ok(())
+                    },
+                    Err(e) => {
+                        error!("SourceActor {} 打开数据流失败: {}", self_id, e);
+                        
+                        // 报告提取失败
+                        let _ = addr.send(ReportExtractionCompletion {
+                            workflow_id: workflow_id.clone(),
+                            records_processed: 0,
+                            success: false,
+                            error: Some(format!("{}", e)),
+                        }).await;
+                        
+                        Err(e)
                     }
-                    
-                    // 发送提取完成报告
-                    let completion_result = addr.send(ReportExtractionCompletion {
-                        workflow_id: workflow_id.clone(),
-                        records_processed: total_records as u64,
-                        success: true,
-                        error: None,
-                    }).await;
-                    
-                    if let Err(e) = completion_result {
-                        error!("发送提取完成报告时出错: {}", e);
-                    }
-                    
-                    info!("SourceActor {} 完成数据提取，总共处理了 {} 条记录", self_id, total_records);
-                    Ok(())
-                },
-                Err(e) => {
-                    error!("SourceActor {} 打开数据流失败: {}", self_id, e);
-                    
-                    // 报告提取失败
-                    let _ = addr.send(ReportExtractionCompletion {
-                        workflow_id: workflow_id.clone(),
-                        records_processed: 0,
-                        success: false,
-                        error: Some(format!("{}", e)),
-                    }).await;
-                    
-                    Err(e)
                 }
-            }
-        }.into_actor(self))
+            }.into_actor(self))
     }
 }
 
@@ -429,6 +448,16 @@ impl Handler<SendBatch> for SourceActor {
         
         // 批次处理成功
         Ok(())
+    }
+}
+
+/// Handler implementation for ConnectToTask
+impl Handler<ConnectToTask> for SourceActor {
+    type Result = ();
+    
+    fn handle(&mut self, msg: ConnectToTask, _ctx: &mut Self::Context) -> Self::Result {
+        info!("SourceActor {} connecting to task {}", self.id, msg.task_id);
+        self.associated_task = Some((msg.task_id, msg.task_addr));
     }
 }
 

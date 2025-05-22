@@ -35,21 +35,25 @@ use dataflare_core::error::Result;
 use dataflare_core::message::{WorkflowPhase, DataRecordBatch, WorkflowProgress};
 use serde_json::Value;
 
-/// Actor status
-#[derive(Debug, Clone, PartialEq)]
+/// Status of an actor
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActorStatus {
-    /// 初始化状态
+    /// Actor is initialized but not started
     Initialized,
-    /// 运行中
+    /// Actor is running
     Running,
-    /// 已暂停
+    /// Actor is paused
     Paused,
-    /// 已停止
+    /// Actor is completed
+    Completed,
+    /// Actor is completed with errors
+    CompletedWithErrors,
+    /// Actor is stopped
     Stopped,
-    /// 已完成（最终状态）
+    /// Actor is finalized
     Finalized,
-    /// 错误状态
-    Error(String),
+    /// Actor has failed
+    Failed,
 }
 
 /// Message to initialize an actor
@@ -99,6 +103,34 @@ pub struct SendBatch {
     pub workflow_id: String,
     /// Batch of data
     pub batch: DataRecordBatch,
+    /// Is this the last batch
+    pub is_last_batch: bool,
+}
+
+/// Message to connect a SourceActor to a TaskActor
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct ConnectToTask {
+    /// TaskActor address
+    pub task_addr: Addr<TaskActor>,
+    /// Task ID
+    pub task_id: String,
+}
+
+/// Message to report task completion
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct TaskCompleted {
+    /// Workflow ID
+    pub workflow_id: String,
+    /// Task ID
+    pub task_id: String,
+    /// Records processed
+    pub records_processed: usize,
+    /// Was the task successful
+    pub success: bool,
+    /// Error message if any
+    pub error_message: Option<String>,
 }
 
 /// Message to subscribe to progress updates

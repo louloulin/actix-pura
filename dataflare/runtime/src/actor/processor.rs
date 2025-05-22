@@ -230,7 +230,8 @@ impl Handler<ProcessBatch> for ProcessorActor {
                 next.send(SendBatch {
                     workflow_id: workflow_id_clone.clone(),
                     batch: processed_batch.clone(),
-                }).await.map_err(|e| DataFlareError::Actor(format!("Error al enviar lote procesado: {}", e)))?;
+                    is_last_batch: false,
+                }).await.map_err(|e| DataFlareError::Actor(format!("Failed to send batch: {}", e)))?;
             }
 
             Ok(processed_batch)
@@ -248,9 +249,9 @@ impl Handler<ProcessBatch> for ProcessorActor {
                     Ok(batch)
                 },
                 Err(e) => {
-                    error!("Error en procesamiento: {}", e);
-                    actor.report_progress(&workflow_id_for_callback, WorkflowPhase::Error, 0.0, &format!("Error en procesamiento: {}", e));
-                    actor.status = ActorStatus::Error(e.to_string());
+                    error!("Processing error: {}", e);
+                    actor.report_progress(&workflow_id_for_callback, WorkflowPhase::Error, 0.0, &format!("Processing error: {}", e));
+                    actor.status = ActorStatus::Failed;
                     Err(e)
                 }
             }

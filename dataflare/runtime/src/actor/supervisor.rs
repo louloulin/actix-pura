@@ -179,18 +179,18 @@ impl SupervisorActor {
                         actor.actor_states.insert(actor_id.clone(), status.clone());
 
                         // Verificar si el actor está en error
-                        if let ActorStatus::Error(ref error) = status {
-                            warn!("Actor {} en estado de error: {}", actor_id, error);
+                        if let ActorStatus::Failed = status {
+                            warn!("Actor {} en estado de error", actor_id);
                             // Aquí se implementaría la lógica de recuperación
                         }
                     },
                     Ok(Err(e)) => {
                         error!("Error al obtener estado del actor {}: {}", actor_id, e);
-                        actor.actor_states.insert(actor_id.clone(), ActorStatus::Error(format!("Error al obtener estado: {}", e)));
+                        actor.actor_states.insert(actor_id.clone(), ActorStatus::Failed);
                     },
                     Err(e) => {
                         error!("Error de comunicación con actor {}: {}", actor_id, e);
-                        actor.actor_states.insert(actor_id.clone(), ActorStatus::Error(format!("Error de comunicación: {}", e)));
+                        actor.actor_states.insert(actor_id.clone(), ActorStatus::Failed);
                     }
                 }
             }));
@@ -343,7 +343,7 @@ impl Handler<RestartActor> for SupervisorActor {
                 },
                 Err(e) => {
                     error!("Error al reiniciar actor {}: {}", actor_id, e);
-                    actor.actor_states.insert(actor_id.clone(), ActorStatus::Error(format!("Error al reiniciar: {}", e)));
+                    actor.actor_states.insert(actor_id.clone(), ActorStatus::Failed);
                     Err(e)
                 }
             }

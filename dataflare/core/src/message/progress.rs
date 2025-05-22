@@ -18,10 +18,16 @@ pub enum WorkflowPhase {
     Loading,
     /// Workflow is processing data
     Processing,
+    /// Workflow is running (general state)
+    Running,
     /// Workflow is finalizing
     Finalizing,
     /// Workflow completed successfully
     Completed,
+    /// Workflow completed with errors
+    CompletedWithErrors,
+    /// Workflow failed
+    Failed,
     /// Workflow encountered an error
     Error,
 }
