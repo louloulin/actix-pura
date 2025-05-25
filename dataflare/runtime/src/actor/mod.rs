@@ -155,6 +155,16 @@ pub struct RegisterSourceActor {
     pub source_addr: Addr<SourceActor>,
 }
 
+/// Message to register a processor actor with the workflow
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct RegisterProcessorActor {
+    /// Processor ID
+    pub processor_id: String,
+    /// Processor actor address
+    pub processor_addr: Addr<ProcessorActor>,
+}
+
 /// Message to register a destination actor with the workflow
 #[derive(Message)]
 #[rtype(result = "()")]

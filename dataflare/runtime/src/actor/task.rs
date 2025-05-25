@@ -146,6 +146,14 @@ pub struct SetDestinationActor {
     pub destination_actor: Addr<crate::actor::DestinationActor>,
 }
 
+/// Message to set processor actor for processor tasks
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct SetProcessorActor {
+    /// Processor actor address
+    pub processor_actor: Addr<crate::actor::ProcessorActor>,
+}
+
 /// Message to reset task state for retry
 #[derive(Message)]
 #[rtype(result = "()")]
@@ -190,6 +198,8 @@ pub struct TaskActor {
     workflow_actor: Option<Addr<WorkflowActor>>,
     /// DestinationActor reference for destination tasks
     destination_actor: Option<Addr<crate::actor::DestinationActor>>,
+    /// ProcessorActor reference for processor tasks
+    processor_actor: Option<Addr<crate::actor::ProcessorActor>>,
     /// Error handling strategy
     error_strategy: ErrorStrategy,
     /// Current retry count
@@ -221,6 +231,7 @@ impl TaskActor {
             records_since_rate_start: 0,
             workflow_actor: None,
             destination_actor: None,
+            processor_actor: None,
             error_strategy: ErrorStrategy::default(),
             retry_count: 0,
             max_retries: 3, // 默认最大重试次数为3
@@ -382,6 +393,11 @@ impl TaskActor {
     /// Set the destination actor reference for destination tasks
     pub fn set_destination_actor(&mut self, actor: Addr<crate::actor::DestinationActor>) {
         self.destination_actor = Some(actor);
+    }
+
+    /// Set the processor actor reference for processor tasks
+    pub fn set_processor_actor(&mut self, actor: Addr<crate::actor::ProcessorActor>) {
+        self.processor_actor = Some(actor);
     }
 
     /// Set the error handling strategy
@@ -742,16 +758,21 @@ impl Handler<SendBatch> for TaskActor {
             TaskKind::Processor => {
                 info!("Processor task processing batch of {} records", msg.batch.records.len());
 
-                // Process the batch with any transformations
-                let process_result = self.handle(ProcessBatch {
-                    batch: msg.batch.clone(),
-                    is_last_batch: msg.is_last_batch,
-                    workflow_id: msg.workflow_id.clone(),
-                }, ctx);
+                // Forward to the actual ProcessorActor if available
+                if let Some(proc_actor) = &self.processor_actor {
+                    info!("🚀 TaskActor {} forwarding batch of {} records to ProcessorActor",
+                          self.id, msg.batch.records.len());
 
-                if let Err(e) = process_result {
-                    error!("Error processing batch in processor task: {}", e);
-                    return Err(e);
+                    // Send SendBatch message to ProcessorActor
+                    proc_actor.do_send(crate::actor::SendBatch {
+                        workflow_id: msg.workflow_id.clone(),
+                        batch: msg.batch.clone(),
+                        is_last_batch: msg.is_last_batch,
+                    });
+
+                    info!("✅ TaskActor {} successfully sent SendBatch message to ProcessorActor", self.id);
+                } else {
+                    warn!("❌ Processor task {} has no associated ProcessorActor", self.id);
                 }
             },
             TaskKind::Destination => {
@@ -932,6 +953,16 @@ impl Handler<SetDestinationActor> for TaskActor {
     fn handle(&mut self, msg: SetDestinationActor, _ctx: &mut Self::Context) -> Self::Result {
         info!("Setting destination actor for task {}", self.id);
         self.set_destination_actor(msg.destination_actor);
+    }
+}
+
+/// Handler for SetProcessorActor message
+impl Handler<SetProcessorActor> for TaskActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: SetProcessorActor, _ctx: &mut Self::Context) -> Self::Result {
+        info!("Setting processor actor for task {}", self.id);
+        self.set_processor_actor(msg.processor_actor);
     }
 }
 

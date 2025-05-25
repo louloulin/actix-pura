@@ -13,7 +13,7 @@ use dataflare_core::{
 };
 use dataflare_processor::processor::Processor;
 
-use crate::actor::{DataFlareActor, Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus, SendBatch, SubscribeProgress, UnsubscribeProgress};
+use crate::actor::{DataFlareActor, Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus, SendBatch, SubscribeProgress, UnsubscribeProgress, ConnectToTask};
 
 /// Actor que gestiona la transformación de datos
 pub struct ProcessorActor {
@@ -312,6 +312,17 @@ impl Handler<UnsubscribeProgress> for ProcessorActor {
             recipients.retain(|r| r != &msg.recipient);
         }
         Ok(())
+    }
+}
+
+/// Implementación del handler para conectar con TaskActor
+impl Handler<ConnectToTask> for ProcessorActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: ConnectToTask, _ctx: &mut Self::Context) -> Self::Result {
+        info!("ProcessorActor {} conectado a TaskActor {}", self.id, msg.task_id);
+        // En una implementación real, aquí se establecería la conexión con el TaskActor
+        // Por ahora, solo registramos la conexión
     }
 }
 

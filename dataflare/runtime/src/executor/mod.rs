@@ -361,6 +361,17 @@ impl WorkflowExecutor {
             }
         }
 
+        // 注册处理器Actor
+        for (id, _proc_config) in &workflow.transformations {
+            let proc_id = format!("{}.{}", workflow.id, id);
+            if let Some(actor) = self.processor_actors.get(&proc_id) {
+                let _ = workflow_addr.send(crate::actor::RegisterProcessorActor {
+                    processor_id: id.clone(),
+                    processor_addr: actor.clone(),
+                }).await;
+            }
+        }
+
         // 注册目标Actor
         for (id, dest_config) in &workflow.destinations {
             let dest_id = format!("{}.{}", workflow.id, id);

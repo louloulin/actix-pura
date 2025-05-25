@@ -23,7 +23,7 @@ use crate::actor::{
     TaskActor, TaskKind, GetTaskStats,
     Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus,
     SubscribeProgress, UnsubscribeProgress,
-    TaskCompleted, RegisterTask, RegisterSourceActor, SourceActor, ConnectToTask, RegisterDestinationActor,
+    TaskCompleted, RegisterTask, RegisterSourceActor, SourceActor, ConnectToTask, RegisterProcessorActor, ProcessorActor, RegisterDestinationActor,
     DestinationActor
 };
 
@@ -235,6 +235,9 @@ pub struct WorkflowActor {
     /// Source actors
     source_actors: HashMap<String, Addr<SourceActor>>,
 
+    /// Processor actors
+    processor_actors: HashMap<String, Addr<ProcessorActor>>,
+
     /// Destination actors
     destination_actors: HashMap<String, Addr<DestinationActor>>,
 
@@ -284,6 +287,7 @@ impl WorkflowActor {
             failed_tasks: HashSet::new(),
             failure_strategy: FailureStrategy::default(),
             source_actors: HashMap::new(),
+            processor_actors: HashMap::new(),
             destination_actors: HashMap::new(),
             task_retry_counts: HashMap::new(),
             max_task_failures: 3, // 默认最多允许3个任务失败
@@ -1180,6 +1184,89 @@ impl Handler<RegisterSourceActor> for WorkflowActor {
         });
 
         info!("Created and connected TaskActor for source {}", msg.source_id);
+    }
+}
+
+/// Handler for RegisterProcessorActor message
+impl Handler<RegisterProcessorActor> for WorkflowActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: RegisterProcessorActor, _ctx: &mut Self::Context) -> Self::Result {
+        info!("Registering processor actor {} with workflow {}", msg.processor_id, self.id);
+
+        // Store the processor actor in the processor actors map
+        self.processor_actors.insert(msg.processor_id.clone(), msg.processor_addr.clone());
+
+        // Get the actual processor configuration from workflow config if available
+        let proc_config = if let Some(workflow_config) = &self.config {
+            if let Some(proc_cfg) = workflow_config.transformations.get(&msg.processor_id) {
+                // Use the processor's actual configuration from workflow
+                info!("Using actual processor configuration for {}: {:?}", msg.processor_id, proc_cfg.config);
+                proc_cfg.config.clone()
+            } else {
+                // Fallback to basic configuration
+                warn!("No processor configuration found for {}, using basic config", msg.processor_id);
+                serde_json::json!({
+                    "processor_id": msg.processor_id,
+                    "workflow_id": self.id
+                })
+            }
+        } else {
+            // Fallback to basic configuration
+            warn!("No workflow configuration available, using basic config for {}", msg.processor_id);
+            serde_json::json!({
+                "processor_id": msg.processor_id,
+                "workflow_id": self.id
+            })
+        };
+
+        // Initialize the processor actor with this workflow and proper configuration
+        msg.processor_addr.do_send(Initialize {
+            workflow_id: self.id.clone(),
+            config: proc_config,
+        });
+
+        // Create a TaskActor for this processor and establish the association
+        let task_actor = crate::actor::task::TaskActor::new(
+            &msg.processor_id,
+            crate::actor::task::TaskKind::Processor,
+        ).start();
+
+        // Store the task actor
+        self.tasks.insert(msg.processor_id.clone(), task_actor.clone());
+
+        // Connect the processor actor to the task actor
+        msg.processor_addr.do_send(crate::actor::ConnectToTask {
+            task_id: msg.processor_id.clone(),
+            task_addr: task_actor.clone(),
+        });
+
+        // Set the processor actor in the task actor
+        task_actor.do_send(crate::actor::task::SetProcessorActor {
+            processor_actor: msg.processor_addr.clone(),
+        });
+
+        // Connect this processor task to source tasks based on workflow configuration
+        if let Some(workflow_config) = &self.config {
+            if let Some(proc_cfg) = workflow_config.transformations.get(&msg.processor_id) {
+                for input in &proc_cfg.inputs {
+                    // Find the source task
+                    let source_task_id = input.clone();
+                    if let Some(source_task_addr) = self.tasks.get(&source_task_id) {
+                        info!("Connecting source task {} to processor task {}", source_task_id, msg.processor_id);
+
+                        // Add this processor task as downstream of the source task
+                        source_task_addr.do_send(crate::actor::task::AddDownstream {
+                            actor_addr: task_actor.clone(),
+                        });
+                    } else {
+                        warn!("Source task {} not found for processor {}", source_task_id, msg.processor_id);
+                    }
+                }
+            }
+        }
+
+        info!("Created and connected TaskActor for processor {}", msg.processor_id);
     }
 }
 
