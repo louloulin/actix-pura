@@ -718,6 +718,11 @@ impl Handler<StartWorkflow> for WorkflowActor {
                                 task_addr: task_addr.clone(),
                                 task_id: task_id.clone(),
                             });
+
+                            // Also set the destination actor reference in the task
+                            task_addr.do_send(crate::actor::task::SetDestinationActor {
+                                destination_actor: dest_addr.clone(),
+                            });
                         }
                     }
                 }

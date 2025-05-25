@@ -138,6 +138,14 @@ pub struct SetErrorStrategy {
     pub strategy: ErrorStrategy,
 }
 
+/// Message to set destination actor for destination tasks
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct SetDestinationActor {
+    /// Destination actor address
+    pub destination_actor: Addr<crate::actor::DestinationActor>,
+}
+
 /// Message to reset task state for retry
 #[derive(Message)]
 #[rtype(result = "()")]
@@ -180,6 +188,8 @@ pub struct TaskActor {
     records_since_rate_start: usize,
     /// WorkflowActor reference for completion notification
     workflow_actor: Option<Addr<WorkflowActor>>,
+    /// DestinationActor reference for destination tasks
+    destination_actor: Option<Addr<crate::actor::DestinationActor>>,
     /// Error handling strategy
     error_strategy: ErrorStrategy,
     /// Current retry count
@@ -210,6 +220,7 @@ impl TaskActor {
             rate_calculation_start: None,
             records_since_rate_start: 0,
             workflow_actor: None,
+            destination_actor: None,
             error_strategy: ErrorStrategy::default(),
             retry_count: 0,
             max_retries: 3, // 默认最大重试次数为3
@@ -366,6 +377,11 @@ impl TaskActor {
     /// Set the workflow actor reference
     pub fn set_workflow_actor(&mut self, actor: Addr<WorkflowActor>) {
         self.workflow_actor = Some(actor);
+    }
+
+    /// Set the destination actor reference for destination tasks
+    pub fn set_destination_actor(&mut self, actor: Addr<crate::actor::DestinationActor>) {
+        self.destination_actor = Some(actor);
     }
 
     /// Set the error handling strategy
@@ -741,28 +757,19 @@ impl Handler<SendBatch> for TaskActor {
             TaskKind::Destination => {
                 info!("Destination task processing batch of {} records", msg.batch.records.len());
 
-                // For destination tasks, forward to any connected destination actor
-                if let Some(dest_task) = &self.workflow_actor {
-                    let dest_addr = dest_task.clone();
-                    let batch_clone = msg.batch.clone();
-                    let workflow_id_clone = msg.workflow_id.clone();
+                // Forward to the actual DestinationActor if available
+                if let Some(dest_actor) = &self.destination_actor {
+                    info!("Forwarding batch to DestinationActor");
 
-                    info!("Forwarding batch to destination actor");
-
-                    // Create future for destination load
-                    let fut = async move {
-                        // 直接处理批次，不发送LoadBatch消息
-                        info!("Processing batch in destination task directly");
-                        // TODO: 实现实际的目标处理逻辑
-
-                        // 模拟成功处理
-                        info!("Successfully processed batch in destination task");
-                    };
-
-                    // Spawn the future
-                    ctx.spawn(fut.into_actor(self));
+                    // Send LoadBatch message to DestinationActor
+                    dest_actor.do_send(dataflare_core::message::LoadBatch {
+                        workflow_id: msg.workflow_id.clone(),
+                        destination_id: self.id.clone(),
+                        batch: msg.batch.clone(),
+                        config: serde_json::json!({}), // Use empty config for now
+                    });
                 } else {
-                    warn!("Destination task has no connected destination actor");
+                    warn!("Destination task {} has no associated DestinationActor", self.id);
                 }
             }
         }
@@ -912,6 +919,16 @@ impl Handler<SetErrorStrategy> for TaskActor {
 
         // Reset retry count when strategy changes
         self.reset_retry_count();
+    }
+}
+
+/// Handler for SetDestinationActor message
+impl Handler<SetDestinationActor> for TaskActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: SetDestinationActor, _ctx: &mut Self::Context) -> Self::Result {
+        info!("Setting destination actor for task {}", self.id);
+        self.set_destination_actor(msg.destination_actor);
     }
 }
 

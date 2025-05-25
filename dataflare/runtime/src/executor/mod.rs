@@ -201,7 +201,7 @@ impl WorkflowExecutor {
             debug!("Creando actor de procesador {}", proc_id);
 
             // Crear procesador según el tipo
-            let processor: Box<dyn Processor> = match proc_config.r#type.as_str() {
+            let mut processor: Box<dyn Processor> = match proc_config.r#type.as_str() {
                 "mapping" => Box::new(MappingProcessor::new(dataflare_processor::mapping::MappingProcessorConfig {
                     mappings: Vec::new(),
                 })),
@@ -210,6 +210,10 @@ impl WorkflowExecutor {
                 })),
                 _ => return Err(DataFlareError::Config(format!("Tipo de procesador desconocido: {}", proc_config.r#type))),
             };
+
+            // Configurar el procesador con la configuración del workflow
+            processor.configure(&proc_config.config)
+                .map_err(|e| DataFlareError::Config(format!("Error al configurar procesador {}: {}", id, e)))?;
 
             // Crear actor de procesador
             let proc_actor = ProcessorActor::new(proc_id.clone(), processor);

@@ -25,7 +25,7 @@ pub use supervisor::SupervisorActor;
 pub use message_bus::MessageBus;
 pub use pool::ActorPool;
 pub use actor_ref::{ActorRef, ActorRegistry, MessageRouter};
-pub use cluster::{ClusterActor, ClusterConfig, RegisterNode, UnregisterNode, 
+pub use cluster::{ClusterActor, ClusterConfig, RegisterNode, UnregisterNode,
                  Heartbeat, DeployWorkflow, StopWorkflow};
 pub use task::{TaskActor, TaskKind, TaskState, TaskStats, ProcessBatch,
               GetTaskState, SetTaskState, GetTaskStats};
@@ -185,6 +185,14 @@ pub struct UnsubscribeProgress {
     pub recipient: Recipient<WorkflowProgress>,
 }
 
+/// Message to set the next actor in the data flow
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct SetNextActor {
+    /// Next actor recipient
+    pub next_actor: Recipient<SendBatch>,
+}
+
 /// Message to subscribe to progress updates (alias for SubscribeProgress)
 pub type SubscribeToProgress = SubscribeProgress;
 
@@ -195,16 +203,16 @@ pub type UnsubscribeFromProgress = UnsubscribeProgress;
 pub trait DataFlareActor: Actor {
     /// Get the actor ID
     fn get_id(&self) -> &str;
-    
+
     /// Get the actor type
     fn get_type(&self) -> &str;
-    
+
     /// Initialize the actor
     fn initialize(&mut self, ctx: &mut Self::Context) -> Result<()>;
-    
+
     /// Finalize the actor
     fn finalize(&mut self, ctx: &mut Self::Context) -> Result<()>;
-    
+
     /// Report progress
     fn report_progress(&self, workflow_id: &str, phase: WorkflowPhase, progress: f64, message: &str);
 }

@@ -18,7 +18,7 @@ use dataflare_core::{
 use dataflare_connector::source::{SourceConnector, ExtractionMode};
 
 use crate::actor::{DataFlareActor, Initialize, Finalize, Pause, Resume, GetStatus, ActorStatus,
-                  SubscribeProgress, UnsubscribeProgress, SendBatch, ConnectToTask, TaskActor};
+                  SubscribeProgress, UnsubscribeProgress, SendBatch, ConnectToTask, TaskActor, SetNextActor};
 
 /// Actor que gestiona la extracción de datos de una fuente
 pub struct SourceActor {
@@ -48,6 +48,9 @@ pub struct SourceActor {
 
     /// Associated TaskActor
     associated_task: Option<(String, Addr<TaskActor>)>,
+
+    /// Next actor in the data flow
+    next_actor: Option<Recipient<SendBatch>>,
 }
 
 impl SourceActor {
@@ -63,6 +66,7 @@ impl SourceActor {
             batch_size: 1000, // Valor predeterminado
             records_processed: 0,
             associated_task: None,
+            next_actor: None,
         }
     }
 

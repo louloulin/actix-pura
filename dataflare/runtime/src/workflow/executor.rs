@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use actix::prelude::*;
 use futures::future::{self, FutureExt};
+use log::info;
 
 use dataflare_core::{
     error::{DataFlareError, Result},
@@ -128,7 +129,7 @@ impl WorkflowExecutor {
         // Crear actores de procesador
         for (id, transform_config) in &workflow.transformations {
             // Crear procesador según el tipo
-            let processor: Box<dyn Processor> = match transform_config.r#type.as_str() {
+            let mut processor: Box<dyn Processor> = match transform_config.r#type.as_str() {
                 "mapping" => {
                     let config = dataflare_processor::mapping::MappingProcessorConfig {
                         mappings: Vec::new(),
@@ -145,6 +146,10 @@ impl WorkflowExecutor {
                     "Tipo de procesador no soportado: {}", transform_config.r#type
                 ))),
             };
+
+            // Configurar el procesador con la configuración del workflow
+            processor.configure(&transform_config.config)
+                .map_err(|e| DataFlareError::Config(format!("Error al configurar procesador {}: {}", id, e)))?;
 
             // Crear actor
             let processor_actor = ProcessorActor::new(id.clone(), processor);
@@ -205,6 +210,8 @@ impl WorkflowExecutor {
         for (id, addr) in &self.destination_actors {
             workflow_actor.add_destination_actor(id.clone(), addr.clone());
         }
+
+        // Las conexiones de datos se establecen en WorkflowActor
 
         // Iniciar actor de flujo de trabajo
         let workflow_addr = workflow_actor.start();
@@ -309,6 +316,8 @@ impl WorkflowExecutor {
             Err(e) => Err(DataFlareError::Actor(format!("Error al ejecutar flujo de trabajo: {}", e))),
         }
     }
+
+
 
     /// Finaliza el ejecutor
     pub fn finalize(&mut self) -> Result<()> {
