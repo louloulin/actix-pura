@@ -37,6 +37,9 @@ pub struct DestinationActor {
 
     /// Associated TaskActor
     associated_task: Option<(String, Addr<TaskActor>)>,
+
+    /// Flag to track if this is the first batch (for write mode determination)
+    is_first_batch: bool,
 }
 
 impl DestinationActor {
@@ -50,6 +53,7 @@ impl DestinationActor {
             progress_recipients: HashMap::new(),
             records_processed: 0,
             associated_task: None,
+            is_first_batch: true,
         }
     }
 
@@ -199,7 +203,41 @@ impl Handler<LoadBatch> for DestinationActor {
 
         // Crear un futuro para la operación de escritura real
         let batch_clone = msg.batch.clone();
-        let write_mode = dataflare_connector::destination::WriteMode::Overwrite;
+
+        // Determinar el modo de escritura basado en la configuración y si es el primer lote
+        let write_mode = {
+            if let Some(mode_str) = msg.config.get("write_mode").and_then(|m| m.as_str()) {
+                match mode_str {
+                    "append" => dataflare_connector::destination::WriteMode::Append,
+                    "overwrite" => {
+                        if self.is_first_batch {
+                            dataflare_connector::destination::WriteMode::Overwrite
+                        } else {
+                            dataflare_connector::destination::WriteMode::Append
+                        }
+                    },
+                    "merge" => dataflare_connector::destination::WriteMode::Merge,
+                    "update" => dataflare_connector::destination::WriteMode::Update,
+                    "delete" => dataflare_connector::destination::WriteMode::Delete,
+                    _ => {
+                        if self.is_first_batch {
+                            dataflare_connector::destination::WriteMode::Overwrite
+                        } else {
+                            dataflare_connector::destination::WriteMode::Append
+                        }
+                    }
+                }
+            } else {
+                // Sin configuración específica, usar overwrite para el primer lote y append para los siguientes
+                if self.is_first_batch {
+                    dataflare_connector::destination::WriteMode::Overwrite
+                } else {
+                    dataflare_connector::destination::WriteMode::Append
+                }
+            }
+        };
+
+        info!("📝 Usando modo de escritura: {:?} (primer lote: {})", write_mode, self.is_first_batch);
 
         // Realizar escritura real usando el conector
         info!("🔄 DestinationActor recibió {} registros para escribir", batch_clone.records.len());
@@ -237,6 +275,10 @@ impl Handler<LoadBatch> for DestinationActor {
                     actor.report_progress(&workflow_id, WorkflowPhase::Loading, 1.0, "Carga completada");
                     actor.status = ActorStatus::Initialized;
                     actor.records_processed += batch_size;
+
+                    // Marcar que ya no es el primer lote
+                    actor.is_first_batch = false;
+
                     Ok(())
                 },
                 Err(e) => {

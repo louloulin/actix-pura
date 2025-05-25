@@ -1382,7 +1382,48 @@ impl Handler<RegisterDestinationActor> for WorkflowActor {
 
         // Connect this destination task to source tasks based on workflow configuration
         if let Some(workflow_config) = &self.config {
-            if let Some(dest_cfg) = workflow_config.destinations.get(&msg.destination_id) {
+            info!("🔍 Checking connections for destination {}", msg.destination_id);
+            // First try to use connections configuration
+            if let Some(connections) = &workflow_config.connections {
+                info!("🔍 Found {} connections in workflow config", connections.len());
+                for connection in connections {
+                    info!("🔍 Checking connection: {} -> {}", connection.from, connection.to);
+                    if connection.to == msg.destination_id {
+                        info!("✅ Found matching connection for destination {}", msg.destination_id);
+                        // Find the source task with correct ID format (could be source or processor)
+                        let source_task_id = format!("{}.source.{}", self.id, connection.from);
+                        let processor_task_id = format!("{}.processor.{}", self.id, connection.from);
+
+                        info!("🔍 Looking for source task: {}", source_task_id);
+                        info!("🔍 Looking for processor task: {}", processor_task_id);
+                        info!("🔍 Available tasks: {:?}", self.tasks.keys().collect::<Vec<_>>());
+
+                        if let Some(source_task_addr) = self.tasks.get(&source_task_id) {
+                            info!("Connecting source task {} to destination task {}", source_task_id, msg.destination_id);
+
+                            // Add this destination task as downstream of the source task
+                            info!("🔗 Sending AddDownstream message from source {} to destination {}", source_task_id, msg.destination_id);
+                            source_task_addr.do_send(crate::actor::task::AddDownstream {
+                                actor_addr: task_actor.clone(),
+                            });
+                            info!("✅ Sent AddDownstream message from source {} to destination {}", source_task_id, msg.destination_id);
+                        } else if let Some(processor_task_addr) = self.tasks.get(&processor_task_id) {
+                            info!("Connecting processor task {} to destination task {}", processor_task_id, msg.destination_id);
+
+                            // Add this destination task as downstream of the processor task
+                            info!("🔗 Sending AddDownstream message from processor {} to destination {}", processor_task_id, msg.destination_id);
+                            processor_task_addr.do_send(crate::actor::task::AddDownstream {
+                                actor_addr: task_actor.clone(),
+                            });
+                            info!("✅ Sent AddDownstream message from processor {} to destination {}", processor_task_id, msg.destination_id);
+                        } else {
+                            warn!("Source/Processor task {} not found for destination {}", connection.from, msg.destination_id);
+                        }
+                    }
+                }
+            }
+            // Fallback to legacy inputs configuration
+            else if let Some(dest_cfg) = workflow_config.destinations.get(&msg.destination_id) {
                 for input in &dest_cfg.inputs {
                     // Find the source task with correct ID format (could be source or processor)
                     let source_task_id = format!("{}.source.{}", self.id, input);

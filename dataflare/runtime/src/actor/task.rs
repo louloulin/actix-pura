@@ -748,17 +748,8 @@ impl Handler<SendBatch> for TaskActor {
             TaskKind::Source => {
                 info!("Source task forwarding batch of {} records", msg.batch.records.len());
 
-                // Process the batch (just pass-through for source)
-                let process_result = self.handle(ProcessBatch {
-                    batch: msg.batch.clone(),
-                    is_last_batch: msg.is_last_batch,
-                    workflow_id: msg.workflow_id.clone(),
-                }, ctx);
-
-                if let Err(e) = process_result {
-                    error!("Error processing batch in source task: {}", e);
-                    return Err(e);
-                }
+                // Update stats for source task
+                self.stats.records_processed += msg.batch.records.len();
 
                 // Forward to downstream tasks
                 info!("🔍 Source TaskActor {} has {} downstream tasks", self.id, self.downstream.len());
@@ -814,12 +805,33 @@ impl Handler<SendBatch> for TaskActor {
                     info!("🚀 TaskActor {} forwarding batch of {} records to DestinationActor",
                           self.id, msg.batch.records.len());
 
+                    // Create destination config with write_mode based on batch order
+                    let dest_config = if self.stats.batches_processed == 0 {
+                        // First batch: use overwrite mode
+                        info!("🔧 TaskActor {} creating config for FIRST batch (overwrite mode)", self.id);
+                        serde_json::json!({
+                            "write_mode": "overwrite"
+                        })
+                    } else {
+                        // Subsequent batches: use append mode
+                        info!("🔧 TaskActor {} creating config for batch {} (append mode)", self.id, self.stats.batches_processed + 1);
+                        serde_json::json!({
+                            "write_mode": "append"
+                        })
+                    };
+
+                    info!("🔧 TaskActor {} sending LoadBatch with config: {}", self.id, dest_config);
+
+                    // Update stats for destination task AFTER checking batch count
+                    self.stats.records_processed += msg.batch.records.len();
+                    self.stats.batches_processed += 1;
+
                     // Send LoadBatch message to DestinationActor
                     dest_actor.do_send(dataflare_core::message::LoadBatch {
                         workflow_id: msg.workflow_id.clone(),
                         destination_id: self.id.clone(),
                         batch: msg.batch.clone(),
-                        config: serde_json::json!({}), // Use empty config for now
+                        config: dest_config,
                     });
 
                     info!("✅ TaskActor {} successfully sent LoadBatch message to DestinationActor", self.id);

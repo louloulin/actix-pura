@@ -1,0 +1,24 @@
+id: large-data-test
+name: "Large Data Performance Test"
+description: "测试DataFlare处理50万条数据的性能"
+version: "1.0.0"
+
+sources:
+  csv_source:
+    type: csv
+    config:
+      file_path: "examples/data/large_test_data.csv"
+      has_header: true
+      delimiter: ","
+      batch_size: 1000  # 与TaskActor批次大小保持一致
+
+destinations:
+  csv_output:
+    inputs:
+      - csv_source
+    type: csv
+    config:
+      file_path: "dataflare/output/large_data_output.csv"
+      delimiter: ","
+      write_header: true
+      write_mode: "append"

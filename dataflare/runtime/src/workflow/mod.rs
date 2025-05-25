@@ -50,6 +50,9 @@ pub struct Workflow {
     /// Configuración de destinos
     pub destinations: HashMap<String, DestinationConfig>,
 
+    /// Conexiones entre componentes
+    pub connections: Option<Vec<WorkflowConnection>>,
+
     /// Configuración de programación
     pub schedule: Option<ScheduleConfig>,
 
@@ -75,6 +78,7 @@ impl Workflow {
             sources: HashMap::new(),
             transformations: HashMap::new(),
             destinations: HashMap::new(),
+            connections: None,
             schedule: None,
             metadata: HashMap::new(),
             created_at: now,
@@ -311,6 +315,26 @@ impl ScheduleConfig {
     pub fn with_end_date(mut self, end_date: DateTime<Utc>) -> Self {
         self.end_date = Some(end_date);
         self
+    }
+}
+
+/// Conexión entre componentes del workflow
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowConnection {
+    /// Componente de origen
+    pub from: String,
+
+    /// Componente de destino
+    pub to: String,
+}
+
+impl WorkflowConnection {
+    /// Crea una nueva conexión
+    pub fn new<S: Into<String>>(from: S, to: S) -> Self {
+        Self {
+            from: from.into(),
+            to: to.into(),
+        }
     }
 }
 

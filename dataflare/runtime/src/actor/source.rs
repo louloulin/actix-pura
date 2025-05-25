@@ -298,18 +298,12 @@ impl Handler<StartExtraction> for SourceActor {
                                         debug!("SourceActor {} 发送批次 {}: {} 条记录到TaskActor {}",
                                               self_id, batch_number, record_count, task_id);
 
-                                        let send_result = task_addr.send(SendBatch {
+                                        // 使用异步发送，不等待响应
+                                        task_addr.do_send(SendBatch {
                                             workflow_id: workflow_id.clone(),
                                             batch,
                                             is_last_batch: false,
-                                        }).await;
-
-                                        if let Err(e) = send_result {
-                                            error!("发送批次时出错: {}", e);
-                                            return Err(DataFlareError::Actor(
-                                                format!("Error al enviar lote: {}", e)
-                                            ));
-                                        }
+                                        });
                                     }
                                 },
                                 Err(e) => {
@@ -334,18 +328,12 @@ impl Handler<StartExtraction> for SourceActor {
                             debug!("SourceActor {} 发送最后批次 {}: {} 条记录到TaskActor {}",
                                   self_id, batch_number, record_count, task_id);
 
-                            let send_result = task_addr.send(SendBatch {
+                            // 使用异步发送，不等待响应
+                            task_addr.do_send(SendBatch {
                                 workflow_id: workflow_id.clone(),
                                 batch,
                                 is_last_batch: true,
-                            }).await;
-
-                            if let Err(e) = send_result {
-                                error!("发送最后批次时出错: {}", e);
-                                return Err(DataFlareError::Actor(
-                                    format!("Error al enviar último lote: {}", e)
-                                ));
-                            }
+                            });
                         }
 
                         // 发送提取完成报告到SourceActor自己

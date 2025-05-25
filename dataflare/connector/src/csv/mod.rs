@@ -481,7 +481,7 @@ impl DestinationConnector for CsvDestinationConnector {
                 .filter_map(|c| c.as_str())
                 .map(|s| s.to_string())
                 .collect();
-            
+
             if !col_names.is_empty() {
                 info!("CSV目标连接器: 配置列名为 {:?}", col_names);
                 self.columns = col_names;
@@ -533,7 +533,7 @@ impl DestinationConnector for CsvDestinationConnector {
         })?;
 
         info!("CSV目标连接器: 准备写入文件 {:?}, 写入模式: {:?}", file_path, mode);
-        
+
         // 检查目录是否存在，不存在则创建
         if let Some(parent) = file_path.parent() {
             if !parent.exists() {
@@ -558,7 +558,7 @@ impl DestinationConnector for CsvDestinationConnector {
         };
 
         // 创建写入器
-        let mut writer = if append && file_path.exists() && !self.file_opened {
+        let mut writer = if append && file_path.exists() {
             info!("CSV目标连接器: 附加到现有文件 {:?}", file_path);
             // 附加到现有文件
             let file = std::fs::OpenOptions::new()
@@ -576,7 +576,7 @@ impl DestinationConnector for CsvDestinationConnector {
                 .has_headers(false)
                 .from_writer(file)
         } else {
-            // 创建新文件
+            // 创建新文件或覆盖现有文件
             info!("CSV目标连接器: 创建新文件 {:?}", file_path);
             let file = std::fs::File::create(file_path).map_err(|e| {
                 error!("CSV目标连接器: 创建文件失败: {}", e);
@@ -590,7 +590,7 @@ impl DestinationConnector for CsvDestinationConnector {
         };
 
         self.file_opened = true;
-        
+
         // 确定标题行
         let headers = if !self.columns.is_empty() {
             info!("CSV目标连接器: 使用配置的列名");
@@ -665,7 +665,7 @@ impl DestinationConnector for CsvDestinationConnector {
         // 计算写入时间
         let write_time_ms = start.elapsed().as_millis() as u64;
 
-        info!("CSV目标连接器: 完成写入，成功: {}，失败: {}，字节数: {}，耗时: {}ms", 
+        info!("CSV目标连接器: 完成写入，成功: {}，失败: {}，字节数: {}，耗时: {}ms",
             success_count, error_count, bytes_written, write_time_ms);
 
         // 更新记录计数
