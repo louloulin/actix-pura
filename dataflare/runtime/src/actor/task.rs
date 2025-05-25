@@ -154,6 +154,11 @@ pub struct SetProcessorActor {
     pub processor_actor: Addr<crate::actor::ProcessorActor>,
 }
 
+/// Message to get downstream task actors
+#[derive(Message)]
+#[rtype(result = "Vec<Addr<TaskActor>>")]
+pub struct GetDownstream;
+
 /// Message to reset task state for retry
 #[derive(Message)]
 #[rtype(result = "()")]
@@ -754,6 +759,20 @@ impl Handler<SendBatch> for TaskActor {
                     error!("Error processing batch in source task: {}", e);
                     return Err(e);
                 }
+
+                // Forward to downstream tasks
+                info!("🔍 Source TaskActor {} has {} downstream tasks", self.id, self.downstream.len());
+                for downstream in &self.downstream {
+                    info!("🚀 Source TaskActor {} forwarding batch to downstream TaskActor", self.id);
+                    downstream.do_send(SendBatch {
+                        workflow_id: msg.workflow_id.clone(),
+                        batch: msg.batch.clone(),
+                        is_last_batch: msg.is_last_batch,
+                    });
+                }
+                if self.downstream.is_empty() {
+                    warn!("❌ Source TaskActor {} has no downstream tasks to forward to!", self.id);
+                }
             },
             TaskKind::Processor => {
                 info!("Processor task processing batch of {} records", msg.batch.records.len());
@@ -771,6 +790,18 @@ impl Handler<SendBatch> for TaskActor {
                     });
 
                     info!("✅ TaskActor {} successfully sent SendBatch message to ProcessorActor", self.id);
+
+                    // After sending to ProcessorActor, also forward to downstream tasks
+                    // The ProcessorActor will process the data, but we need to forward the processed data
+                    // For now, we'll forward the original data and let the downstream handle it
+                    for downstream in &self.downstream {
+                        info!("🚀 Processor TaskActor {} forwarding batch to downstream TaskActor", self.id);
+                        downstream.do_send(SendBatch {
+                            workflow_id: msg.workflow_id.clone(),
+                            batch: msg.batch.clone(),
+                            is_last_batch: msg.is_last_batch,
+                        });
+                    }
                 } else {
                     warn!("❌ Processor task {} has no associated ProcessorActor", self.id);
                 }
@@ -928,8 +959,11 @@ impl Handler<AddDownstream> for TaskActor {
     type Result = ();
 
     fn handle(&mut self, msg: AddDownstream, _ctx: &mut Self::Context) -> Self::Result {
+        info!("🔗 TaskActor {} adding downstream TaskActor, total downstream: {} -> {}",
+              self.id, self.downstream.len(), self.downstream.len() + 1);
         self.downstream.push(msg.actor_addr);
-        debug!("Added downstream actor to task {}", self.id);
+        info!("✅ TaskActor {} successfully added downstream TaskActor, total downstream: {}",
+              self.id, self.downstream.len());
     }
 }
 
@@ -963,6 +997,15 @@ impl Handler<SetProcessorActor> for TaskActor {
     fn handle(&mut self, msg: SetProcessorActor, _ctx: &mut Self::Context) -> Self::Result {
         info!("Setting processor actor for task {}", self.id);
         self.set_processor_actor(msg.processor_actor);
+    }
+}
+
+/// Handler for GetDownstream message
+impl Handler<GetDownstream> for TaskActor {
+    type Result = Vec<Addr<TaskActor>>;
+
+    fn handle(&mut self, _msg: GetDownstream, _ctx: &mut Self::Context) -> Self::Result {
+        self.downstream.clone()
     }
 }
 

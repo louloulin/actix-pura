@@ -5,7 +5,8 @@
 
 use std::time::{Duration, Instant};
 use std::fs;
-use tempfile::{NamedTempFile, TempDir};
+use std::path::PathBuf;
+use tempfile::NamedTempFile;
 use std::io::Write;
 use tokio::task::LocalSet;
 
@@ -13,6 +14,34 @@ use dataflare_runtime::{
     executor::WorkflowExecutor,
     workflow::YamlWorkflowParser,
 };
+
+/// 获取项目输出目录
+fn get_project_output_dir() -> PathBuf {
+    let mut current_dir = std::env::current_dir().unwrap();
+
+    // 如果当前目录是 dataflare/runtime，则向上一级到 dataflare
+    if current_dir.file_name().unwrap() == "runtime" {
+        current_dir = current_dir.parent().unwrap().to_path_buf();
+    }
+
+    // 如果当前目录不是 dataflare，则查找 dataflare 目录
+    if current_dir.file_name().unwrap() != "dataflare" {
+        // 尝试查找 dataflare 子目录
+        let dataflare_dir = current_dir.join("dataflare");
+        if dataflare_dir.exists() {
+            current_dir = dataflare_dir;
+        }
+    }
+
+    let output_dir = current_dir.join("output");
+
+    // 确保输出目录存在
+    if !output_dir.exists() {
+        fs::create_dir_all(&output_dir).unwrap();
+    }
+
+    output_dir
+}
 
 /// 创建测试数据文件
 fn create_test_data(size: usize) -> NamedTempFile {
@@ -132,8 +161,8 @@ async fn test_small_dataset_performance() {
 
         // 创建测试数据
         let input_file = create_test_data(1000);
-        let temp_dir = TempDir::new().unwrap();
-        let output_path = temp_dir.path().join("small_output.csv");
+        let output_dir = get_project_output_dir();
+        let output_path = output_dir.join("small_output.csv");
 
         // 创建工作流
         let workflow_yaml = create_performance_workflow(
@@ -167,6 +196,7 @@ async fn test_small_dataset_performance() {
                 let output_lines: Vec<&str> = output_content.lines().collect();
 
                 println!("📄 输出文件包含 {} 行", output_lines.len());
+                println!("📁 输出文件路径: {}", output_path.display());
                 if output_lines.len() > 0 {
                     println!("📝 第一行: {}", output_lines[0]);
                 }
@@ -201,8 +231,8 @@ async fn test_medium_dataset_performance() {
 
         // 创建测试数据
         let input_file = create_test_data(10000);
-        let temp_dir = TempDir::new().unwrap();
-        let output_path = temp_dir.path().join("medium_output.csv");
+        let output_dir = get_project_output_dir();
+        let output_path = output_dir.join("medium_output.csv");
 
         // 创建工作流
         let workflow_yaml = create_performance_workflow(
@@ -240,6 +270,7 @@ async fn test_medium_dataset_performance() {
                 let output_lines: Vec<&str> = output_content.lines().collect();
 
                 println!("📄 输出文件包含 {} 行", output_lines.len());
+                println!("📁 输出文件路径: {}", output_path.display());
 
                 // 验证数据正确性
                 assert!(output_lines.len() > 1, "输出文件应该包含数据");
@@ -271,8 +302,8 @@ async fn test_large_dataset_performance() {
 
         // 创建测试数据
         let input_file = create_test_data(50000);
-        let temp_dir = TempDir::new().unwrap();
-        let output_path = temp_dir.path().join("large_output.csv");
+        let output_dir = get_project_output_dir();
+        let output_path = output_dir.join("large_output.csv");
 
         // 创建工作流
         let workflow_yaml = create_performance_workflow(
@@ -308,6 +339,9 @@ async fn test_large_dataset_performance() {
             if output_path.exists() {
                 let output_content = fs::read_to_string(&output_path).unwrap();
                 let output_lines: Vec<&str> = output_content.lines().collect();
+
+                println!("📄 输出文件包含 {} 行", output_lines.len());
+                println!("📁 输出文件路径: {}", output_path.display());
 
                 // 验证数据正确性
                 assert!(output_lines.len() > 5000, "输出应该包含大量数据");

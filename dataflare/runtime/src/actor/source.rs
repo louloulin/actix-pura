@@ -294,11 +294,11 @@ impl Handler<StartExtraction> for SourceActor {
                                             std::mem::take(&mut batch_records)
                                         );
 
-                                        // 发送批次
-                                        debug!("SourceActor {} 发送批次 {}: {} 条记录",
-                                              self_id, batch_number, record_count);
+                                        // 发送批次到TaskActor
+                                        debug!("SourceActor {} 发送批次 {}: {} 条记录到TaskActor {}",
+                                              self_id, batch_number, record_count, task_id);
 
-                                        let send_result = addr.send(SendBatch {
+                                        let send_result = task_addr.send(SendBatch {
                                             workflow_id: workflow_id.clone(),
                                             batch,
                                             is_last_batch: false,
@@ -330,11 +330,11 @@ impl Handler<StartExtraction> for SourceActor {
                                 std::mem::take(&mut batch_records)
                             );
 
-                            // 发送批次
-                            debug!("SourceActor {} 发送最后批次 {}: {} 条记录",
-                                  self_id, batch_number, record_count);
+                            // 发送最后批次到TaskActor
+                            debug!("SourceActor {} 发送最后批次 {}: {} 条记录到TaskActor {}",
+                                  self_id, batch_number, record_count, task_id);
 
-                            let send_result = addr.send(SendBatch {
+                            let send_result = task_addr.send(SendBatch {
                                 workflow_id: workflow_id.clone(),
                                 batch,
                                 is_last_batch: true,
@@ -348,7 +348,7 @@ impl Handler<StartExtraction> for SourceActor {
                             }
                         }
 
-                        // 发送提取完成报告
+                        // 发送提取完成报告到SourceActor自己
                         let completion_result = addr.send(ReportExtractionCompletion {
                             workflow_id: workflow_id.clone(),
                             records_processed: total_records as u64,

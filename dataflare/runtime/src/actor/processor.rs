@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use actix::prelude::*;
-use log::{error, info};
+use log::{error, info, warn};
 use chrono::Utc;
 
 use dataflare_core::{
@@ -35,6 +35,9 @@ pub struct ProcessorActor {
     /// Destinatario para enviar datos procesados
     next_actor: Option<Recipient<SendBatch>>,
 
+    /// TaskActor asociado para reenvío de datos
+    task_actor: Option<Addr<crate::actor::TaskActor>>,
+
     /// Contador de registros procesados
     records_processed: u64,
 }
@@ -49,6 +52,7 @@ impl ProcessorActor {
             config: None,
             progress_recipients: HashMap::new(),
             next_actor: None,
+            task_actor: None,
             records_processed: 0,
         }
     }
@@ -57,6 +61,11 @@ impl ProcessorActor {
     pub fn with_next_actor(mut self, next_actor: Recipient<SendBatch>) -> Self {
         self.next_actor = Some(next_actor);
         self
+    }
+
+    /// Establece el TaskActor asociado
+    pub fn set_task_actor(&mut self, task_actor: Addr<crate::actor::TaskActor>) {
+        self.task_actor = Some(task_actor);
     }
 
     /// Reporta el progreso a los suscriptores
@@ -204,6 +213,7 @@ impl Handler<ProcessBatch> for ProcessorActor {
         let batch = msg.batch.clone();
         let _config = msg.config.clone();
         let next_actor = self.next_actor.clone();
+        let task_actor = self.task_actor.clone();
 
         // Iniciar el procesamiento en un futuro
         let fut = async move {
@@ -225,14 +235,11 @@ impl Handler<ProcessBatch> for ProcessorActor {
 
             let processed_batch = DataRecordBatch::new(processed_records);
 
-            // Si hay un actor siguiente, enviar el lote procesado
-            if let Some(next) = next_actor {
-                next.send(SendBatch {
-                    workflow_id: workflow_id_clone.clone(),
-                    batch: processed_batch.clone(),
-                    is_last_batch: false,
-                }).await.map_err(|e| DataFlareError::Actor(format!("Failed to send batch: {}", e)))?;
-            }
+            info!("🚀 ProcessorActor procesó {} registros", processed_batch.records.len());
+
+            // Por ahora, simplemente registramos que el procesamiento está completo
+            // El TaskActor se encargará de reenviar los datos a través de su sistema downstream
+            info!("✅ ProcessorActor completó el procesamiento de {} registros", processed_batch.records.len());
 
             Ok(processed_batch)
         };

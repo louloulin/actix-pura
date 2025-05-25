@@ -1168,14 +1168,23 @@ impl Handler<RegisterSourceActor> for WorkflowActor {
             config: source_config,
         });
 
-        // Create a TaskActor for this source and establish the association
-        let task_actor = crate::actor::task::TaskActor::new(
-            &msg.source_id,
-            crate::actor::task::TaskKind::Source,
-        ).start();
+        // Find existing TaskActor for this source (created in init_from_config)
+        let task_id = format!("{}.source.{}", self.id, msg.source_id);
+        let task_actor = if let Some(existing_task) = self.tasks.get(&task_id) {
+            info!("🔗 Using existing TaskActor {} for source {}", task_id, msg.source_id);
+            existing_task.clone()
+        } else {
+            // Create a TaskActor for this source if it doesn't exist
+            info!("🆕 Creating new TaskActor {} for source {}", task_id, msg.source_id);
+            let task = crate::actor::task::TaskActor::new(
+                &msg.source_id,
+                crate::actor::task::TaskKind::Source,
+            ).start();
 
-        // Store the task actor
-        self.tasks.insert(msg.source_id.clone(), task_actor.clone());
+            // Store the task actor with the correct ID format
+            self.tasks.insert(task_id.clone(), task.clone());
+            task
+        };
 
         // Connect the source actor to the task actor
         msg.source_addr.do_send(crate::actor::ConnectToTask {
@@ -1226,14 +1235,23 @@ impl Handler<RegisterProcessorActor> for WorkflowActor {
             config: proc_config,
         });
 
-        // Create a TaskActor for this processor and establish the association
-        let task_actor = crate::actor::task::TaskActor::new(
-            &msg.processor_id,
-            crate::actor::task::TaskKind::Processor,
-        ).start();
+        // Find existing TaskActor for this processor (created in init_from_config)
+        let task_id = format!("{}.processor.{}", self.id, msg.processor_id);
+        let task_actor = if let Some(existing_task) = self.tasks.get(&task_id) {
+            info!("🔗 Using existing TaskActor {} for processor {}", task_id, msg.processor_id);
+            existing_task.clone()
+        } else {
+            // Create a TaskActor for this processor if it doesn't exist
+            info!("🆕 Creating new TaskActor {} for processor {}", task_id, msg.processor_id);
+            let task = crate::actor::task::TaskActor::new(
+                &msg.processor_id,
+                crate::actor::task::TaskKind::Processor,
+            ).start();
 
-        // Store the task actor
-        self.tasks.insert(msg.processor_id.clone(), task_actor.clone());
+            // Store the task actor with the correct ID format
+            self.tasks.insert(task_id.clone(), task.clone());
+            task
+        };
 
         // Connect the processor actor to the task actor
         msg.processor_addr.do_send(crate::actor::ConnectToTask {
@@ -1246,19 +1264,25 @@ impl Handler<RegisterProcessorActor> for WorkflowActor {
             processor_actor: msg.processor_addr.clone(),
         });
 
+        // Set the task actor in the processor actor (for downstream forwarding)
+        // We need to send a message to set the task actor reference
+        // For now, we'll use a simple approach and modify the ProcessorActor later
+
         // Connect this processor task to source tasks based on workflow configuration
         if let Some(workflow_config) = &self.config {
             if let Some(proc_cfg) = workflow_config.transformations.get(&msg.processor_id) {
                 for input in &proc_cfg.inputs {
-                    // Find the source task
-                    let source_task_id = input.clone();
+                    // Find the source task with correct ID format
+                    let source_task_id = format!("{}.source.{}", self.id, input);
                     if let Some(source_task_addr) = self.tasks.get(&source_task_id) {
                         info!("Connecting source task {} to processor task {}", source_task_id, msg.processor_id);
 
                         // Add this processor task as downstream of the source task
+                        info!("🔗 Sending AddDownstream message from source {} to processor {}", source_task_id, msg.processor_id);
                         source_task_addr.do_send(crate::actor::task::AddDownstream {
                             actor_addr: task_actor.clone(),
                         });
+                        info!("✅ Sent AddDownstream message from source {} to processor {}", source_task_id, msg.processor_id);
                     } else {
                         warn!("Source task {} not found for processor {}", source_task_id, msg.processor_id);
                     }
@@ -1309,14 +1333,23 @@ impl Handler<RegisterDestinationActor> for WorkflowActor {
             config: dest_config,
         });
 
-        // Create a TaskActor for this destination and establish the association
-        let task_actor = crate::actor::task::TaskActor::new(
-            &msg.destination_id,
-            crate::actor::task::TaskKind::Destination,
-        ).start();
+        // Find existing TaskActor for this destination (created in init_from_config)
+        let task_id = format!("{}.destination.{}", self.id, msg.destination_id);
+        let task_actor = if let Some(existing_task) = self.tasks.get(&task_id) {
+            info!("🔗 Using existing TaskActor {} for destination {}", task_id, msg.destination_id);
+            existing_task.clone()
+        } else {
+            // Create a TaskActor for this destination if it doesn't exist
+            info!("🆕 Creating new TaskActor {} for destination {}", task_id, msg.destination_id);
+            let task = crate::actor::task::TaskActor::new(
+                &msg.destination_id,
+                crate::actor::task::TaskKind::Destination,
+            ).start();
 
-        // Store the task actor
-        self.tasks.insert(msg.destination_id.clone(), task_actor.clone());
+            // Store the task actor with the correct ID format
+            self.tasks.insert(task_id.clone(), task.clone());
+            task
+        };
 
         // Connect the destination actor to the task actor
         msg.destination_addr.do_send(crate::actor::ConnectToTask {
@@ -1333,17 +1366,30 @@ impl Handler<RegisterDestinationActor> for WorkflowActor {
         if let Some(workflow_config) = &self.config {
             if let Some(dest_cfg) = workflow_config.destinations.get(&msg.destination_id) {
                 for input in &dest_cfg.inputs {
-                    // Find the source task
-                    let source_task_id = input.clone();
+                    // Find the source task with correct ID format (could be source or processor)
+                    let source_task_id = format!("{}.source.{}", self.id, input);
+                    let processor_task_id = format!("{}.processor.{}", self.id, input);
+
                     if let Some(source_task_addr) = self.tasks.get(&source_task_id) {
                         info!("Connecting source task {} to destination task {}", source_task_id, msg.destination_id);
 
                         // Add this destination task as downstream of the source task
+                        info!("🔗 Sending AddDownstream message from source {} to destination {}", source_task_id, msg.destination_id);
                         source_task_addr.do_send(crate::actor::task::AddDownstream {
                             actor_addr: task_actor.clone(),
                         });
+                        info!("✅ Sent AddDownstream message from source {} to destination {}", source_task_id, msg.destination_id);
+                    } else if let Some(processor_task_addr) = self.tasks.get(&processor_task_id) {
+                        info!("Connecting processor task {} to destination task {}", processor_task_id, msg.destination_id);
+
+                        // Add this destination task as downstream of the processor task
+                        info!("🔗 Sending AddDownstream message from processor {} to destination {}", processor_task_id, msg.destination_id);
+                        processor_task_addr.do_send(crate::actor::task::AddDownstream {
+                            actor_addr: task_actor.clone(),
+                        });
+                        info!("✅ Sent AddDownstream message from processor {} to destination {}", processor_task_id, msg.destination_id);
                     } else {
-                        warn!("Source task {} not found for destination {}", source_task_id, msg.destination_id);
+                        warn!("Source/Processor task {} not found for destination {}", input, msg.destination_id);
                     }
                 }
             }
