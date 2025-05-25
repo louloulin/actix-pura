@@ -2,8 +2,10 @@
 //!
 //! 提供注册和获取处理器的功能。
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 use serde_json::Value;
+use lazy_static::lazy_static;
 
 use dataflare_core::{
     error::Result,
@@ -57,33 +59,33 @@ pub fn register_default_processors() {
 /// 处理器工厂类型
 type ProcessorFactory = Arc<dyn Fn(Value) -> Result<Box<dyn Processor>> + Send + Sync>;
 
-/// 处理器注册表
-static mut PROCESSOR_REGISTRY: Option<std::collections::HashMap<String, ProcessorFactory>> = None;
+/// 处理器注册表 - 使用线程安全的lazy_static替代unsafe static
+lazy_static! {
+    static ref PROCESSOR_REGISTRY: Arc<Mutex<HashMap<String, ProcessorFactory>>> = {
+        Arc::new(Mutex::new(HashMap::new()))
+    };
+}
 
 /// 注册处理器
 pub fn register_processor(name: &str, factory: ProcessorFactory) {
-    unsafe {
-        if PROCESSOR_REGISTRY.is_none() {
-            PROCESSOR_REGISTRY = Some(std::collections::HashMap::new());
-        }
-
-        if let Some(registry) = &mut PROCESSOR_REGISTRY {
-            registry.insert(name.to_string(), factory);
-        }
+    if let Ok(mut registry) = PROCESSOR_REGISTRY.lock() {
+        registry.insert(name.to_string(), factory);
     }
 }
 
 /// 创建处理器
 pub fn create_processor(name: &str, config: Value) -> Result<Box<dyn Processor>> {
-    unsafe {
-        if PROCESSOR_REGISTRY.is_none() {
+    // 确保默认处理器已注册
+    if let Ok(registry) = PROCESSOR_REGISTRY.lock() {
+        if registry.is_empty() {
+            drop(registry); // 释放锁
             register_default_processors();
         }
+    }
 
-        if let Some(registry) = &PROCESSOR_REGISTRY {
-            if let Some(factory) = registry.get(name) {
-                return factory(config);
-            }
+    if let Ok(registry) = PROCESSOR_REGISTRY.lock() {
+        if let Some(factory) = registry.get(name) {
+            return factory(config);
         }
     }
 
@@ -92,14 +94,16 @@ pub fn create_processor(name: &str, config: Value) -> Result<Box<dyn Processor>>
 
 /// 获取所有注册的处理器名称
 pub fn get_processor_names() -> Vec<String> {
-    unsafe {
-        if PROCESSOR_REGISTRY.is_none() {
+    // 确保默认处理器已注册
+    if let Ok(registry) = PROCESSOR_REGISTRY.lock() {
+        if registry.is_empty() {
+            drop(registry); // 释放锁
             register_default_processors();
         }
+    }
 
-        if let Some(registry) = &PROCESSOR_REGISTRY {
-            return registry.keys().cloned().collect();
-        }
+    if let Ok(registry) = PROCESSOR_REGISTRY.lock() {
+        return registry.keys().cloned().collect();
     }
 
     Vec::new()

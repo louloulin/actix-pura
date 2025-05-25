@@ -9,7 +9,7 @@ use serde_json::{Map, Value};
 use dataflare_core::{
     error::{DataFlareError, Result},
     message::{DataRecord, DataRecordBatch},
-    processor::{Processor, ProcessorState},
+    processor::ProcessorState,
 };
 
 /// 连接类型
@@ -331,6 +331,7 @@ impl dataflare_core::processor::Processor for JoinProcessor {
 mod tests {
     use super::*;
     use serde_json::json;
+    use dataflare_core::processor::Processor;
 
     #[tokio::test]
     async fn test_join_processor_inner_join() {

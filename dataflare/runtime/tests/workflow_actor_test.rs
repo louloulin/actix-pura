@@ -152,7 +152,10 @@ async fn test_three_layer_architecture() {
     // 部署工作流 (中层)
     let workflow_id = "test-three-layer".to_string();
     let workflow_config = serde_json::json!({
+        "id": "test-three-layer",
         "name": "三层架构测试",
+        "description": "测试三层架构",
+        "version": "1.0.0",
         "sources": {
             "source1": {
                 "type": "test-source",
@@ -172,7 +175,10 @@ async fn test_three_layer_architecture() {
                 "type": "test-destination",
                 "config": { "test": "data" }
             }
-        }
+        },
+        "metadata": {},
+        "created_at": chrono::Utc::now().to_rfc3339(),
+        "updated_at": chrono::Utc::now().to_rfc3339()
     });
 
     // 通过集群Actor部署工作流

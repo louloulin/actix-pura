@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
 
-use dataflare_core::processor::Processor;
+// Removed unused import: use dataflare_core::processor::Processor;
 
 /// Configuration for the filter processor
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -202,6 +202,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     use tokio_test::block_on;
+    use dataflare_core::processor::Processor;
 
     #[test]
     fn test_filter_processor() {
