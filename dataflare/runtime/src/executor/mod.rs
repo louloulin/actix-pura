@@ -272,6 +272,16 @@ impl WorkflowExecutor {
             None => return Err(DataFlareError::Workflow("Workflow actor not initialized".to_string())),
         };
 
+        // Initialize WorkflowActor first
+        info!("Initializing WorkflowActor");
+        let _ = workflow_addr.send(crate::actor::Initialize {
+            workflow_id: workflow.id.clone(),
+            config: serde_json::to_value(&workflow)?,
+        }).await?;
+
+        // Wait a bit to ensure WorkflowActor is fully initialized
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
         // Initialize actors
         let mut futures = Vec::new();
 
@@ -334,6 +344,31 @@ impl WorkflowExecutor {
         for result in results {
             if let Err(e) = result {
                 return Err(e);
+            }
+        }
+
+        // 将创建的Actor注册到WorkflowActor
+        info!("Registering actors with WorkflowActor");
+
+        // 注册源Actor
+        for (id, source_config) in &workflow.sources {
+            let source_id = format!("{}.{}", workflow.id, id);
+            if let Some(actor) = self.source_actors.get(&source_id) {
+                let _ = workflow_addr.send(crate::actor::RegisterSourceActor {
+                    source_id: id.clone(),
+                    source_addr: actor.clone(),
+                }).await;
+            }
+        }
+
+        // 注册目标Actor
+        for (id, dest_config) in &workflow.destinations {
+            let dest_id = format!("{}.{}", workflow.id, id);
+            if let Some(actor) = self.destination_actors.get(&dest_id) {
+                let _ = workflow_addr.send(crate::actor::RegisterDestinationActor {
+                    destination_id: id.clone(),
+                    destination_addr: actor.clone(),
+                }).await;
             }
         }
 

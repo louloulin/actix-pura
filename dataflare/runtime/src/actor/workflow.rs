@@ -690,6 +690,23 @@ impl Handler<StartWorkflow> for WorkflowActor {
                         });
                     }
 
+                // Start data extraction for source tasks
+                for (task_id, addr) in &self.tasks {
+                    if let Some(task_kind) = self.task_kinds.get(task_id) {
+                        if *task_kind == TaskKind::Source {
+                            info!("🚀 Starting data extraction for source task {}", task_id);
+
+                            // Send StartExtraction message to source task
+                            let _ = addr.do_send(StartExtraction {
+                                workflow_id: self.id.clone(),
+                                source_id: task_id.clone(),
+                                config: serde_json::json!({}), // Use empty config for now
+                                state: None, // No previous state for now
+                            });
+                        }
+                    }
+                }
+
                 // Connect SourceActors to their corresponding TaskActors
                 for (source_id, source_addr) in &self.source_actors {
                     // Find a matching source task (with matching ID or prefix)
@@ -1122,9 +1139,11 @@ impl Handler<RegisterSourceActor> for WorkflowActor {
         let source_config = if let Some(workflow_config) = &self.config {
             if let Some(source_cfg) = workflow_config.sources.get(&msg.source_id) {
                 // Use the source's actual configuration from workflow
+                info!("Using actual source configuration for {}: {:?}", msg.source_id, source_cfg.config);
                 source_cfg.config.clone()
             } else {
                 // Fallback to basic configuration
+                warn!("No source configuration found for {}, using basic config", msg.source_id);
                 serde_json::json!({
                     "source_id": msg.source_id,
                     "workflow_id": self.id
@@ -1132,6 +1151,7 @@ impl Handler<RegisterSourceActor> for WorkflowActor {
             }
         } else {
             // Fallback to basic configuration
+            warn!("No workflow configuration available, using basic config for {}", msg.source_id);
             serde_json::json!({
                 "source_id": msg.source_id,
                 "workflow_id": self.id
@@ -1143,6 +1163,23 @@ impl Handler<RegisterSourceActor> for WorkflowActor {
             workflow_id: self.id.clone(),
             config: source_config,
         });
+
+        // Create a TaskActor for this source and establish the association
+        let task_actor = crate::actor::task::TaskActor::new(
+            &msg.source_id,
+            crate::actor::task::TaskKind::Source,
+        ).start();
+
+        // Store the task actor
+        self.tasks.insert(msg.source_id.clone(), task_actor.clone());
+
+        // Connect the source actor to the task actor
+        msg.source_addr.do_send(crate::actor::ConnectToTask {
+            task_id: msg.source_id.clone(),
+            task_addr: task_actor.clone(),
+        });
+
+        info!("Created and connected TaskActor for source {}", msg.source_id);
     }
 }
 
@@ -1160,9 +1197,11 @@ impl Handler<RegisterDestinationActor> for WorkflowActor {
         let dest_config = if let Some(workflow_config) = &self.config {
             if let Some(dest_cfg) = workflow_config.destinations.get(&msg.destination_id) {
                 // Use the destination's actual configuration from workflow
+                info!("Using actual destination configuration for {}: {:?}", msg.destination_id, dest_cfg.config);
                 dest_cfg.config.clone()
             } else {
                 // Fallback to basic configuration
+                warn!("No destination configuration found for {}, using basic config", msg.destination_id);
                 serde_json::json!({
                     "destination_id": msg.destination_id,
                     "workflow_id": self.id
@@ -1170,6 +1209,7 @@ impl Handler<RegisterDestinationActor> for WorkflowActor {
             }
         } else {
             // Fallback to basic configuration
+            warn!("No workflow configuration available, using basic config for {}", msg.destination_id);
             serde_json::json!({
                 "destination_id": msg.destination_id,
                 "workflow_id": self.id
@@ -1181,6 +1221,48 @@ impl Handler<RegisterDestinationActor> for WorkflowActor {
             workflow_id: self.id.clone(),
             config: dest_config,
         });
+
+        // Create a TaskActor for this destination and establish the association
+        let task_actor = crate::actor::task::TaskActor::new(
+            &msg.destination_id,
+            crate::actor::task::TaskKind::Destination,
+        ).start();
+
+        // Store the task actor
+        self.tasks.insert(msg.destination_id.clone(), task_actor.clone());
+
+        // Connect the destination actor to the task actor
+        msg.destination_addr.do_send(crate::actor::ConnectToTask {
+            task_id: msg.destination_id.clone(),
+            task_addr: task_actor.clone(),
+        });
+
+        // Set the destination actor in the task actor
+        task_actor.do_send(crate::actor::task::SetDestinationActor {
+            destination_actor: msg.destination_addr.clone(),
+        });
+
+        // Connect this destination task to source tasks based on workflow configuration
+        if let Some(workflow_config) = &self.config {
+            if let Some(dest_cfg) = workflow_config.destinations.get(&msg.destination_id) {
+                for input in &dest_cfg.inputs {
+                    // Find the source task
+                    let source_task_id = input.clone();
+                    if let Some(source_task_addr) = self.tasks.get(&source_task_id) {
+                        info!("Connecting source task {} to destination task {}", source_task_id, msg.destination_id);
+
+                        // Add this destination task as downstream of the source task
+                        source_task_addr.do_send(crate::actor::task::AddDownstream {
+                            actor_addr: task_actor.clone(),
+                        });
+                    } else {
+                        warn!("Source task {} not found for destination {}", source_task_id, msg.destination_id);
+                    }
+                }
+            }
+        }
+
+        info!("Created and connected TaskActor for destination {}", msg.destination_id);
     }
 }
 

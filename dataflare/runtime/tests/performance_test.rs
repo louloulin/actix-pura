@@ -121,6 +121,11 @@ impl PerformanceMetrics {
 
 #[tokio::test]
 async fn test_small_dataset_performance() {
+    // 初始化日志系统
+    let _ = env_logger::builder()
+        .filter_level(log::LevelFilter::Info)
+        .try_init();
+
     let local = LocalSet::new();
     local.run_until(async {
         println!("\n🧪 开始小数据集性能测试 (1,000条记录)");

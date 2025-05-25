@@ -759,7 +759,8 @@ impl Handler<SendBatch> for TaskActor {
 
                 // Forward to the actual DestinationActor if available
                 if let Some(dest_actor) = &self.destination_actor {
-                    info!("Forwarding batch to DestinationActor");
+                    info!("🚀 TaskActor {} forwarding batch of {} records to DestinationActor",
+                          self.id, msg.batch.records.len());
 
                     // Send LoadBatch message to DestinationActor
                     dest_actor.do_send(dataflare_core::message::LoadBatch {
@@ -768,8 +769,10 @@ impl Handler<SendBatch> for TaskActor {
                         batch: msg.batch.clone(),
                         config: serde_json::json!({}), // Use empty config for now
                     });
+
+                    info!("✅ TaskActor {} successfully sent LoadBatch message to DestinationActor", self.id);
                 } else {
-                    warn!("Destination task {} has no associated DestinationActor", self.id);
+                    warn!("❌ Destination task {} has no associated DestinationActor", self.id);
                 }
             }
         }

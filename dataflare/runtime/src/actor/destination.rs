@@ -201,41 +201,52 @@ impl Handler<LoadBatch> for DestinationActor {
         let batch_clone = msg.batch.clone();
         let write_mode = dataflare_connector::destination::WriteMode::Overwrite;
 
-        // Usar spawn para ejecutar la escritura de forma asíncrona
-        let workflow_id_clone = workflow_id.clone();
-        let batch_size_clone = batch_size;
+        // Realizar escritura real usando el conector
+        info!("🔄 DestinationActor recibió {} registros para escribir", batch_clone.records.len());
 
-        _ctx.spawn(
-            async move {
-                info!("Realizando escritura real con el conector");
+        // Crear un futuro que llama al conector real
+        let connector_ptr = self.connector.as_mut() as *mut dyn DestinationConnector;
 
-                // TODO: Llamar al conector real para escribir los datos
-                // Por ahora simular escritura exitosa para verificar el flujo de datos
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        Box::pin(async move {
+            info!("📝 Iniciando escritura real con el conector...");
 
-                info!("Escritura simulada exitosa para {} registros", batch_clone.records.len());
-                Ok::<(), DataFlareError>(())
-            }
-            .into_actor(self)
-            .map(move |result, actor, _ctx| {
-                match result {
-                    Ok(_) => {
-                        info!("Escritura completada para {} registros", batch_size_clone);
-                        actor.report_progress(&workflow_id_clone, WorkflowPhase::Loading, 1.0, "Carga completada");
-                        actor.status = ActorStatus::Initialized;
-                        actor.records_processed += batch_size_clone;
-                    },
-                    Err(e) => {
-                        error!("Error en escritura: {}", e);
-                        actor.report_progress(&workflow_id_clone, WorkflowPhase::Error, 0.0, &format!("Error en escritura: {}", e));
-                        actor.status = ActorStatus::Failed;
-                    }
+            // SAFETY: Estamos en el contexto del actor, por lo que el puntero es válido
+            let connector = unsafe { &mut *connector_ptr };
+
+            // Llamar al conector real para escribir los datos
+            let result = connector.write_batch(&batch_clone, write_mode).await;
+
+            match result {
+                Ok(stats) => {
+                    info!("✅ Escritura real exitosa: {} registros escritos, {} bytes",
+                          stats.records_written, stats.bytes_written);
+                    Ok(stats)
+                },
+                Err(e) => {
+                    error!("❌ Error en escritura real: {}", e);
+                    Err(e)
                 }
-            })
-        );
-
-        // 返回一个立即完成的future
-        Box::pin(async move { Ok(()) }.into_actor(self))
+            }
+        }
+        .into_actor(self)
+        .map(move |result, actor, _ctx| {
+            match result {
+                Ok(stats) => {
+                    info!("✅ Escritura completada: {} registros, {} bytes",
+                          stats.records_written, stats.bytes_written);
+                    actor.report_progress(&workflow_id, WorkflowPhase::Loading, 1.0, "Carga completada");
+                    actor.status = ActorStatus::Initialized;
+                    actor.records_processed += batch_size;
+                    Ok(())
+                },
+                Err(e) => {
+                    error!("❌ Error en escritura: {}", e);
+                    actor.report_progress(&workflow_id, WorkflowPhase::Error, 0.0, &format!("Error en escritura: {}", e));
+                    actor.status = ActorStatus::Failed;
+                    Err(e)
+                }
+            }
+        }))
     }
 }
 
