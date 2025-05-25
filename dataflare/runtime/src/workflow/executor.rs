@@ -78,6 +78,10 @@ impl WorkflowExecutor {
 
     /// Inicializa el ejecutor
     pub fn initialize(&mut self) -> Result<()> {
+        // Inicializar conectores
+        dataflare_connector::initialize()
+            .map_err(|e| DataFlareError::Registry(format!("Error al inicializar conectores: {}", e)))?;
+
         // No creamos un nuevo sistema de actores, usamos el existente
         // Crear actor supervisor
         let supervisor = SupervisorActor::new("supervisor");

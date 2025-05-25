@@ -1,0 +1,44 @@
+id: simple-test
+name: Simple Test Workflow
+description: Basic test workflow for debugging
+version: 1.0.0
+
+# Data source
+sources:
+  csv_source:
+    type: csv
+    config:
+      file_path: "examples\\data\\large_test.csv"
+      has_header: true
+      delimiter: ","
+    collection_mode: full
+
+# Simple transformation
+transformations:
+  passthrough:
+    inputs:
+      - csv_source
+    type: mapping
+    config:
+      mappings:
+        - source: id
+          destination: id
+        - source: name
+          destination: name
+
+# Output destination
+destinations:
+  csv_output:
+    inputs:
+      - passthrough
+    type: csv
+    config:
+      file_path: "examples\\data\\simple_output.csv"
+      delimiter: ","
+      write_header: true
+
+# Metadata
+metadata:
+  owner: test
+  department: debug
+  created: "2025-01-01"

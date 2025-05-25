@@ -65,7 +65,7 @@ pub struct WorkflowExecutor {
 
     /// Progress reporter
     progress_reporter: ProgressReporter,
-    
+
     /// Progress actor
     progress_actor: Option<Addr<ProgressActor>>,
 
@@ -105,7 +105,7 @@ impl WorkflowExecutor {
         self.legacy_progress_callback = Some(Box::new(callback));
         self
     }
-    
+
     /// Add a function callback for progress updates
     pub fn add_progress_callback<F>(&self, callback: F) -> Result<()>
     where
@@ -113,12 +113,12 @@ impl WorkflowExecutor {
     {
         self.progress_reporter.add_function_callback(callback)
     }
-    
+
     /// Add a webhook for progress updates
     pub fn add_progress_webhook(&self, config: WebhookConfig) -> Result<()> {
         self.progress_reporter.add_webhook(config)
     }
-    
+
     /// Create a progress event stream
     pub fn create_progress_stream(&self) -> Result<crate::progress::ProgressEventStream> {
         self.progress_reporter.create_event_stream()
@@ -126,17 +126,21 @@ impl WorkflowExecutor {
 
     /// Inicializa el ejecutor
     pub fn initialize(&mut self) -> Result<()> {
+        // Inicializar conectores
+        dataflare_connector::initialize()
+            .map_err(|e| DataFlareError::Registry(format!("Error al inicializar conectores: {}", e)))?;
+
         // No creamos un nuevo sistema de actores, usamos el existente
         // Crear actor supervisor
         let supervisor = SupervisorActor::new("supervisor");
         let supervisor_addr = supervisor.start();
         self.supervisor_actor = Some(supervisor_addr);
-        
+
         // Create progress actor
         let progress_actor = ProgressActor::new(self.progress_reporter.clone());
         let progress_addr = progress_actor.start();
         self.progress_actor = Some(progress_addr);
-        
+
         // Temporarily disable legacy callback support until lifecycle issues are fixed
         // TODO: Re-implement legacy callback support
         // if let Some(callback) = &self.legacy_progress_callback {
@@ -351,11 +355,11 @@ impl WorkflowExecutor {
             // The actor will be stopped when dropped
             drop(progress_actor);
         }
-        
+
         if let Err(e) = self.progress_reporter.clear() {
             warn!("Failed to clear progress reporters: {}", e);
         }
-        
+
         // Detener sistema de actores
         if let Some(_system) = self.system.take() {
             // El sistema se detiene automáticamente cuando se descarta
@@ -402,32 +406,32 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        
+
         workflow
     }
-    
+
     #[actix::test]
     async fn test_progress_callback() {
         // Create a counter to track progress updates
         let counter = Arc::new(Mutex::new(0));
         let counter_clone = counter.clone();
-        
+
         // Create an executor with a progress callback
         let mut executor = WorkflowExecutor::new();
         executor.add_progress_callback(move |_progress| {
             let mut count = counter_clone.lock().unwrap();
             *count += 1;
         }).unwrap();
-        
+
         // Initialize executor
         executor.initialize().unwrap();
-        
+
         // Create a test workflow
         let workflow = create_test_workflow();
-        
+
         // Prepare and execute workflow
         executor.prepare(&workflow).unwrap();
-        
+
         // Manually send a progress update via the progress actor
         if let Some(progress_actor) = &executor.progress_actor {
             // Create test progress directly
@@ -438,56 +442,56 @@ mod tests {
                 message: format!("Started workflow {}", workflow.id),
                 timestamp: Utc::now(),
             };
-            
+
             progress_actor.do_send(progress);
-            
+
             // Allow some time for processing
             actix::clock::sleep(std::time::Duration::from_millis(100)).await;
-            
+
             // Check that the callback was called
             let count = *counter.lock().unwrap();
             assert!(count > 0, "Progress callback should have been called");
         } else {
             panic!("Progress actor should be initialized");
         }
-        
+
         // Finalize executor
         executor.finalize().unwrap();
     }
-    
+
     #[actix::test]
     async fn test_multiple_callbacks() {
         // Create counters to track progress updates
         let counter1 = Arc::new(Mutex::new(0));
         let counter1_clone = counter1.clone();
-        
+
         let counter2 = Arc::new(Mutex::new(0));
         let counter2_clone = counter2.clone();
-        
+
         // Create an executor with multiple progress callbacks
         let mut executor = WorkflowExecutor::new();
-        
+
         // Add first callback
         executor.add_progress_callback(move |_progress| {
             let mut count = counter1_clone.lock().unwrap();
             *count += 1;
         }).unwrap();
-        
+
         // Add second callback
         executor.add_progress_callback(move |_progress| {
             let mut count = counter2_clone.lock().unwrap();
             *count += 2; // Increment by 2 to differentiate
         }).unwrap();
-        
+
         // Initialize executor
         executor.initialize().unwrap();
-        
+
         // Create a test workflow
         let workflow = create_test_workflow();
-        
+
         // Prepare workflow
         executor.prepare(&workflow).unwrap();
-        
+
         // Manually send a progress update via the progress actor
         if let Some(progress_actor) = &executor.progress_actor {
             // Create test progress directly
@@ -498,22 +502,22 @@ mod tests {
                 message: format!("Started workflow {}", workflow.id),
                 timestamp: Utc::now(),
             };
-            
+
             progress_actor.do_send(progress);
-            
+
             // Allow some time for processing
             actix::clock::sleep(std::time::Duration::from_millis(100)).await;
-            
+
             // Check that both callbacks were called
             let count1 = *counter1.lock().unwrap();
             let count2 = *counter2.lock().unwrap();
-            
+
             assert_eq!(count1, 1, "First progress callback should have been called once");
             assert_eq!(count2, 2, "Second progress callback should have been called once (with +2)");
         } else {
             panic!("Progress actor should be initialized");
         }
-        
+
         // Finalize executor
         executor.finalize().unwrap();
     }

@@ -8,7 +8,7 @@ sources:
   csv_source:
     type: csv
     config:
-      file_path: "/Users/louloulin/mastra_docs/actix/examples/data/large_test.csv"
+      file_path: "examples\\data\\large_test.csv"
       has_header: true
       delimiter: ","
     collection_mode: full
@@ -47,7 +47,7 @@ destinations:
       - transform_data
     type: csv
     config:
-      file_path: "/Users/louloulin/mastra_docs/actix/examples/data/performance_output.csv"
+      file_path: "examples\\data\\performance_output.csv"
       delimiter: ","
       write_header: true
 
@@ -55,4 +55,4 @@ destinations:
 metadata:
   owner: admin
   department: performance
-  created: "2023-07-01" 
+  created: "2023-07-01"
