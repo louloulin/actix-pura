@@ -5,7 +5,6 @@
 //! that follows the dependency inversion principle and uses the new actor message system.
 
 mod builder;
-mod executor;
 mod parser;
 mod template;
 mod yaml_parser;
@@ -13,7 +12,6 @@ mod yaml_parser;
 // mod engine;
 
 pub use builder::WorkflowBuilder;
-pub use executor::WorkflowExecutor;
 pub use parser::WorkflowParser;
 pub use template::{WorkflowTemplate, WorkflowTemplateManager, TemplateParameter, TemplateParameterValues};
 pub use yaml_parser::YamlWorkflowParser;

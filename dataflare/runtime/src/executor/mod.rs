@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use actix::prelude::*;
-use log::{debug, info, warn};
+use log::{debug, info, warn, error};
 use futures::future::{self, FutureExt};
 
 use dataflare_core::{
@@ -350,38 +350,86 @@ impl WorkflowExecutor {
         // 将创建的Actor注册到WorkflowActor
         info!("Registering actors with WorkflowActor");
 
-        // 注册源Actor
+        // 注册源Actor - 使用同步等待确保注册完成
+        let mut registration_futures = Vec::new();
+
         for (id, source_config) in &workflow.sources {
             let source_id = format!("{}.{}", workflow.id, id);
+            info!("🔍 Looking for source actor with key: {}", source_id);
+            info!("🔍 Available source actors: {:?}", self.source_actors.keys().collect::<Vec<_>>());
+
             if let Some(actor) = self.source_actors.get(&source_id) {
-                let _ = workflow_addr.send(crate::actor::RegisterSourceActor {
+                info!("✅ Found source actor {}, registering with WorkflowActor", source_id);
+                info!("📤 Sending RegisterSourceActor message for {}", id);
+
+                let fut = workflow_addr.send(crate::actor::RegisterSourceActor {
                     source_id: id.clone(),
                     source_addr: actor.clone(),
-                }).await;
+                });
+                registration_futures.push(fut);
+            } else {
+                error!("❌ Source actor {} not found in source_actors map", source_id);
             }
         }
 
-        // 注册处理器Actor
+        // 等待所有源Actor注册完成
+        let registration_results = future::join_all(registration_futures).await;
+        for (i, result) in registration_results.into_iter().enumerate() {
+            match result {
+                Ok(_) => info!("✅ Successfully registered source actor {}", i),
+                Err(e) => error!("❌ Failed to register source actor {}: {}", i, e),
+            }
+        }
+
+        // 注册处理器Actor - 使用同步等待
+        let mut proc_registration_futures = Vec::new();
         for (id, _proc_config) in &workflow.transformations {
             let proc_id = format!("{}.{}", workflow.id, id);
             if let Some(actor) = self.processor_actors.get(&proc_id) {
-                let _ = workflow_addr.send(crate::actor::RegisterProcessorActor {
+                info!("📤 Registering processor actor {}", id);
+                let fut = workflow_addr.send(crate::actor::RegisterProcessorActor {
                     processor_id: id.clone(),
                     processor_addr: actor.clone(),
-                }).await;
+                });
+                proc_registration_futures.push(fut);
             }
         }
 
-        // 注册目标Actor
+        // 等待所有处理器Actor注册完成
+        let proc_results = future::join_all(proc_registration_futures).await;
+        for (i, result) in proc_results.into_iter().enumerate() {
+            match result {
+                Ok(_) => info!("✅ Successfully registered processor actor {}", i),
+                Err(e) => error!("❌ Failed to register processor actor {}: {}", i, e),
+            }
+        }
+
+        // 注册目标Actor - 使用同步等待
+        let mut dest_registration_futures = Vec::new();
         for (id, dest_config) in &workflow.destinations {
             let dest_id = format!("{}.{}", workflow.id, id);
             if let Some(actor) = self.destination_actors.get(&dest_id) {
-                let _ = workflow_addr.send(crate::actor::RegisterDestinationActor {
+                info!("📤 Registering destination actor {}", id);
+                let fut = workflow_addr.send(crate::actor::RegisterDestinationActor {
                     destination_id: id.clone(),
                     destination_addr: actor.clone(),
-                }).await;
+                });
+                dest_registration_futures.push(fut);
             }
         }
+
+        // 等待所有目标Actor注册完成
+        let dest_results = future::join_all(dest_registration_futures).await;
+        for (i, result) in dest_results.into_iter().enumerate() {
+            match result {
+                Ok(_) => info!("✅ Successfully registered destination actor {}", i),
+                Err(e) => error!("❌ Failed to register destination actor {}: {}", i, e),
+            }
+        }
+
+        // 添加额外延迟确保所有注册消息都被处理
+        info!("⏳ Waiting for all actor registrations to complete...");
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
         // Execute workflow
         let result = workflow_addr.send(crate::actor::workflow::ExecuteWorkflow {

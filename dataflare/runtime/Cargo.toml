@@ -36,6 +36,4 @@ env_logger = "0.10"
 actix-rt = "2.8"
 tempfile = "3.0"
 
-[[bench]]
-name = "actor_bench"
-harness = false
+

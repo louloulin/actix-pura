@@ -5,7 +5,8 @@
 use std::path::PathBuf;
 use std::time::Instant;
 use clap::{Parser, Subcommand};
-use dataflare_runtime::workflow::{YamlWorkflowParser, WorkflowExecutor};
+use dataflare_runtime::workflow::YamlWorkflowParser;
+use dataflare_runtime::WorkflowExecutor;
 use log::{info, debug, error, warn, LevelFilter};
 
 #[derive(Parser)]
@@ -65,7 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 初始化 DataFlare (包含了日志初始化)
     dataflare_cli::init()?;
-    
+
     info!("DataFlare CLI 启动");
     debug!("日志级别: {}", cli.log_level);
 
@@ -109,7 +110,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // 使用 YAML 解析器加载工作流
             let workflow = YamlWorkflowParser::load_from_file(file)?;
             info!("工作流已加载: {}", workflow.id);
-            
+
             // 输出CSV源配置信息
             for (name, source) in &workflow.sources {
                 info!("源配置 '{}' 信息:", name);
@@ -136,7 +137,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            
+
             // 输出目标配置信息
             for (name, dest) in &workflow.destinations {
                 info!("目标配置 '{}' 信息:", name);
@@ -158,7 +159,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         }
-                        
+
                         // 尝试创建一个空文件以验证写入权限
                         let test_path = path.with_file_name(format!("test_{}.tmp", workflow.id));
                         match std::fs::File::create(&test_path) {
@@ -220,7 +221,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if path.exists() {
                             let metadata = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
                             info!("目标文件已创建: {} (大小: {} 字节)", file_path, metadata);
-                            
+
                             // 读取文件前几行作为示例
                             if metadata > 0 {
                                 debug!("文件内容预览:");
@@ -238,7 +239,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         } else {
                             warn!("目标文件未创建: {}", file_path);
-                            
+
                             // 检查文件父目录是否存在
                             if let Some(parent) = path.parent() {
                                 if !parent.exists() {
@@ -258,7 +259,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                
+
                 Ok::<(), Box<dyn std::error::Error>>(())
             })?;
         },

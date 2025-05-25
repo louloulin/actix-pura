@@ -774,7 +774,7 @@ impl Handler<StartWorkflow> for WorkflowActor {
 
                 // Start all source actors - directly start the source extraction
                 for (source_id, source_addr) in &self.source_actors {
-                    info!("Starting source actor {}", source_id);
+                    info!("🚀 Starting source actor {}", source_id);
                     let _ = source_addr.do_send(StartExtraction {
                         workflow_id: self.id.clone(),
                         source_id: source_id.clone(),
@@ -783,6 +783,21 @@ impl Handler<StartWorkflow> for WorkflowActor {
                         }),
                         state: None,
                     });
+                }
+
+                // If no source actors are registered, log a warning
+                if self.source_actors.is_empty() {
+                    warn!("⚠️  No source actors registered in workflow {}! Data flow will not start.", self.id);
+                    warn!("   Available tasks: {:?}", self.tasks.keys().collect::<Vec<_>>());
+                    warn!("   Task kinds: {:?}", self.task_kinds);
+                    warn!("   Source actors count: {}", self.source_actors.len());
+                    warn!("   Processor actors count: {}", self.processor_actors.len());
+                    warn!("   Destination actors count: {}", self.destination_actors.len());
+                } else {
+                    info!("✅ Found {} source actors, starting data flow", self.source_actors.len());
+                    for (source_id, _) in &self.source_actors {
+                        info!("   📍 Source actor: {}", source_id);
+                    }
                 }
 
                 // Send initial progress update
@@ -1134,10 +1149,13 @@ impl Handler<RegisterSourceActor> for WorkflowActor {
     type Result = ();
 
     fn handle(&mut self, msg: RegisterSourceActor, _ctx: &mut Self::Context) -> Self::Result {
-        info!("Registering source actor {} with workflow {}", msg.source_id, self.id);
+        info!("🔧 RegisterSourceActor: Registering source actor {} with workflow {}", msg.source_id, self.id);
 
         // Store the source actor in a separate map
         self.source_actors.insert(msg.source_id.clone(), msg.source_addr.clone());
+
+        info!("🔧 RegisterSourceActor: Source actors count after registration: {}", self.source_actors.len());
+        info!("🔧 RegisterSourceActor: Source actors keys: {:?}", self.source_actors.keys().collect::<Vec<_>>());
 
         // Get the actual source configuration from workflow config if available
         let source_config = if let Some(workflow_config) = &self.config {

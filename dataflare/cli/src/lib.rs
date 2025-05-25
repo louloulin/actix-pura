@@ -15,11 +15,11 @@ use std::time::Instant;
 use dataflare_connector::registry::{get_registered_source_connectors, get_registered_destination_connectors};
 use dataflare_processor::registry::get_processor_names;
 use dataflare_plugin::{
-    registry::list_plugins, 
+    registry::list_plugins,
     plugin::{PluginManager, PluginMetadata}
 };
 use dataflare_runtime::{
-    workflow::{YamlWorkflowParser}, 
+    workflow::{YamlWorkflowParser},
     executor::WorkflowExecutor,
     RuntimeMode
 };
@@ -133,18 +133,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             initialize_project(&project_name, &project_dir)?;
-            println!("Project '{}' initialized successfully in: {}", 
+            println!("Project '{}' initialized successfully in: {}",
                      project_name, project_dir.display());
         }
 
         Commands::Run { workflow, mode } => {
             println!("Running workflow: {} in {} mode", workflow.display(), mode);
-            
+
             // Validate the workflow file exists
             if !workflow.exists() {
                 return Err(format!("Workflow file not found: {}", workflow.display()).into());
             }
-            
+
             // Parse runtime mode
             let runtime_mode = match mode.to_lowercase().as_str() {
                 "standalone" => RuntimeMode::Standalone,
@@ -152,10 +152,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "cloud" => RuntimeMode::Cloud,
                 _ => return Err(format!("Invalid runtime mode: {}. Valid options are: standalone, edge, cloud", mode).into()),
             };
-            
+
             // Execute the workflow
             let result = execute_workflow(&workflow, runtime_mode);
-            
+
             match result {
                 Ok(_) => {
                     println!("Workflow execution completed successfully");
@@ -168,15 +168,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         Commands::Validate { workflow } => {
             println!("Validating workflow: {:?}", workflow);
-            
+
             // Validate the workflow file exists
             if !workflow.exists() {
                 return Err(format!("Workflow file not found: {}", workflow.display()).into());
             }
-            
+
             // Load and validate the workflow
             let result = validate_workflow(&workflow);
-            
+
             match result {
                 Ok(validation_result) => {
                     println!("Workflow validation successful:");
@@ -200,7 +200,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("Available connectors:");
             let source_connectors = list_source_connectors();
             let destination_connectors = list_destination_connectors();
-            
+
             println!("\nSource connectors:");
             if source_connectors.is_empty() {
                 println!("  No source connectors registered");
@@ -209,7 +209,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     println!("  - {}", connector);
                 }
             }
-            
+
             println!("\nDestination connectors:");
             if destination_connectors.is_empty() {
                 println!("  No destination connectors registered");
@@ -223,7 +223,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Processors => {
             println!("Available processors:");
             let processors = list_processors();
-            
+
             if processors.is_empty() {
                 println!("  No processors registered");
             } else {
@@ -313,10 +313,10 @@ pub struct WorkflowValidationResult {
 pub fn validate_workflow(workflow_path: &Path) -> Result<WorkflowValidationResult, Box<dyn std::error::Error>> {
     // Parse the workflow
     let workflow = YamlWorkflowParser::load_from_file(workflow_path)?;
-    
+
     // Additional validation steps could be added here
     // For example, checking that all referenced connectors and processors exist
-    
+
     // Return validation result
     Ok(WorkflowValidationResult {
         id: workflow.id,
@@ -412,7 +412,7 @@ connectors:
     csv:
       delimiter: ","
       header: true
-  
+
   destination:
     # Configure default options for destination connectors
     postgres:
@@ -460,7 +460,7 @@ transformations:
         - source: created_at
           destination: user.createdAt
           transform: parse_datetime
-  
+
   # Filter out inactive users
   active_users:
     type: filter
@@ -615,10 +615,10 @@ pub fn get_plugin_details(plugin_id: &str) -> Result<Option<String>, Box<dyn std
     if !plugins_dir.exists() {
         return Ok(None);
     }
-    
+
     // Look for metadata file
     let metadata_pattern = format!("{}.meta.json", plugin_id);
-    
+
     for entry in fs::read_dir(plugins_dir)? {
         if let Ok(entry) = entry {
             let file_name = entry.file_name().to_string_lossy().to_string();
@@ -627,12 +627,12 @@ pub fn get_plugin_details(plugin_id: &str) -> Result<Option<String>, Box<dyn std
                 let mut file = File::open(entry.path())?;
                 let mut content = String::new();
                 file.read_to_string(&mut content)?;
-                
+
                 return Ok(Some(content));
             }
         }
     }
-    
+
     Ok(None)
 }
 
@@ -641,15 +641,15 @@ pub fn format_plugin_list(plugins: &[dataflare_plugin::plugin::PluginMetadata]) 
     if plugins.is_empty() {
         return "No plugins installed".to_string();
     }
-    
+
     let mut result = String::new();
     result.push_str("Installed plugins:\n");
-    
+
     // Calculate column widths
     let name_width = plugins.iter().map(|p| p.name.len()).max().unwrap_or(4).max(4);
     let version_width = plugins.iter().map(|p| p.version.len()).max().unwrap_or(7).max(7);
     let type_width = plugins.iter().map(|p| format!("{:?}", p.plugin_type).len()).max().unwrap_or(4).max(4);
-    
+
     // Add header
     result.push_str(&format!(
         "┌{:─^width$}┬{:─^version_width$}┬{:─^type_width$}┬{:─^50}┐\n",
@@ -658,7 +658,7 @@ pub fn format_plugin_list(plugins: &[dataflare_plugin::plugin::PluginMetadata]) 
         version_width = version_width,
         type_width = type_width
     ));
-    
+
     result.push_str(&format!(
         "│ {:width$} │ {:version_width$} │ {:type_width$} │ {:50} │\n",
         "Name", "Version", "Type", "Description",
@@ -666,7 +666,7 @@ pub fn format_plugin_list(plugins: &[dataflare_plugin::plugin::PluginMetadata]) 
         version_width = version_width,
         type_width = type_width
     ));
-    
+
     result.push_str(&format!(
         "├{:─^width$}┼{:─^version_width$}┼{:─^type_width$}┼{:─^50}┤\n",
         "", "", "", "",
@@ -674,7 +674,7 @@ pub fn format_plugin_list(plugins: &[dataflare_plugin::plugin::PluginMetadata]) 
         version_width = version_width,
         type_width = type_width
     ));
-    
+
     // Add plugins
     for plugin in plugins {
         // Truncate description if too long
@@ -683,7 +683,7 @@ pub fn format_plugin_list(plugins: &[dataflare_plugin::plugin::PluginMetadata]) 
         } else {
             plugin.description.clone()
         };
-        
+
         result.push_str(&format!(
             "│ {:width$} │ {:version_width$} │ {:type_width$} │ {:50} │\n",
             plugin.name, plugin.version, format!("{:?}", plugin.plugin_type), description,
@@ -692,7 +692,7 @@ pub fn format_plugin_list(plugins: &[dataflare_plugin::plugin::PluginMetadata]) 
             type_width = type_width
         ));
     }
-    
+
     result.push_str(&format!(
         "└{:─^width$}┴{:─^version_width$}┴{:─^type_width$}┴{:─^50}┘\n",
         "", "", "", "",
@@ -700,7 +700,7 @@ pub fn format_plugin_list(plugins: &[dataflare_plugin::plugin::PluginMetadata]) 
         version_width = version_width,
         type_width = type_width
     ));
-    
+
     result
 }
 
@@ -721,57 +721,62 @@ pub fn init() -> Result<(), Box<dyn std::error::Error>> {
 pub fn execute_workflow(workflow_path: &Path, mode: RuntimeMode) -> Result<(), Box<dyn std::error::Error>> {
     // Parse the workflow
     let workflow = YamlWorkflowParser::load_from_file(workflow_path)?;
-    
+
     // Initialize Actix system
     let system = actix::System::new();
-    
+
     // Time tracking
     let start = Instant::now();
-    
-    // Execute in the Actix system
+
+    // Execute in the Actix system with LocalSet for proper async context
     system.block_on(async {
-        // Create a workflow executor with the specified runtime mode
-        let mut executor = WorkflowExecutor::new();
-        // Apply the runtime mode
-        match mode {
-            RuntimeMode::Standalone => executor = executor.with_runtime_mode(dataflare_runtime::executor::RuntimeMode::Standalone),
-            RuntimeMode::Edge => executor = executor.with_runtime_mode(dataflare_runtime::executor::RuntimeMode::Edge),
-            RuntimeMode::Cloud => executor = executor.with_runtime_mode(dataflare_runtime::executor::RuntimeMode::Cloud),
-        };
-        
-        // Add progress callback using the new API
-        if let Err(e) = executor.add_progress_callback(|progress| {
-            display_progress(progress);
-        }) {
-            return Err(format!("Failed to add progress callback: {}", e));
-        }
-        
-        // Initialize the executor
-        if let Err(e) = executor.initialize() {
-            return Err(format!("Failed to initialize executor: {}", e));
-        }
-        
-        // Prepare the workflow
-        if let Err(e) = executor.prepare(&workflow) {
-            return Err(format!("Failed to prepare workflow: {}", e));
-        }
-        
-        // Execute the workflow
-        match executor.execute(&workflow).await {
-            Ok(_) => {
-                // Finalize the executor
-                if let Err(e) = executor.finalize() {
-                    return Err(format!("Failed to finalize executor: {}", e));
-                }
-                Ok(())
-            },
-            Err(e) => Err(format!("Failed to execute workflow: {}", e)),
-        }
+        // Use LocalSet to ensure proper async execution context (like in successful unit tests)
+        let local = tokio::task::LocalSet::new();
+        local.run_until(async {
+            // Create a workflow executor with the specified runtime mode
+            let mut executor = WorkflowExecutor::new();
+            // Apply the runtime mode
+            match mode {
+                RuntimeMode::Standalone => executor = executor.with_runtime_mode(dataflare_runtime::executor::RuntimeMode::Standalone),
+                RuntimeMode::Edge => executor = executor.with_runtime_mode(dataflare_runtime::executor::RuntimeMode::Edge),
+                RuntimeMode::Cloud => executor = executor.with_runtime_mode(dataflare_runtime::executor::RuntimeMode::Cloud),
+            };
+
+            // Add progress callback using the legacy API (which works correctly)
+            executor = executor.with_progress_callback(|progress| {
+                display_progress(progress);
+            });
+
+            // Initialize the executor
+            if let Err(e) = executor.initialize() {
+                return Err(format!("Failed to initialize executor: {}", e));
+            }
+
+            // Prepare the workflow
+            if let Err(e) = executor.prepare(&workflow) {
+                return Err(format!("Failed to prepare workflow: {}", e));
+            }
+
+            // Execute the workflow
+            match executor.execute(&workflow).await {
+                Ok(_) => {
+                    // Add a small delay to ensure all async operations complete
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+                    // Finalize the executor
+                    if let Err(e) = executor.finalize() {
+                        return Err(format!("Failed to finalize executor: {}", e));
+                    }
+                    Ok(())
+                },
+                Err(e) => Err(format!("Failed to execute workflow: {}", e)),
+            }
+        }).await
     })?;
-    
+
     let duration = start.elapsed();
     println!("Workflow execution completed in {:.2} seconds", duration.as_secs_f64());
-    
+
     Ok(())
 }
 
@@ -779,7 +784,7 @@ pub fn execute_workflow(workflow_path: &Path, mode: RuntimeMode) -> Result<(), B
 fn display_progress(progress: WorkflowProgress) {
     let workflow_id = &progress.workflow_id;
     let progress_percent = (progress.progress * 100.0) as u32;
-    
+
     match progress.phase {
         WorkflowPhase::Initializing => {
             println!("🚀 Initializing workflow: {}", workflow_id);
@@ -814,38 +819,38 @@ fn display_progress(progress: WorkflowProgress) {
 /// Install a plugin from a file path
 pub fn install_plugin(path: &str) -> Result<PluginMetadata, Box<dyn std::error::Error>> {
     let path = Path::new(path);
-    
+
     // Check if file exists
     if !path.exists() {
         return Err(format!("Plugin file not found: {}", path.display()).into());
     }
-    
+
     // Read the file
     let mut file = File::open(path)?;
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
-    
+
     // Create plugin manager with default plugin directory
     let plugin_dir = std::path::PathBuf::from("plugins");
     let _plugin_manager = PluginManager::new(plugin_dir);
-    
+
     // Load the plugin
     let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
-    
+
     if extension == "wasm" {
         // Load WASM plugin
         println!("Loading WASM plugin from: {}", path.display());
-        
+
         // Extract metadata from filename or try to parse from WASM binary
         // Format: name-version.wasm
         let file_name = path.file_stem().unwrap_or_default().to_string_lossy();
         let mut parts: Vec<&str> = file_name.split('-').collect();
-        
+
         // Ensure we have at least name and version
         if parts.len() < 2 {
             parts = vec!["unknown", "0.1.0"];
         }
-        
+
         // Create metadata
         let metadata = PluginMetadata {
             name: parts[0].to_string(),
@@ -857,29 +862,29 @@ pub fn install_plugin(path: &str) -> Result<PluginMetadata, Box<dyn std::error::
             output_schema: None,
             config_schema: None,
         };
-        
+
         // Create plugins directory if it doesn't exist
         let plugins_dir = PathBuf::from("plugins");
         if !plugins_dir.exists() {
             fs::create_dir_all(&plugins_dir)?;
             println!("Created plugins directory: {}", plugins_dir.display());
         }
-        
+
         // Create metadata file
         let metadata_path = plugins_dir.join(format!("{}-{}.meta.json", metadata.name, metadata.version));
         let metadata_json = serde_json::to_string_pretty(&metadata)?;
         let mut metadata_file = File::create(&metadata_path)?;
         metadata_file.write_all(metadata_json.as_bytes())?;
         println!("Created plugin metadata: {}", metadata_path.display());
-        
+
         // Copy the plugin file to plugins directory
         let dest_path = plugins_dir.join(path.file_name().unwrap());
         fs::copy(path, &dest_path)?;
         println!("Plugin file copied to: {}", dest_path.display());
-        
+
         println!("Plugin '{}' v{} installed successfully.", metadata.name, metadata.version);
         println!("Note: The plugin will be loaded on restart");
-        
+
         Ok(metadata)
     } else {
         Err(format!("Unsupported plugin format: {}. Only .wasm files are supported.", path.display()).into())
@@ -893,24 +898,24 @@ pub fn remove_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> 
     if parts.len() < 2 {
         return Err(format!("Invalid plugin ID format: '{}'. Expected 'name-version'", plugin_id).into());
     }
-    
+
     let plugin_name = parts[0];
     let plugin_version = parts[1];
-    
+
     // Find the plugin file in plugins directory
     let plugins_dir = PathBuf::from("plugins");
     if !plugins_dir.exists() {
         return Err("Plugins directory not found".into());
     }
-    
+
     let mut found = false;
-    
+
     // Remove plugin binary and metadata
     for entry in fs::read_dir(&plugins_dir)? {
         if let Ok(entry) = entry {
             let file_name = entry.file_name();
             let file_name_str = file_name.to_string_lossy();
-            
+
             // Match both the WASM file and metadata file
             if file_name_str.starts_with(&format!("{}-{}", plugin_name, plugin_version)) {
                 fs::remove_file(entry.path())?;
@@ -919,15 +924,15 @@ pub fn remove_plugin(plugin_id: &str) -> Result<(), Box<dyn std::error::Error>> 
             }
         }
     }
-    
+
     if !found {
         println!("Warning: No plugin files were found for '{}'", plugin_id);
         return Err(format!("Plugin '{}' not found", plugin_id).into());
     }
-    
+
     println!("Plugin '{}' removed successfully.", plugin_id);
     println!("Note: Plugin will be fully unloaded on restart");
-    
+
     Ok(())
 }
 
@@ -957,7 +962,7 @@ mod tests {
     fn test_list_processors() {
         let processors = list_processors();
         assert!(!processors.is_empty());
-        
+
         // Verify we have at least the core processors
         assert!(processors.contains(&"mapping".to_string()));
         assert!(processors.contains(&"filter".to_string()));
@@ -968,11 +973,11 @@ mod tests {
         // Create a temporary directory for testing
         let temp_dir = tempdir().unwrap();
         let project_path = temp_dir.path().join("test-project");
-        
+
         // Initialize project
         let result = initialize_project("test-project", &project_path);
         assert!(result.is_ok());
-        
+
         // Verify directories were created
         assert!(project_path.exists());
         assert!(project_path.join("workflows").exists());
@@ -980,7 +985,7 @@ mod tests {
         assert!(project_path.join("plugins").exists());
         assert!(project_path.join("state").exists());
         assert!(project_path.join("config").exists());
-        
+
         // Verify files were created
         assert!(project_path.join("config/dataflare.yaml").exists());
         assert!(project_path.join("workflows/example.yaml").exists());
@@ -993,17 +998,17 @@ mod tests {
         // Create a temporary directory for testing
         let temp_dir = tempdir().unwrap();
         let project_path = temp_dir.path().join("test-validation");
-        
+
         // Initialize project to get example workflow
         initialize_project("test-validation", &project_path).unwrap();
-        
+
         // Test workflow validation on the example workflow
         let workflow_path = project_path.join("workflows/example.yaml");
         let result = validate_workflow(&workflow_path);
-        
+
         // Validation should succeed for the example workflow
         assert!(result.is_ok());
-        
+
         // Check validation result
         let validation = result.unwrap();
         assert_eq!(validation.id, "example-workflow");
@@ -1018,34 +1023,34 @@ mod tests {
     fn test_parse_runtime_mode() {
         // Test valid runtime modes
         let workflow_path = PathBuf::from("dummy.yaml");
-        
+
         // We can't actually run the workflow in tests without a full system,
         // but we can check that the mode parsing works
         assert!(matches!(
             parse_runtime_mode("standalone"),
             Ok(RuntimeMode::Standalone)
         ));
-        
+
         assert!(matches!(
             parse_runtime_mode("edge"),
             Ok(RuntimeMode::Edge)
         ));
-        
+
         assert!(matches!(
             parse_runtime_mode("cloud"),
             Ok(RuntimeMode::Cloud)
         ));
-        
+
         // Test case insensitivity
         assert!(matches!(
             parse_runtime_mode("Standalone"),
             Ok(RuntimeMode::Standalone)
         ));
-        
+
         // Test invalid mode
         assert!(parse_runtime_mode("invalid").is_err());
     }
-    
+
     /// Helper function to parse runtime mode for testing
     fn parse_runtime_mode(mode: &str) -> Result<RuntimeMode, String> {
         match mode.to_lowercase().as_str() {
@@ -1083,7 +1088,7 @@ mod tests {
         ];
 
         let formatted = format_plugin_list(&plugins);
-        
+
         // Verify the table contains expected content
         assert!(formatted.contains("test-plugin"));
         assert!(formatted.contains("another-plugin"));
@@ -1091,7 +1096,7 @@ mod tests {
         assert!(formatted.contains("1.0.0"));
         assert!(formatted.contains("Processor"));
         assert!(formatted.contains("SourceConnector"));
-        
+
         // Verify table headers
         assert!(formatted.contains("Name"));
         assert!(formatted.contains("Version"));
@@ -1105,12 +1110,12 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let plugin_dir = temp_dir.path().join("plugins");
         fs::create_dir_all(&plugin_dir).unwrap();
-        
+
         // Create a test WASM plugin
         let plugin_path = plugin_dir.join("test-plugin-0.1.0.wasm");
         let mut file = File::create(&plugin_path).unwrap();
         file.write_all(b"mock wasm content").unwrap();
-        
+
         // Create metadata file
         let metadata = PluginMetadata {
             name: "test-plugin".to_string(),
@@ -1122,23 +1127,23 @@ mod tests {
             output_schema: None,
             config_schema: None,
         };
-        
+
         let metadata_path = plugin_dir.join("test-plugin-0.1.0.meta.json");
         let metadata_json = serde_json::to_string_pretty(&metadata).unwrap();
         let mut metadata_file = File::create(&metadata_path).unwrap();
         metadata_file.write_all(metadata_json.as_bytes()).unwrap();
-        
+
         // Test plugin details
         // This test is limited since we can't easily mock the global plugin system
         // But we can verify file paths and error handling
-        
+
         // Test plugin details for non-existent plugin
         match get_plugin_details("non-existent-plugin") {
             Ok(None) => {}, // Expected
             _ => panic!("Expected None result for non-existent plugin"),
         }
     }
-    
+
     // Note: Complete plugin installation and removal tests
     // would require more setup and mocking of the plugin registry
 }
