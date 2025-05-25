@@ -6,7 +6,7 @@
 use std::time::{Duration, Instant};
 use std::fs;
 use std::path::PathBuf;
-use tempfile::NamedTempFile;
+use tempfile::{NamedTempFile, TempDir};
 use std::io::Write;
 use tokio::task::LocalSet;
 
