@@ -1,0 +1,399 @@
+// DataFlare WASM Plugin Interface Definition
+// WIT (WebAssembly Interface Types) specification for DataFlare plugins
+// Based on DataFlare's existing architecture and data types
+
+package dataflare:core@1.0.0;
+
+/// Core data types based on DataFlare's existing type system
+interface types {
+    /// DataFlare data types - matching dataflare_core::model::DataType
+    variant data-type {
+        null,
+        boolean,
+        int32,
+        int64,
+        float32,
+        float64,
+        string,
+        date,
+        time,
+        timestamp,
+        array(data-type),
+        object,
+        binary,
+        custom(string),
+    }
+
+    /// Field definition - matching dataflare_core::model::Field
+    record field {
+        name: string,
+        data-type: data-type,
+        nullable: bool,
+        description: option<string>,
+        metadata: list<tuple<string, string>>,
+    }
+
+    /// Schema definition - matching dataflare_core::model::Schema
+    record schema {
+        fields: list<field>,
+        metadata: list<tuple<string, string>>,
+    }
+
+    /// Data record - matching dataflare_core::message::DataRecord
+    record data-record {
+        /// Record ID
+        id: string,
+        /// Record data as JSON value
+        data: string, // JSON serialized serde_json::Value
+        /// Record metadata
+        metadata: list<tuple<string, string>>,
+        /// Optional schema reference
+        schema: option<schema>,
+    }
+
+    /// Processing result variants - inspired by Fluvio SmartModule results
+    variant processing-result {
+        /// Successfully processed record
+        success(data-record),
+        /// Processing failed with error message
+        error(string),
+        /// Record should be skipped
+        skip,
+        /// Record should be retried later
+        retry(string),
+        /// Record filtered out (Fluvio-inspired)
+        filtered,
+        /// Multiple records produced (Fluvio flat-map inspired)
+        multiple(list<data-record>),
+    }
+
+    /// Batch processing result
+    record batch-result {
+        processed: list<processing-result>,
+        total-count: u32,
+        success-count: u32,
+        error-count: u32,
+        skip-count: u32,
+    }
+
+    /// Component capabilities
+    record capabilities {
+        supports-async: bool,
+        supports-streaming: bool,
+        supports-batch: bool,
+        supports-backpressure: bool,
+        max-batch-size: option<u32>,
+    }
+
+    /// Performance metrics
+    record metrics {
+        execution-time-ms: f64,
+        memory-usage-bytes: u64,
+        throughput-per-sec: f64,
+        error-rate: f64,
+    }
+
+    /// Configuration value types
+    variant config-value {
+        string-val(string),
+        int-val(s64),
+        float-val(f64),
+        bool-val(bool),
+        list-val(list<config-value>),
+        map-val(list<tuple<string, config-value>>),
+    }
+
+    /// Plugin configuration
+    type config = list<tuple<string, config-value>>;
+}
+
+/// Data source interface for reading data
+interface data-source {
+    use types.{data-record, batch-result, capabilities, metrics, config};
+
+    /// Initialize the data source with configuration
+    init: func(config: config) -> result<_, string>;
+
+    /// Read the next available record
+    read-next: func() -> result<option<data-record>, string>;
+
+    /// Read a batch of records
+    read-batch: func(max-size: u32) -> result<list<data-record>, string>;
+
+    /// Reset the data source to beginning
+    reset: func() -> result<_, string>;
+
+    /// Check if more data is available
+    has-more: func() -> bool;
+
+    /// Get source capabilities
+    get-capabilities: func() -> capabilities;
+
+    /// Get current metrics
+    get-metrics: func() -> metrics;
+
+    /// Cleanup and close the source
+    close: func() -> result<_, string>;
+}
+
+/// Data destination interface for writing data
+interface data-destination {
+    use types.{data-record, batch-result, capabilities, metrics, config};
+
+    /// Initialize the destination with configuration
+    init: func(config: config) -> result<_, string>;
+
+    /// Write a single record
+    write: func(record: data-record) -> result<_, string>;
+
+    /// Write a batch of records
+    write-batch: func(records: list<data-record>) -> result<batch-result, string>;
+
+    /// Flush any buffered data
+    flush: func() -> result<_, string>;
+
+    /// Get destination capabilities
+    get-capabilities: func() -> capabilities;
+
+    /// Get current metrics
+    get-metrics: func() -> metrics;
+
+    /// Cleanup and close the destination
+    close: func() -> result<_, string>;
+}
+
+/// Data processor interface for processing data
+interface data-processor {
+    use types.{data-record, processing-result, batch-result, capabilities, metrics, config};
+
+    /// Initialize the processor with configuration
+    init: func(config: config) -> result<_, string>;
+
+    /// Process a single record
+    process: func(input: data-record) -> result<processing-result, string>;
+
+    /// Process a batch of records
+    process-batch: func(inputs: list<data-record>) -> result<batch-result, string>;
+
+    /// Get processor capabilities
+    get-capabilities: func() -> capabilities;
+
+    /// Get current metrics
+    get-metrics: func() -> metrics;
+
+    /// Cleanup the processor
+    cleanup: func() -> result<_, string>;
+}
+
+/// Data transformer interface for transforming data
+interface data-transformer {
+    use types.{data-record, capabilities, metrics, config};
+
+    /// Initialize the transformer with configuration
+    init: func(config: config) -> result<_, string>;
+
+    /// Transform a single record
+    transform: func(input: data-record) -> result<data-record, string>;
+
+    /// Transform a batch of records
+    transform-batch: func(inputs: list<data-record>) -> result<list<data-record>, string>;
+
+    /// Get transformer capabilities
+    get-capabilities: func() -> capabilities;
+
+    /// Get current metrics
+    get-metrics: func() -> metrics;
+
+    /// Cleanup the transformer
+    cleanup: func() -> result<_, string>;
+}
+
+/// Data filter interface for filtering data
+interface data-filter {
+    use types.{data-record, capabilities, metrics, config};
+
+    /// Initialize the filter with configuration
+    init: func(config: config) -> result<_, string>;
+
+    /// Filter a single record (returns true to keep, false to discard)
+    filter: func(input: data-record) -> result<bool, string>;
+
+    /// Filter a batch of records
+    filter-batch: func(inputs: list<data-record>) -> result<list<bool>, string>;
+
+    /// Get filter capabilities
+    get-capabilities: func() -> capabilities;
+
+    /// Get current metrics
+    get-metrics: func() -> metrics;
+
+    /// Cleanup the filter
+    cleanup: func() -> result<_, string>;
+}
+
+/// Data aggregator interface for aggregating data
+interface data-aggregator {
+    use types.{data-record, capabilities, metrics, config};
+
+    /// Initialize the aggregator with configuration
+    init: func(config: config) -> result<_, string>;
+
+    /// Add a record to the aggregation
+    aggregate: func(input: data-record) -> result<_, string>;
+
+    /// Get the current aggregation result
+    get-result: func() -> result<option<data-record>, string>;
+
+    /// Reset the aggregation state
+    reset: func() -> result<_, string>;
+
+    /// Get aggregator capabilities
+    get-capabilities: func() -> capabilities;
+
+    /// Get current metrics
+    get-metrics: func() -> metrics;
+
+    /// Cleanup the aggregator
+    cleanup: func() -> result<_, string>;
+}
+
+/// Host functions provided by the DataFlare runtime
+interface host-functions {
+    use types.{timestamp, metrics};
+
+    /// Logging functions
+    log: func(level: string, message: string);
+    log-structured: func(level: string, fields: list<tuple<string, string>>);
+
+    /// Time functions
+    now: func() -> timestamp;
+    format-time: func(ts: timestamp, format: string) -> string;
+
+    /// Random number generation
+    random-u32: func() -> u32;
+    random-f64: func() -> f64;
+    random-bytes: func(len: u32) -> list<u8>;
+
+    /// Metrics collection
+    increment-counter: func(name: string, value: u64, tags: list<tuple<string, string>>);
+    record-histogram: func(name: string, value: f64, tags: list<tuple<string, string>>);
+    record-gauge: func(name: string, value: f64, tags: list<tuple<string, string>>);
+
+    /// Configuration access
+    get-config: func(key: string) -> option<string>;
+    get-config-section: func(section: string) -> list<tuple<string, string>>;
+
+    /// Error handling
+    set-error: func(error: string);
+    get-last-error: func() -> option<string>;
+
+    /// Memory management hints
+    suggest-gc: func();
+    get-memory-usage: func() -> u64;
+}
+
+/// Plugin metadata interface
+interface plugin-metadata {
+    use types.{capabilities};
+
+    /// Plugin information
+    record plugin-info {
+        name: string,
+        version: string,
+        description: string,
+        author: string,
+        license: string,
+        homepage: option<string>,
+        repository: option<string>,
+    }
+
+    /// Component type enumeration
+    enum component-type {
+        source,
+        destination,
+        processor,
+        transformer,
+        filter,
+        aggregator,
+    }
+
+    /// Security requirements
+    record security-requirements {
+        requires-network: bool,
+        requires-filesystem: bool,
+        requires-env-vars: bool,
+        max-memory-mb: option<u32>,
+        max-execution-time-ms: option<u64>,
+    }
+
+    /// Get plugin metadata
+    get-info: func() -> plugin-info;
+
+    /// Get component type
+    get-component-type: func() -> component-type;
+
+    /// Get capabilities
+    get-capabilities: func() -> capabilities;
+
+    /// Get security requirements
+    get-security-requirements: func() -> security-requirements;
+}
+
+/// World definition for DataFlare plugins
+world dataflare-plugin {
+    /// Plugin must export metadata
+    export plugin-metadata;
+
+    /// Plugin must export at least one component interface
+    export data-source?;
+    export data-destination?;
+    export data-processor?;
+    export data-transformer?;
+    export data-filter?;
+    export data-aggregator?;
+
+    /// Plugin can import host functions
+    import host-functions;
+}
+
+/// World definition for DataFlare source plugins
+world dataflare-source {
+    export plugin-metadata;
+    export data-source;
+    import host-functions;
+}
+
+/// World definition for DataFlare destination plugins
+world dataflare-destination {
+    export plugin-metadata;
+    export data-destination;
+    import host-functions;
+}
+
+/// World definition for DataFlare processor plugins
+world dataflare-processor {
+    export plugin-metadata;
+    export data-processor;
+    import host-functions;
+}
+
+/// World definition for DataFlare transformer plugins
+world dataflare-transformer {
+    export plugin-metadata;
+    export data-transformer;
+    import host-functions;
+}
+
+/// World definition for DataFlare filter plugins
+world dataflare-filter {
+    export plugin-metadata;
+    export data-filter;
+    import host-functions;
+}
+
+/// World definition for DataFlare aggregator plugins
+world dataflare-aggregator {
+    export plugin-metadata;
+    export data-aggregator;
+    import host-functions;
+}

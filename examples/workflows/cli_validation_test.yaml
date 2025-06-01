@@ -1,0 +1,30 @@
+id: cli-validation-test
+name: CLI验证测试工作流
+description: 用于验证CLI执行功能的简单工作流
+version: 1.0.0
+
+# 数据源配置
+sources:
+  csv_source:
+    type: csv
+    config:
+      file_path: "examples/data/cli_validation_test.csv"
+      has_header: true
+      delimiter: ","
+
+# 目标配置
+destinations:
+  csv_output:
+    inputs:
+      - csv_source
+    type: csv
+    config:
+      file_path: "dataflare/output/cli_validation_output.csv"
+      delimiter: ","
+      write_header: true
+
+# 元数据
+metadata:
+  owner: admin
+  department: validation
+  created: "2023-07-01"

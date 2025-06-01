@@ -1,0 +1,17 @@
+[package]
+name = "file_sync"
+version = "0.1.0"
+edition = "2021"
+description = "Distributed file synchronization service example"
+authors = ["Actix Team <https://github.com/actix>"]
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+actix = { path = "../../actix" }
+actix-cluster = { path = "../../actix-cluster" }
+log = "0.4"
+env_logger = "0.10"
+structopt = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.0", features = ["full"] }
+actix-rt = "2.9" 

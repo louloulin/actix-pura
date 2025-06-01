@@ -1,0 +1,743 @@
+{
+  "start_time": "2025-04-02T08:34:22.656314Z",
+  "end_time": "2025-04-02T08:34:23.350221Z",
+  "duration_ms": 693,
+  "node_count": 5,
+  "total_orders": 100000,
+  "completed_orders": 100000,
+  "throughput": 144126.07868028845,
+  "sampled_count": 1000,
+  "avg_latency_us": 5.161824999999999,
+  "p50_latency_us": 4,
+  "p95_latency_us": 7,
+  "p99_latency_us": 13,
+  "batch_details": [
+    {
+      "batch_num": 1,
+      "start_idx": 0,
+      "end_idx": 999,
+      "duration_ms": 6,
+      "throughput": 145464.25717731557
+    },
+    {
+      "batch_num": 2,
+      "start_idx": 1000,
+      "end_idx": 1999,
+      "duration_ms": 7,
+      "throughput": 140685.71907706792
+    },
+    {
+      "batch_num": 3,
+      "start_idx": 2000,
+      "end_idx": 2999,
+      "duration_ms": 7,
+      "throughput": 139966.18137125706
+    },
+    {
+      "batch_num": 4,
+      "start_idx": 3000,
+      "end_idx": 3999,
+      "duration_ms": 6,
+      "throughput": 143573.30702304625
+    },
+    {
+      "batch_num": 5,
+      "start_idx": 4000,
+      "end_idx": 4999,
+      "duration_ms": 6,
+      "throughput": 144583.53219593325
+    },
+    {
+      "batch_num": 6,
+      "start_idx": 5000,
+      "end_idx": 5999,
+      "duration_ms": 7,
+      "throughput": 137059.84430275808
+    },
+    {
+      "batch_num": 7,
+      "start_idx": 6000,
+      "end_idx": 6999,
+      "duration_ms": 6,
+      "throughput": 145362.9298072938
+    },
+    {
+      "batch_num": 8,
+      "start_idx": 7000,
+      "end_idx": 7999,
+      "duration_ms": 6,
+      "throughput": 145525.09602109648
+    },
+    {
+      "batch_num": 9,
+      "start_idx": 8000,
+      "end_idx": 8999,
+      "duration_ms": 6,
+      "throughput": 149910.99034947998
+    },
+    {
+      "batch_num": 10,
+      "start_idx": 9000,
+      "end_idx": 9999,
+      "duration_ms": 6,
+      "throughput": 148579.2039334264
+    },
+    {
+      "batch_num": 11,
+      "start_idx": 10000,
+      "end_idx": 10999,
+      "duration_ms": 6,
+      "throughput": 149808.04346350805
+    },
+    {
+      "batch_num": 12,
+      "start_idx": 11000,
+      "end_idx": 11999,
+      "duration_ms": 6,
+      "throughput": 149256.51597977575
+    },
+    {
+      "batch_num": 13,
+      "start_idx": 12000,
+      "end_idx": 12999,
+      "duration_ms": 6,
+      "throughput": 145754.0036802886
+    },
+    {
+      "batch_num": 14,
+      "start_idx": 13000,
+      "end_idx": 13999,
+      "duration_ms": 6,
+      "throughput": 145677.03401558744
+    },
+    {
+      "batch_num": 15,
+      "start_idx": 14000,
+      "end_idx": 14999,
+      "duration_ms": 6,
+      "throughput": 148342.2897463139
+    },
+    {
+      "batch_num": 16,
+      "start_idx": 15000,
+      "end_idx": 15999,
+      "duration_ms": 6,
+      "throughput": 148709.03456458962
+    },
+    {
+      "batch_num": 17,
+      "start_idx": 16000,
+      "end_idx": 16999,
+      "duration_ms": 6,
+      "throughput": 151855.4918842351
+    },
+    {
+      "batch_num": 18,
+      "start_idx": 17000,
+      "end_idx": 17999,
+      "duration_ms": 6,
+      "throughput": 149919.41831265696
+    },
+    {
+      "batch_num": 19,
+      "start_idx": 18000,
+      "end_idx": 18999,
+      "duration_ms": 6,
+      "throughput": 148519.4467650608
+    },
+    {
+      "batch_num": 20,
+      "start_idx": 19000,
+      "end_idx": 19999,
+      "duration_ms": 6,
+      "throughput": 149630.5994575891
+    },
+    {
+      "batch_num": 21,
+      "start_idx": 20000,
+      "end_idx": 20999,
+      "duration_ms": 7,
+      "throughput": 130845.09576225445
+    },
+    {
+      "batch_num": 22,
+      "start_idx": 21000,
+      "end_idx": 21999,
+      "duration_ms": 7,
+      "throughput": 141046.21026463795
+    },
+    {
+      "batch_num": 23,
+      "start_idx": 22000,
+      "end_idx": 22999,
+      "duration_ms": 7,
+      "throughput": 140295.9205734287
+    },
+    {
+      "batch_num": 24,
+      "start_idx": 23000,
+      "end_idx": 23999,
+      "duration_ms": 7,
+      "throughput": 141076.05762956955
+    },
+    {
+      "batch_num": 25,
+      "start_idx": 24000,
+      "end_idx": 24999,
+      "duration_ms": 6,
+      "throughput": 145466.88104605817
+    },
+    {
+      "batch_num": 26,
+      "start_idx": 25000,
+      "end_idx": 25999,
+      "duration_ms": 6,
+      "throughput": 147771.42951716573
+    },
+    {
+      "batch_num": 27,
+      "start_idx": 26000,
+      "end_idx": 26999,
+      "duration_ms": 6,
+      "throughput": 148240.56241283455
+    },
+    {
+      "batch_num": 28,
+      "start_idx": 27000,
+      "end_idx": 27999,
+      "duration_ms": 6,
+      "throughput": 144021.32898273703
+    },
+    {
+      "batch_num": 29,
+      "start_idx": 28000,
+      "end_idx": 28999,
+      "duration_ms": 6,
+      "throughput": 146942.67398930993
+    },
+    {
+      "batch_num": 30,
+      "start_idx": 29000,
+      "end_idx": 29999,
+      "duration_ms": 7,
+      "throughput": 141659.77373817618
+    },
+    {
+      "batch_num": 31,
+      "start_idx": 30000,
+      "end_idx": 30999,
+      "duration_ms": 6,
+      "throughput": 147074.13654245177
+    },
+    {
+      "batch_num": 32,
+      "start_idx": 31000,
+      "end_idx": 31999,
+      "duration_ms": 6,
+      "throughput": 145757.5515529884
+    },
+    {
+      "batch_num": 33,
+      "start_idx": 32000,
+      "end_idx": 32999,
+      "duration_ms": 7,
+      "throughput": 140954.26034251886
+    },
+    {
+      "batch_num": 34,
+      "start_idx": 33000,
+      "end_idx": 33999,
+      "duration_ms": 7,
+      "throughput": 142370.70284287242
+    },
+    {
+      "batch_num": 35,
+      "start_idx": 34000,
+      "end_idx": 34999,
+      "duration_ms": 6,
+      "throughput": 143173.33093183933
+    },
+    {
+      "batch_num": 36,
+      "start_idx": 35000,
+      "end_idx": 35999,
+      "duration_ms": 7,
+      "throughput": 125412.16708713186
+    },
+    {
+      "batch_num": 37,
+      "start_idx": 36000,
+      "end_idx": 36999,
+      "duration_ms": 7,
+      "throughput": 140725.3349649967
+    },
+    {
+      "batch_num": 38,
+      "start_idx": 37000,
+      "end_idx": 37999,
+      "duration_ms": 6,
+      "throughput": 145929.47957899346
+    },
+    {
+      "batch_num": 39,
+      "start_idx": 38000,
+      "end_idx": 38999,
+      "duration_ms": 6,
+      "throughput": 145913.50976708555
+    },
+    {
+      "batch_num": 40,
+      "start_idx": 39000,
+      "end_idx": 39999,
+      "duration_ms": 6,
+      "throughput": 144182.2394298919
+    },
+    {
+      "batch_num": 41,
+      "start_idx": 40000,
+      "end_idx": 40999,
+      "duration_ms": 6,
+      "throughput": 147557.00200766057
+    },
+    {
+      "batch_num": 42,
+      "start_idx": 41000,
+      "end_idx": 41999,
+      "duration_ms": 6,
+      "throughput": 144646.272602969
+    },
+    {
+      "batch_num": 43,
+      "start_idx": 42000,
+      "end_idx": 42999,
+      "duration_ms": 6,
+      "throughput": 146044.9280933192
+    },
+    {
+      "batch_num": 44,
+      "start_idx": 43000,
+      "end_idx": 43999,
+      "duration_ms": 6,
+      "throughput": 147603.30607789085
+    },
+    {
+      "batch_num": 45,
+      "start_idx": 44000,
+      "end_idx": 44999,
+      "duration_ms": 6,
+      "throughput": 147371.2722989314
+    },
+    {
+      "batch_num": 46,
+      "start_idx": 45000,
+      "end_idx": 45999,
+      "duration_ms": 6,
+      "throughput": 150175.51763623735
+    },
+    {
+      "batch_num": 47,
+      "start_idx": 46000,
+      "end_idx": 46999,
+      "duration_ms": 6,
+      "throughput": 150914.92171288436
+    },
+    {
+      "batch_num": 48,
+      "start_idx": 47000,
+      "end_idx": 47999,
+      "duration_ms": 6,
+      "throughput": 151654.94980524472
+    },
+    {
+      "batch_num": 49,
+      "start_idx": 48000,
+      "end_idx": 48999,
+      "duration_ms": 6,
+      "throughput": 148731.1522306475
+    },
+    {
+      "batch_num": 50,
+      "start_idx": 49000,
+      "end_idx": 49999,
+      "duration_ms": 6,
+      "throughput": 151026.99109076677
+    },
+    {
+      "batch_num": 51,
+      "start_idx": 50000,
+      "end_idx": 50999,
+      "duration_ms": 6,
+      "throughput": 150176.4423020607
+    },
+    {
+      "batch_num": 52,
+      "start_idx": 51000,
+      "end_idx": 51999,
+      "duration_ms": 6,
+      "throughput": 150828.60711892927
+    },
+    {
+      "batch_num": 53,
+      "start_idx": 52000,
+      "end_idx": 52999,
+      "duration_ms": 6,
+      "throughput": 150736.7333209428
+    },
+    {
+      "batch_num": 54,
+      "start_idx": 53000,
+      "end_idx": 53999,
+      "duration_ms": 6,
+      "throughput": 148354.1956420955
+    },
+    {
+      "batch_num": 55,
+      "start_idx": 54000,
+      "end_idx": 54999,
+      "duration_ms": 6,
+      "throughput": 148596.69000873005
+    },
+    {
+      "batch_num": 56,
+      "start_idx": 55000,
+      "end_idx": 55999,
+      "duration_ms": 6,
+      "throughput": 150473.0345550791
+    },
+    {
+      "batch_num": 57,
+      "start_idx": 56000,
+      "end_idx": 56999,
+      "duration_ms": 6,
+      "throughput": 145987.19166775185
+    },
+    {
+      "batch_num": 58,
+      "start_idx": 57000,
+      "end_idx": 57999,
+      "duration_ms": 6,
+      "throughput": 145959.6614202926
+    },
+    {
+      "batch_num": 59,
+      "start_idx": 58000,
+      "end_idx": 58999,
+      "duration_ms": 7,
+      "throughput": 137596.5325673793
+    },
+    {
+      "batch_num": 60,
+      "start_idx": 59000,
+      "end_idx": 59999,
+      "duration_ms": 6,
+      "throughput": 149294.59795412654
+    },
+    {
+      "batch_num": 61,
+      "start_idx": 60000,
+      "end_idx": 60999,
+      "duration_ms": 6,
+      "throughput": 145434.27984871346
+    },
+    {
+      "batch_num": 62,
+      "start_idx": 61000,
+      "end_idx": 61999,
+      "duration_ms": 6,
+      "throughput": 147183.27997939434
+    },
+    {
+      "batch_num": 63,
+      "start_idx": 62000,
+      "end_idx": 62999,
+      "duration_ms": 6,
+      "throughput": 146828.51867937733
+    },
+    {
+      "batch_num": 64,
+      "start_idx": 63000,
+      "end_idx": 63999,
+      "duration_ms": 7,
+      "throughput": 140545.66855817713
+    },
+    {
+      "batch_num": 65,
+      "start_idx": 64000,
+      "end_idx": 64999,
+      "duration_ms": 6,
+      "throughput": 149496.38405621063
+    },
+    {
+      "batch_num": 66,
+      "start_idx": 65000,
+      "end_idx": 65999,
+      "duration_ms": 6,
+      "throughput": 144436.49401787372
+    },
+    {
+      "batch_num": 67,
+      "start_idx": 66000,
+      "end_idx": 66999,
+      "duration_ms": 6,
+      "throughput": 144832.2198390885
+    },
+    {
+      "batch_num": 68,
+      "start_idx": 67000,
+      "end_idx": 67999,
+      "duration_ms": 6,
+      "throughput": 146131.19132284675
+    },
+    {
+      "batch_num": 69,
+      "start_idx": 68000,
+      "end_idx": 68999,
+      "duration_ms": 6,
+      "throughput": 144746.60297816136
+    },
+    {
+      "batch_num": 70,
+      "start_idx": 69000,
+      "end_idx": 69999,
+      "duration_ms": 6,
+      "throughput": 149817.40254977235
+    },
+    {
+      "batch_num": 71,
+      "start_idx": 70000,
+      "end_idx": 70999,
+      "duration_ms": 6,
+      "throughput": 146855.4503270985
+    },
+    {
+      "batch_num": 72,
+      "start_idx": 71000,
+      "end_idx": 71999,
+      "duration_ms": 6,
+      "throughput": 149558.80899141578
+    },
+    {
+      "batch_num": 73,
+      "start_idx": 72000,
+      "end_idx": 72999,
+      "duration_ms": 6,
+      "throughput": 147875.22525093687
+    },
+    {
+      "batch_num": 74,
+      "start_idx": 73000,
+      "end_idx": 73999,
+      "duration_ms": 6,
+      "throughput": 147625.07423695922
+    },
+    {
+      "batch_num": 75,
+      "start_idx": 74000,
+      "end_idx": 74999,
+      "duration_ms": 6,
+      "throughput": 147260.96085420783
+    },
+    {
+      "batch_num": 76,
+      "start_idx": 75000,
+      "end_idx": 75999,
+      "duration_ms": 6,
+      "throughput": 150569.3252039951
+    },
+    {
+      "batch_num": 77,
+      "start_idx": 76000,
+      "end_idx": 76999,
+      "duration_ms": 6,
+      "throughput": 150418.35103882672
+    },
+    {
+      "batch_num": 78,
+      "start_idx": 77000,
+      "end_idx": 77999,
+      "duration_ms": 6,
+      "throughput": 147736.84876119698
+    },
+    {
+      "batch_num": 79,
+      "start_idx": 78000,
+      "end_idx": 78999,
+      "duration_ms": 6,
+      "throughput": 148440.43285823983
+    },
+    {
+      "batch_num": 80,
+      "start_idx": 79000,
+      "end_idx": 79999,
+      "duration_ms": 6,
+      "throughput": 151030.77750493228
+    },
+    {
+      "batch_num": 81,
+      "start_idx": 80000,
+      "end_idx": 80999,
+      "duration_ms": 6,
+      "throughput": 150314.72897953735
+    },
+    {
+      "batch_num": 82,
+      "start_idx": 81000,
+      "end_idx": 81999,
+      "duration_ms": 6,
+      "throughput": 150246.97597911448
+    },
+    {
+      "batch_num": 83,
+      "start_idx": 82000,
+      "end_idx": 82999,
+      "duration_ms": 6,
+      "throughput": 148430.363746418
+    },
+    {
+      "batch_num": 84,
+      "start_idx": 83000,
+      "end_idx": 83999,
+      "duration_ms": 6,
+      "throughput": 149884.7910553553
+    },
+    {
+      "batch_num": 85,
+      "start_idx": 84000,
+      "end_idx": 84999,
+      "duration_ms": 6,
+      "throughput": 147978.24719766196
+    },
+    {
+      "batch_num": 86,
+      "start_idx": 85000,
+      "end_idx": 85999,
+      "duration_ms": 6,
+      "throughput": 146156.09470914936
+    },
+    {
+      "batch_num": 87,
+      "start_idx": 86000,
+      "end_idx": 86999,
+      "duration_ms": 6,
+      "throughput": 144284.52909136817
+    },
+    {
+      "batch_num": 88,
+      "start_idx": 87000,
+      "end_idx": 87999,
+      "duration_ms": 6,
+      "throughput": 149782.82239666596
+    },
+    {
+      "batch_num": 89,
+      "start_idx": 88000,
+      "end_idx": 88999,
+      "duration_ms": 6,
+      "throughput": 149222.17196751075
+    },
+    {
+      "batch_num": 90,
+      "start_idx": 89000,
+      "end_idx": 89999,
+      "duration_ms": 6,
+      "throughput": 148852.8949357566
+    },
+    {
+      "batch_num": 91,
+      "start_idx": 90000,
+      "end_idx": 90999,
+      "duration_ms": 6,
+      "throughput": 148367.9525222552
+    },
+    {
+      "batch_num": 92,
+      "start_idx": 91000,
+      "end_idx": 91999,
+      "duration_ms": 6,
+      "throughput": 150256.3674140819
+    },
+    {
+      "batch_num": 93,
+      "start_idx": 92000,
+      "end_idx": 92999,
+      "duration_ms": 6,
+      "throughput": 149485.21030700524
+    },
+    {
+      "batch_num": 94,
+      "start_idx": 93000,
+      "end_idx": 93999,
+      "duration_ms": 6,
+      "throughput": 150260.1378636765
+    },
+    {
+      "batch_num": 95,
+      "start_idx": 94000,
+      "end_idx": 94999,
+      "duration_ms": 6,
+      "throughput": 149116.4996512165
+    },
+    {
+      "batch_num": 96,
+      "start_idx": 95000,
+      "end_idx": 95999,
+      "duration_ms": 6,
+      "throughput": 148018.41822781693
+    },
+    {
+      "batch_num": 97,
+      "start_idx": 96000,
+      "end_idx": 96999,
+      "duration_ms": 6,
+      "throughput": 147908.93010519136
+    },
+    {
+      "batch_num": 98,
+      "start_idx": 97000,
+      "end_idx": 97999,
+      "duration_ms": 7,
+      "throughput": 142818.03111919208
+    },
+    {
+      "batch_num": 99,
+      "start_idx": 98000,
+      "end_idx": 98999,
+      "duration_ms": 6,
+      "throughput": 151207.7873220133
+    },
+    {
+      "batch_num": 100,
+      "start_idx": 99000,
+      "end_idx": 99999,
+      "duration_ms": 6,
+      "throughput": 146822.2022772417
+    }
+  ],
+  "node_details": [
+    {
+      "node_id": "cluster-node-0",
+      "processed_orders": 1000,
+      "avg_latency_us": 5.161824999999999
+    },
+    {
+      "node_id": "cluster-node-1",
+      "processed_orders": 0,
+      "avg_latency_us": 0.0
+    },
+    {
+      "node_id": "cluster-node-2",
+      "processed_orders": 0,
+      "avg_latency_us": 0.0
+    },
+    {
+      "node_id": "cluster-node-3",
+      "processed_orders": 0,
+      "avg_latency_us": 0.0
+    },
+    {
+      "node_id": "cluster-node-4",
+      "processed_orders": 0,
+      "avg_latency_us": 0.0
+    }
+  ]
+}

@@ -1,0 +1,109 @@
+# CDC 工作流示例
+id: cdc-workflow
+name: CDC Workflow
+description: 演示变更数据捕获 (CDC) 的工作流示例
+version: 1.0.0
+
+# 数据源配置
+sources:
+  # PostgreSQL 源 - CDC 模式
+  postgres_users:
+    type: postgres
+    mode: cdc
+    config:
+      host: localhost
+      port: 5432
+      database: testdb
+      username: postgres
+      password: postgres
+      table: users
+      cdc:
+        slot_name: dataflare_users_slot
+        publication_name: dataflare_users_pub
+        plugin: pgoutput
+        timestamp_field: updated_at
+
+# 转换配置
+transformations:
+  # 用户变更数据处理
+  user_cdc_transform:
+    inputs:
+      - postgres_users
+    type: mapping
+    config:
+      mappings:
+        - source: id
+          destination: user.id
+        - source: name
+          destination: user.name
+        - source: email
+          destination: user.email
+        - source: updated_at
+          destination: user.updatedAt
+        - source: cdc_operation
+          destination: user.operation
+
+  # 过滤删除操作
+  filter_deletes:
+    inputs:
+      - user_cdc_transform
+    type: filter
+    config:
+      condition: "user.operation != 'DELETE'"
+
+  # 丰富用户数据
+  user_enrichment:
+    inputs:
+      - filter_deletes
+    type: enrichment
+    config:
+      source_field: user.id
+      target_field: user.metadata
+      lookup_key: id
+      keep_original_fields: true
+      lookup_data:
+        - id: 1
+          role: admin
+          department: IT
+        - id: 2
+          role: user
+          department: Sales
+        - id: 3
+          role: user
+          department: Marketing
+      default_value:
+        role: guest
+        department: Unknown
+
+# 目标配置
+destinations:
+  # 内存目标
+  memory_output:
+    inputs:
+      - user_enrichment
+    type: memory
+    config: {}
+
+  # Elasticsearch 目标
+  elasticsearch_output:
+    inputs:
+      - user_enrichment
+    type: elasticsearch
+    config:
+      host: localhost
+      port: 9200
+      index: users
+      id_field: user.id
+
+# 调度配置
+schedule:
+  type: interval
+  expression: "300" # 每5分钟运行一次
+  timezone: UTC
+
+# 元数据
+metadata:
+  owner: data-engineering
+  department: platform
+  priority: critical
+  description: "实时用户数据同步"

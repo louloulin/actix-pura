@@ -1,0 +1,47 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# WASM
+*.wasm
+*.wat
+
+# Build artifacts
+/dist/
+/build/
+*.opt.wasm
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+
+# Test artifacts
+/coverage/
+*.profraw
+
+# Temporary files
+*.tmp
+*.temp
+
+# Package files
+*.tar.gz
+*.zip
+
+# DataFlare specific
+.dataflare/
+plugin-cache/

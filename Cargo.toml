@@ -1,0 +1,77 @@
+[workspace]
+resolver = "2"
+members = [
+    "actix",
+    "actix-broker",
+    "actix-derive",
+    "actix-cluster",
+    "dataflare",
+    "dataflare/core",
+    "dataflare/runtime",
+    "dataflare/connector",
+    "dataflare/processor",
+
+    "dataflare/plugin",
+    "dataflare/state",
+    "dataflare/edge",
+    "dataflare/cloud",
+    "dataflare/cli",
+    "examples/chat_system",
+    "examples/task_processor",
+    "examples/http_api",
+    "examples/file_sync",
+    "examples/distributed_benchmark",
+    "trading",
+]
+
+[workspace.package]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/actix/actix"
+edition = "2021"
+rust-version = "1.75"
+
+[workspace.dependencies]
+# 核心依赖
+tokio = { version = "1.34", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+futures = "0.3"
+async-trait = "0.1"
+thiserror = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+reqwest = { version = "0.11", features = ["json"] }
+axum = "0.7"
+
+# 工具库
+uuid = { version = "1.6", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1.10"
+url = "2.5"
+
+# 测试工具
+tokio-test = "0.4"
+mockall = "0.11"
+mockito = "1.2"
+tempfile = "3.8"
+
+[patch.crates-io]
+actix = { path = "actix" }
+actix-broker = { path = "actix-broker" }
+actix_derive = { path = "actix-derive" }
+actix-cluster = { path = "actix-cluster" }
+dataflare = { path = "dataflare" }
+dataflare-core = { path = "dataflare/core" }
+dataflare-runtime = { path = "dataflare/runtime" }
+dataflare-connector = { path = "dataflare/connector" }
+dataflare-processor = { path = "dataflare/processor" }
+dataflare-plugin = { path = "dataflare/plugin" }
+dataflare-state = { path = "dataflare/state" }
+dataflare-edge = { path = "dataflare/edge" }
+dataflare-cloud = { path = "dataflare/cloud" }
+dataflare-cli = { path = "dataflare/cli" }
+
+[profile.release]
+lto = true
+opt-level = 3
+codegen-units = 1

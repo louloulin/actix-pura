@@ -1,0 +1,203 @@
+# {{plugin_name}}
+
+A {{plugin_type}} plugin for DataFlare data processing pipelines.
+
+## Description
+
+This plugin provides {{plugin_type}} functionality for DataFlare, allowing you to process data in your data integration workflows.
+
+## Features
+
+{{#if has_ai}}
+- AI-powered data processing
+{{/if}}
+{{#if has_streaming}}
+- Real-time streaming support
+{{/if}}
+{{#if has_batch}}
+- Batch processing capabilities
+{{/if}}
+- High-performance WASM execution
+- Type-safe data handling
+- Configurable processing parameters
+
+## Installation
+
+```bash
+dataflare-plugin install {{plugin_name}}
+```
+
+## Usage
+
+### Basic Configuration
+
+```yaml
+# In your DataFlare workflow
+processors:
+  - name: my-{{plugin_type}}
+    type: {{plugin_name}}
+    config:
+      # Add your configuration here
+      parameter1: value1
+      parameter2: value2
+```
+
+### Advanced Configuration
+
+```yaml
+processors:
+  - name: advanced-{{plugin_type}}
+    type: {{plugin_name}}
+    config:
+      # Advanced settings
+      batch_size: 1000
+      timeout: 5000
+      {{#if has_ai}}
+      ai_model: "default"
+      confidence_threshold: 0.8
+      {{/if}}
+```
+
+## Development
+
+### Prerequisites
+
+- Rust 1.70+
+- DataFlare Plugin CLI
+- wasm32-wasi target
+
+```bash
+rustup target add wasm32-wasi
+cargo install dataflare-plugin-cli
+```
+
+### Building
+
+```bash
+# Build the plugin
+dataflare-plugin build
+
+# Build with optimization
+dataflare-plugin build --release --optimize
+```
+
+### Testing
+
+```bash
+# Run tests
+dataflare-plugin test
+
+# Run with coverage
+dataflare-plugin test --coverage
+
+# Run integration tests
+dataflare-plugin test --integration
+```
+
+### Validation
+
+```bash
+# Validate plugin
+dataflare-plugin validate
+
+# Strict validation
+dataflare-plugin validate --strict
+```
+
+## API Reference
+
+### Input Data Format
+
+The plugin expects data records in the following format:
+
+```json
+{
+  "id": "unique-record-id",
+  "data": "{\"field1\": \"value1\", \"field2\": \"value2\"}",
+  "metadata": {
+    "source": "input-source",
+    "timestamp": "2024-01-01T00:00:00Z"
+  },
+  "created_at": 1704067200,
+  "updated_at": null
+}
+```
+
+### Output Data Format
+
+The plugin outputs processed data in the same format:
+
+```json
+{
+  "id": "unique-record-id",
+  "data": "{\"field1\": \"processed-value1\", \"field2\": \"processed-value2\", \"processed_by\": \"{{plugin_name}}\"}",
+  "metadata": {
+    "source": "input-source",
+    "timestamp": "2024-01-01T00:00:00Z",
+    "processed_at": "2024-01-01T00:00:01Z"
+  },
+  "created_at": 1704067200,
+  "updated_at": 1704067201
+}
+```
+
+## Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `parameter1` | string | `"default"` | Description of parameter1 |
+| `parameter2` | number | `100` | Description of parameter2 |
+{{#if has_ai}}
+| `ai_model` | string | `"default"` | AI model to use for processing |
+| `confidence_threshold` | number | `0.8` | Minimum confidence threshold |
+{{/if}}
+
+## Error Handling
+
+The plugin handles errors gracefully and returns appropriate error responses:
+
+```json
+{
+  "status": "error",
+  "message": "Description of the error",
+  "code": "ERROR_CODE"
+}
+```
+
+## Performance
+
+- **Memory Usage**: < 64MB
+- **Execution Time**: < 5 seconds per record
+- **Throughput**: Up to 1000 records/second
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Run validation
+6. Submit a pull request
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Support
+
+- Documentation: [Plugin Documentation](https://docs.dataflare.io/plugins/{{plugin_name}})
+- Issues: [GitHub Issues](https://github.com/your-username/{{plugin_name}}/issues)
+- Community: [DataFlare Discord](https://discord.gg/dataflare)
+
+## Changelog
+
+### v0.1.0
+
+- Initial release
+- Basic {{plugin_type}} functionality
+{{#if has_ai}}
+- AI processing capabilities
+{{/if}}
+{{#if has_streaming}}
+- Streaming support
+{{/if}}

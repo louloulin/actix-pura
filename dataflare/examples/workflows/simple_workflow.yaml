@@ -1,0 +1,67 @@
+# 简单工作流示例
+id: simple-workflow
+name: Simple Workflow
+description: 一个简单的数据集成工作流示例
+version: 1.0.0
+
+# 数据源配置
+sources:
+  users:
+    type: memory
+    config:
+      data:
+        - id: 1
+          name: 张三
+          email: zhangsan@example.com
+          age: 30
+        - id: 2
+          name: 李四
+          email: lisi@example.com
+          age: 25
+        - id: 3
+          name: 王五
+          email: wangwu@example.com
+          age: 35
+
+# 转换配置
+transformations:
+  user_transform:
+    inputs:
+      - users
+    type: mapping
+    config:
+      mappings:
+        - source: name
+          destination: user.name
+        - source: email
+          destination: user.email
+          transform: lowercase
+        - source: age
+          destination: user.age
+
+  filter_adults:
+    inputs:
+      - user_transform
+    type: filter
+    config:
+      condition: "user.age >= 18"
+
+# 目标配置
+destinations:
+  memory_output:
+    inputs:
+      - filter_adults
+    type: memory
+    config: {}
+
+# 调度配置
+schedule:
+  type: cron
+  expression: "0 0 * * *"
+  timezone: Asia/Shanghai
+
+# 元数据
+metadata:
+  owner: admin
+  department: data
+  created: "2023-01-01"

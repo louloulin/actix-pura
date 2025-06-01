@@ -1,0 +1,39 @@
+// Smart JSON Processor WIT World Definition
+// Demonstrates high-cohesion, low-coupling design
+
+package dataflare:smart-json-processor@0.1.0;
+
+/// Import the core DataFlare interfaces
+use dataflare:core/types@1.0.0.{data-record, processing-result, batch-result};
+
+/// Smart Module interface for JSON processing
+interface smart-module {
+    /// Initialize the processor with configuration
+    /// High cohesion: all initialization logic in one place
+    init: func(config: list<tuple<string, string>>) -> result<_, string>;
+    
+    /// Process a single record
+    /// Low coupling: minimal dependencies, clear interface
+    process: func(record: data-record) -> result<processing-result, string>;
+    
+    /// Process a batch of records for efficiency
+    /// Encapsulated batch processing logic
+    process-batch: func(records: list<data-record>) -> result<batch-result, string>;
+    
+    /// Get current processor state/statistics
+    /// Encapsulated state management
+    get-state: func() -> string;
+    
+    /// Cleanup resources
+    /// Proper resource management
+    cleanup: func() -> result<_, string>;
+}
+
+/// World definition for the smart JSON processor
+world dataflare-smart-module {
+    /// Export the smart module interface
+    export smart-module;
+    
+    /// Import host functions for logging and metrics
+    import dataflare:core/host-functions@1.0.0;
+}

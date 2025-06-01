@@ -1,0 +1,40 @@
+[package]
+name = "dataflare"
+version = "0.1.0"
+edition = "2021"
+description = "DataFlare - Modern data pipeline framework"
+authors = ["DataFlare Team <team@dataflare.io>"]
+
+[dependencies]
+dataflare-core = { path = "core" }
+dataflare-runtime = { path = "runtime" }
+dataflare-connector = { path = "connector" }
+dataflare-processor = { path = "processor" }
+dataflare-plugin = { path = "plugin" }
+dataflare-wasm = { path = "wasm" }
+dataflare-state = { path = "state" }
+dataflare-cli = { path = "cli" }
+
+actix = { path = "../actix" }
+actix-rt = "2.8"
+clap = { version = "4.4", features = ["derive"] }
+rustc_version_runtime = "0.2.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }
+log = "0.4"
+env_logger = "0.10"
+futures = "0.3"
+futures-util = "0.3"
+chrono = "0.4"
+tempfile = "3.8"
+async-trait = "0.1"
+
+[features]
+default = []
+edge = []
+cloud = []
+
+[[bin]]
+name = "main"
+path = "src/bin/main.rs"

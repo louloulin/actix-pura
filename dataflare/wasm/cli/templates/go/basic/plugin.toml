@@ -1,0 +1,53 @@
+[plugin]
+name = "{{plugin_name}}"
+version = "0.1.0"
+description = "{{description}}"
+author = "{{author}}"
+plugin_type = "{{plugin_type}}"
+language = "go"
+
+[plugin.metadata]
+keywords = ["dataflare", "plugin", "{{plugin_type}}", "go"]
+categories = ["data-processing"]
+license = "MIT"
+repository = ""
+documentation = ""
+
+[plugin.runtime]
+target = "wasm32-wasi"
+memory_limit = "16MB"
+timeout_ms = 10000
+sandbox = true
+
+[plugin.capabilities]
+supports_batch = false
+supports_streaming = true
+supports_state = {{#if (eq plugin_type "aggregate")}}true{{else}}false{{/if}}
+memory_requirements = "low"
+cpu_requirements = "low"
+
+[plugin.dependencies]
+dataflare_version = ">=1.0.0"
+wasm_version = ">=1.0.0"
+
+[build]
+target = "wasm32-wasi"
+optimization = "size"
+debug_info = false
+
+[build.go]
+compiler = "tinygo"
+entry_point = "main.go"
+output_format = "wasm"
+gc = "leaking"  # Use leaking GC for smaller binary size
+scheduler = "none"  # Disable scheduler for WASM
+
+[test]
+test_data_dir = "tests/test_data"
+benchmark_enabled = true
+integration_tests = true
+
+[publish]
+registry = "https://plugins.dataflare.io"
+categories = ["data-processing", "{{plugin_type}}"]
+keywords = ["etl", "data", "processing", "go"]

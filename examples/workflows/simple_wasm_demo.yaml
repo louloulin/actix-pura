@@ -1,0 +1,39 @@
+# 简化的WASM插件演示工作流
+name: "Simple WASM Demo"
+version: "1.0.0"
+
+workflow:
+  id: "simple-wasm-demo"
+  name: "简单WASM插件演示"
+  
+  sources:
+    - id: "users_source"
+      type: "file"
+      config:
+        path: "examples/data/sample_users.json"
+        format: "json"
+        
+  processors:
+    - id: "json_transform"
+      type: "json_processor"
+      config:
+        transformations:
+          - field: "name"
+            expression: "personal_info.first_name + ' ' + personal_info.last_name"
+          - field: "location"
+            expression: "address.city + ', ' + address.country"
+          - field: "salary_annual"
+            expression: "profile.salary * 12"
+            
+  destinations:
+    - id: "output"
+      type: "file"
+      config:
+        path: "examples/output/simple_transformed.json"
+        format: "json"
+        
+  flows:
+    - from: "users_source"
+      to: "json_transform"
+    - from: "json_transform"
+      to: "output"

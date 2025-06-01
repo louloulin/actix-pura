@@ -1,0 +1,66 @@
+id: large-data-test
+name: "Large Data Performance Test"
+description: "测试DataFlare处理50万条数据的性能和转换功能"
+version: "1.0.0"
+
+sources:
+  csv_source:
+    type: csv
+    config:
+      file_path: "examples/data/large_test_data.csv"
+      has_header: true
+      delimiter: ","
+      batch_size: 1000  # 与TaskActor批次大小保持一致
+      limit: 5000  # 只处理前5000条记录用于测试
+
+# 数据转换配置
+transformations:
+  # 数据清洗和映射
+  data_mapping:
+    inputs:
+      - csv_source
+    type: mapping
+    config:
+      mappings:
+        - source: id
+          destination: user_id
+        - source: name
+          destination: user_name
+          transform: uppercase
+        - source: email
+          destination: user_email
+          transform: lowercase
+        - source: age
+          destination: user_age
+        - source: phone
+          destination: contact_phone
+        - source: address
+          destination: contact_address
+        - source: company
+          destination: work_company
+        - source: department
+          destination: work_department
+        - source: salary
+          destination: work_salary
+        - source: status
+          destination: user_status
+        - source: level
+          destination: user_level
+
+destinations:
+  csv_output:
+    inputs:
+      - data_mapping  # 使用映射后的数据
+    type: csv
+    config:
+      file_path: "dataflare/output/large_data_output.csv"
+      delimiter: ","
+      write_header: true
+      write_mode: "append"
+
+# 元数据
+metadata:
+  owner: "dataflare-team"
+  department: "data-engineering"
+  created: "2025-01-25"
+  tags: "performance-test,large-data,transformation,etl"

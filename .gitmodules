@@ -1,0 +1,3 @@
+[submodule "lumos.ai"]
+	path = lumos.ai
+	url = https://github.com/louloulin/lumos.ai.git

@@ -1,0 +1,47 @@
+id: simple-transform-test
+name: "Simple Transform Test"
+description: "测试DataFlare基本转换功能"
+version: "1.0.0"
+
+sources:
+  csv_source:
+    type: csv
+    config:
+      file_path: "examples/data/large_test_data.csv"
+      has_header: true
+      delimiter: ","
+      batch_size: 100
+      limit: 200  # 只处理200条记录用于快速测试
+
+# 数据转换配置
+transformations:
+  # 简单的字段映射
+  simple_mapping:
+    inputs:
+      - csv_source
+    type: mapping
+    config:
+      mappings:
+        - source: id
+          destination: user_id
+        - source: name
+          destination: user_name
+        - source: email
+          destination: user_email
+
+destinations:
+  csv_output:
+    inputs:
+      - simple_mapping
+    type: csv
+    config:
+      file_path: "dataflare/output/simple_transform_output.csv"
+      delimiter: ","
+      write_header: true
+      write_mode: "overwrite"
+
+# 元数据
+metadata:
+  owner: "dataflare-team"
+  created: "2025-01-25"
+  tags: "simple-test,transformation"

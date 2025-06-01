@@ -1,0 +1,124 @@
+//! {{plugin_name}} - A {{plugin_type}} plugin for DataFlare
+//! 
+//! This plugin provides {{plugin_type}} functionality for DataFlare data processing pipelines.
+
+#![warn(missing_docs)]
+
+use dataflare_plugin_sdk::prelude::*;
+
+{{#if (eq plugin_type "processor")}}
+mod processor;
+pub use processor::*;
+{{/if}}
+
+{{#if (eq plugin_type "source")}}
+mod source;
+pub use source::*;
+{{/if}}
+
+{{#if (eq plugin_type "destination")}}
+mod destination;
+pub use destination::*;
+{{/if}}
+
+{{#if (eq plugin_type "transformer")}}
+mod transformer;
+pub use transformer::*;
+{{/if}}
+
+{{#if (eq plugin_type "filter")}}
+mod filter;
+pub use filter::*;
+{{/if}}
+
+{{#if (eq plugin_type "aggregator")}}
+mod aggregator;
+pub use aggregator::*;
+{{/if}}
+
+// Export the plugin implementation
+struct {{plugin_name}}Plugin;
+
+impl PluginMetadataImpl for {{plugin_name}}Plugin {
+    fn get_info(&self) -> PluginInfo {
+        PluginInfo {
+            name: "{{plugin_name}}".to_string(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            description: env!("CARGO_PKG_DESCRIPTION").to_string(),
+            author: Some(env!("CARGO_PKG_AUTHORS").to_string()),
+            dataflare_version: "4.0.0".to_string(),
+        }
+    }
+    
+    fn get_component_type(&self) -> ComponentType {
+        {{#if (eq plugin_type "processor")}}
+        ComponentType::Processor
+        {{/if}}
+        {{#if (eq plugin_type "source")}}
+        ComponentType::Source
+        {{/if}}
+        {{#if (eq plugin_type "destination")}}
+        ComponentType::Destination
+        {{/if}}
+        {{#if (eq plugin_type "transformer")}}
+        ComponentType::Transformer
+        {{/if}}
+        {{#if (eq plugin_type "filter")}}
+        ComponentType::Filter
+        {{/if}}
+        {{#if (eq plugin_type "aggregator")}}
+        ComponentType::Aggregator
+        {{/if}}
+    }
+    
+    fn get_capabilities(&self) -> Capabilities {
+        Capabilities {
+            supports_async: {{#if has_streaming}}true{{else}}false{{/if}},
+            supports_streaming: {{#if has_streaming}}true{{else}}false{{/if}},
+            supports_batch: {{#if has_batch}}true{{else}}true{{/if}},
+            supports_backpressure: false,
+            max_batch_size: Some(1000),
+        }
+    }
+    
+    fn get_security_requirements(&self) -> SecurityRequirements {
+        SecurityRequirements {
+            requires_network: false,
+            requires_filesystem: false,
+            requires_env_vars: false,
+            max_memory_mb: Some(64),
+            max_execution_time_ms: Some(5000),
+        }
+    }
+}
+
+{{#if (eq plugin_type "processor")}}
+impl DataProcessorImpl for {{plugin_name}}Plugin {
+    fn process(&self, input: DataRecord) -> Result<ProcessingResult, String> {
+        process_data(input)
+    }
+    
+    fn process_batch(&self, inputs: Vec<DataRecord>) -> Result<Vec<ProcessingResult>, String> {
+        inputs.into_iter()
+            .map(|input| self.process(input))
+            .collect()
+    }
+}
+{{/if}}
+
+{{#if (eq plugin_type "transformer")}}
+impl DataTransformerImpl for {{plugin_name}}Plugin {
+    fn transform(&self, input: DataRecord) -> Result<DataRecord, String> {
+        transform_data(input)
+    }
+    
+    fn transform_batch(&self, inputs: Vec<DataRecord>) -> Result<Vec<DataRecord>, String> {
+        inputs.into_iter()
+            .map(|input| self.transform(input))
+            .collect()
+    }
+}
+{{/if}}
+
+// Export the plugin
+export!({{plugin_name}}Plugin);

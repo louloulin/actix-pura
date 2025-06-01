@@ -1,0 +1,215 @@
+{
+  "plugins": [
+    {
+      "name": "csv_source",
+      "type": "source",
+      "module_path": "./plugins/csv_source.wasm",
+      "config": {
+        "file_path": "./data/input.csv",
+        "delimiter": ",",
+        "has_header": true,
+        "encoding": "utf-8"
+      },
+      "security_policy": {
+        "allow_network": false,
+        "allow_file_system": true,
+        "allow_env_vars": false,
+        "max_memory": 16777216,
+        "max_execution_time": 10000,
+        "allowed_paths": ["./data/"]
+      },
+      "memory_limit": 16777216,
+      "timeout_ms": 10000,
+      "metadata": {
+        "author": "DataFlare Team",
+        "version": "1.0.0",
+        "description": "CSV文件数据源插件"
+      }
+    },
+    {
+      "name": "json_transformer",
+      "type": "transformer",
+      "module_path": "./plugins/json_transformer.wasm",
+      "config": {
+        "transformation_rules": [
+          {
+            "field": "timestamp",
+            "operation": "parse_datetime",
+            "format": "ISO8601"
+          },
+          {
+            "field": "amount",
+            "operation": "parse_number",
+            "type": "float"
+          },
+          {
+            "field": "category",
+            "operation": "normalize",
+            "case": "lower"
+          }
+        ]
+      },
+      "security_policy": {
+        "allow_network": false,
+        "allow_file_system": false,
+        "allow_env_vars": false,
+        "max_memory": 8388608,
+        "max_execution_time": 5000
+      },
+      "memory_limit": 8388608,
+      "timeout_ms": 5000,
+      "metadata": {
+        "author": "DataFlare Team",
+        "version": "1.2.0",
+        "description": "JSON数据转换插件"
+      }
+    },
+    {
+      "name": "data_filter",
+      "type": "filter",
+      "module_path": "./plugins/data_filter.wasm",
+      "config": {
+        "filter_conditions": [
+          {
+            "field": "amount",
+            "operator": "greater_than",
+            "value": 100.0
+          },
+          {
+            "field": "status",
+            "operator": "equals",
+            "value": "active"
+          }
+        ],
+        "logic": "AND"
+      },
+      "security_policy": {
+        "allow_network": false,
+        "allow_file_system": false,
+        "allow_env_vars": false,
+        "max_memory": 4194304,
+        "max_execution_time": 3000
+      },
+      "memory_limit": 4194304,
+      "timeout_ms": 3000,
+      "metadata": {
+        "author": "DataFlare Team",
+        "version": "1.1.0",
+        "description": "数据过滤插件"
+      }
+    },
+    {
+      "name": "aggregator",
+      "type": "aggregator",
+      "module_path": "./plugins/aggregator.wasm",
+      "config": {
+        "group_by": ["category", "date"],
+        "aggregations": [
+          {
+            "field": "amount",
+            "operation": "sum",
+            "alias": "total_amount"
+          },
+          {
+            "field": "count",
+            "operation": "count",
+            "alias": "record_count"
+          },
+          {
+            "field": "amount",
+            "operation": "avg",
+            "alias": "avg_amount"
+          }
+        ],
+        "window_size": 1000
+      },
+      "security_policy": {
+        "allow_network": false,
+        "allow_file_system": false,
+        "allow_env_vars": false,
+        "max_memory": 33554432,
+        "max_execution_time": 15000
+      },
+      "memory_limit": 33554432,
+      "timeout_ms": 15000,
+      "metadata": {
+        "author": "DataFlare Team",
+        "version": "1.3.0",
+        "description": "数据聚合插件"
+      }
+    },
+    {
+      "name": "database_destination",
+      "type": "destination",
+      "module_path": "./plugins/database_destination.wasm",
+      "config": {
+        "connection_string": "postgresql://user:pass@localhost:5432/dataflare",
+        "table_name": "processed_data",
+        "batch_size": 1000,
+        "insert_mode": "upsert",
+        "key_fields": ["id"]
+      },
+      "security_policy": {
+        "allow_network": true,
+        "allow_file_system": false,
+        "allow_env_vars": true,
+        "max_memory": 67108864,
+        "max_execution_time": 30000,
+        "allowed_hosts": ["localhost", "db.example.com"]
+      },
+      "memory_limit": 67108864,
+      "timeout_ms": 30000,
+      "metadata": {
+        "author": "DataFlare Team",
+        "version": "2.0.0",
+        "description": "数据库目标插件"
+      }
+    },
+    {
+      "name": "custom_processor",
+      "type": "custom_analytics",
+      "module_path": "./plugins/custom_processor.wasm",
+      "config": {
+        "algorithm": "machine_learning",
+        "model_path": "./models/prediction_model.bin",
+        "features": ["feature1", "feature2", "feature3"],
+        "output_field": "prediction_score"
+      },
+      "security_policy": {
+        "allow_network": false,
+        "allow_file_system": true,
+        "allow_env_vars": false,
+        "max_memory": 134217728,
+        "max_execution_time": 60000,
+        "allowed_paths": ["./models/", "./cache/"]
+      },
+      "memory_limit": 134217728,
+      "timeout_ms": 60000,
+      "metadata": {
+        "author": "AI Team",
+        "version": "3.0.0",
+        "description": "自定义机器学习处理插件"
+      }
+    }
+  ],
+  "runtime_config": {
+    "max_concurrent_plugins": 10,
+    "plugin_cache_size": 100,
+    "enable_hot_reload": true,
+    "log_level": "info",
+    "metrics_enabled": true,
+    "sandbox_mode": "strict"
+  },
+  "host_functions": {
+    "enabled": ["log", "get_time", "random", "http_request", "file_read"],
+    "disabled": ["system_exec", "network_raw"],
+    "custom_functions": [
+      {
+        "name": "dataflare_api_call",
+        "description": "调用DataFlare内部API",
+        "parameters": ["endpoint", "method", "data"],
+        "return_type": "json"
+      }
+    ]
+  }
+}

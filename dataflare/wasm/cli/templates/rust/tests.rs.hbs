@@ -1,0 +1,266 @@
+//! Integration tests for {{plugin_name}}
+
+use dataflare_plugin_sdk::prelude::*;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+
+/// Test data helper
+fn create_test_record(id: &str, data: Value) -> DataRecord {
+    DataRecord {
+        id: id.to_string(),
+        data: data.to_string(),
+        metadata: HashMap::new(),
+        created_at: Some(chrono::Utc::now().timestamp() as u64),
+        updated_at: None,
+    }
+}
+
+#[tokio::test]
+async fn test_basic_processing() {
+    // Create test input
+    let input = create_test_record(
+        "test-1",
+        json!({
+            "message": "Hello, world!",
+            "value": 42
+        })
+    );
+    
+    // Process the data
+    let result = {{plugin_name}}::process_data(input).unwrap();
+    
+    // Verify the result
+    match result {
+        ProcessingResult::Success(output) => {
+            let data: Value = serde_json::from_str(&output.data).unwrap();
+            
+            // Check that original data is preserved
+            assert_eq!(data["message"], "Hello, world!");
+            assert_eq!(data["value"], 42);
+            
+            // Check that processing metadata is added
+            assert!(data.get("processed_at").is_some());
+            assert_eq!(data["processed_by"], "{{plugin_name}}");
+            
+            // Check that updated_at is set
+            assert!(output.updated_at.is_some());
+        }
+        _ => panic!("Expected success result"),
+    }
+}
+
+#[tokio::test]
+async fn test_invalid_json_input() {
+    let input = DataRecord {
+        id: "test-invalid".to_string(),
+        data: "invalid json".to_string(),
+        metadata: HashMap::new(),
+        created_at: Some(chrono::Utc::now().timestamp() as u64),
+        updated_at: None,
+    };
+    
+    let result = {{plugin_name}}::process_data(input);
+    
+    // Should return an error for invalid JSON
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_empty_data() {
+    let input = create_test_record("test-empty", json!({}));
+    
+    let result = {{plugin_name}}::process_data(input).unwrap();
+    
+    match result {
+        ProcessingResult::Success(output) => {
+            let data: Value = serde_json::from_str(&output.data).unwrap();
+            
+            // Should still add processing metadata
+            assert!(data.get("processed_at").is_some());
+            assert_eq!(data["processed_by"], "{{plugin_name}}");
+        }
+        _ => panic!("Expected success result"),
+    }
+}
+
+#[tokio::test]
+async fn test_large_data() {
+    // Create a large JSON object
+    let mut large_object = serde_json::Map::new();
+    for i in 0..1000 {
+        large_object.insert(format!("field_{}", i), json!(format!("value_{}", i)));
+    }
+    
+    let input = create_test_record("test-large", json!(large_object));
+    
+    let result = {{plugin_name}}::process_data(input).unwrap();
+    
+    match result {
+        ProcessingResult::Success(output) => {
+            let data: Value = serde_json::from_str(&output.data).unwrap();
+            
+            // Check that all original fields are preserved
+            assert_eq!(data["field_0"], "value_0");
+            assert_eq!(data["field_999"], "value_999");
+            
+            // Check processing metadata
+            assert!(data.get("processed_at").is_some());
+            assert_eq!(data["processed_by"], "{{plugin_name}}");
+        }
+        _ => panic!("Expected success result"),
+    }
+}
+
+{{#if has_ai}}
+#[tokio::test]
+async fn test_sentiment_analysis() {
+    let test_cases = vec![
+        ("This is great!", "positive"),
+        ("This is terrible!", "negative"),
+        ("This is okay.", "neutral"),
+        ("I love this product!", "positive"),
+        ("This is awful and bad!", "negative"),
+    ];
+    
+    for (text, expected_sentiment) in test_cases {
+        let input = create_test_record(
+            "test-sentiment",
+            json!({
+                "text": text,
+                "other_field": "value"
+            })
+        );
+        
+        let result = {{plugin_name}}::process_data(input).unwrap();
+        
+        match result {
+            ProcessingResult::Success(output) => {
+                let data: Value = serde_json::from_str(&output.data).unwrap();
+                
+                // Check sentiment analysis result
+                assert_eq!(data["sentiment"], expected_sentiment);
+                
+                // Check original data is preserved
+                assert_eq!(data["text"], text);
+                assert_eq!(data["other_field"], "value");
+            }
+            _ => panic!("Expected success result for text: {}", text),
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_no_text_field() {
+    let input = create_test_record(
+        "test-no-text",
+        json!({
+            "number": 42,
+            "boolean": true
+        })
+    );
+    
+    let result = {{plugin_name}}::process_data(input).unwrap();
+    
+    match result {
+        ProcessingResult::Success(output) => {
+            let data: Value = serde_json::from_str(&output.data).unwrap();
+            
+            // Should not have sentiment field if no text
+            assert!(data.get("sentiment").is_none());
+            
+            // Should still have processing metadata
+            assert!(data.get("processed_at").is_some());
+            assert_eq!(data["processed_by"], "{{plugin_name}}");
+        }
+        _ => panic!("Expected success result"),
+    }
+}
+{{/if}}
+
+{{#if has_batch}}
+#[tokio::test]
+async fn test_batch_processing() {
+    let inputs = vec![
+        create_test_record("batch-1", json!({"value": 1})),
+        create_test_record("batch-2", json!({"value": 2})),
+        create_test_record("batch-3", json!({"value": 3})),
+    ];
+    
+    let results: Result<Vec<_>, _> = inputs.into_iter()
+        .map({{plugin_name}}::process_data)
+        .collect();
+    
+    let results = results.unwrap();
+    
+    assert_eq!(results.len(), 3);
+    
+    for (i, result) in results.iter().enumerate() {
+        match result {
+            ProcessingResult::Success(output) => {
+                let data: Value = serde_json::from_str(&output.data).unwrap();
+                assert_eq!(data["value"], i + 1);
+                assert!(data.get("processed_at").is_some());
+            }
+            _ => panic!("Expected success result for batch item {}", i),
+        }
+    }
+}
+{{/if}}
+
+#[tokio::test]
+async fn test_metadata_preservation() {
+    let mut metadata = HashMap::new();
+    metadata.insert("source".to_string(), "test-source".to_string());
+    metadata.insert("pipeline".to_string(), "test-pipeline".to_string());
+    
+    let input = DataRecord {
+        id: "test-metadata".to_string(),
+        data: json!({"test": "data"}).to_string(),
+        metadata,
+        created_at: Some(1234567890),
+        updated_at: None,
+    };
+    
+    let result = {{plugin_name}}::process_data(input).unwrap();
+    
+    match result {
+        ProcessingResult::Success(output) => {
+            // Check that metadata is preserved
+            assert_eq!(output.metadata.get("source").unwrap(), "test-source");
+            assert_eq!(output.metadata.get("pipeline").unwrap(), "test-pipeline");
+            
+            // Check that timestamps are handled correctly
+            assert_eq!(output.created_at, Some(1234567890));
+            assert!(output.updated_at.is_some());
+            assert!(output.updated_at.unwrap() > 1234567890);
+        }
+        _ => panic!("Expected success result"),
+    }
+}
+
+#[tokio::test]
+async fn test_performance() {
+    use std::time::Instant;
+    
+    let input = create_test_record(
+        "perf-test",
+        json!({
+            "data": "performance test data",
+            "numbers": vec![1, 2, 3, 4, 5]
+        })
+    );
+    
+    let start = Instant::now();
+    let result = {{plugin_name}}::process_data(input).unwrap();
+    let duration = start.elapsed();
+    
+    // Should complete within reasonable time (adjust as needed)
+    assert!(duration.as_millis() < 1000, "Processing took too long: {:?}", duration);
+    
+    match result {
+        ProcessingResult::Success(_) => {
+            // Performance test passed
+        }
+        _ => panic!("Expected success result"),
+    }
+}

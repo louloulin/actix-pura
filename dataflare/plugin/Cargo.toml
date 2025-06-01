@@ -1,0 +1,42 @@
+[package]
+name = "dataflare-plugin"
+version = "0.1.0"
+edition = "2021"
+description = "DataFlare plugin system core library"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dataflare/dataflare"
+
+[dependencies]
+# Core dependencies
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+base64 = "0.21"
+
+# DataFlare core integration
+dataflare-core = { path = "../core" }
+
+# Optional dependencies for advanced features
+tokio = { version = "1.0", features = ["rt", "macros"], optional = true }
+
+# WASM runtime dependencies (optional)
+wasmtime = { version = "25.0", optional = true }
+wasmtime-wasi = { version = "25.0", optional = true }
+anyhow = { version = "1.0", optional = true }
+
+[features]
+default = []
+async = ["tokio"]
+wasm = ["wasmtime", "wasmtime-wasi", "anyhow"]
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["rt", "macros"] }
+tokio-test = "0.4"
+criterion = "0.5"
+
+[[bench]]
+name = "plugin_performance"
+harness = false

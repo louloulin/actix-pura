@@ -1,0 +1,10 @@
+overrides:
+  - files: '*.md'
+    options:
+      printWidth: 9999
+      proseWrap: never
+  - files: '*.{yml,yaml}'
+    options:
+      singleQuote: true
+      printWidth: 100
+      proseWrap: always

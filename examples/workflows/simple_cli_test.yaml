@@ -1,0 +1,30 @@
+id: simple-cli-test
+name: 简单CLI测试工作流
+description: 简单的CSV数据处理测试
+version: 1.0.0
+
+# 数据源配置
+sources:
+  csv_source:
+    type: csv
+    config:
+      file_path: "examples/data/extra_large_test.csv"
+      has_header: true
+      delimiter: ","
+
+# 目标配置
+destinations:
+  csv_output:
+    inputs:
+      - csv_source
+    type: csv
+    config:
+      file_path: "dataflare/output/simple_cli_output.csv"
+      delimiter: ","
+      write_header: true
+
+# 元数据
+metadata:
+  owner: admin
+  department: test
+  created: "2023-07-01"

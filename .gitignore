@@ -1,0 +1,23 @@
+/gh-pages
+__pycache__
+
+*.so
+*.out
+*.pyc
+*.pid
+*.sock
+*~
+target/
+actix/examples/chat/target/
+.idea
+
+/lcov.info
+
+# Large data files (>50MB)
+examples/data/large_test_data.csv
+dataflare/output/simple_transform_output.csv
+**/large_*.csv
+**/*_large.csv
+**/*_big.csv
+**/*_output.csv
+*.csv.large

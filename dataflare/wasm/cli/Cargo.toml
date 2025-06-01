@@ -1,0 +1,73 @@
+[package]
+name = "dataflare-wasm-cli"
+version = "0.1.0"
+edition = "2021"
+description = "DataFlare WASM Plugin CLI Tool"
+authors = ["DataFlare Team"]
+license = "MIT"
+repository = "https://github.com/dataflare/dataflare"
+
+[[bin]]
+name = "dataflare-plugin"
+path = "src/main.rs"
+
+[dependencies]
+# CLI framework
+clap = { version = "4.0", features = ["derive"] }
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+toml = "0.8"
+
+# File system operations
+walkdir = "2.0"
+tempfile = "3.0"
+fs_extra = "1.3"
+
+# HTTP client for registry operations
+reqwest = { version = "0.11", features = ["json", "stream"] }
+
+# Template engine
+handlebars = "4.0"
+
+# Compression
+flate2 = "1.0"
+tar = "0.4"
+
+# Logging
+log = "0.4"
+env_logger = "0.10"
+
+# Process execution
+which = "4.0"
+
+# Version parsing
+semver = "1.0"
+
+# Progress bars
+indicatif = "0.17"
+
+# Terminal colors
+colored = "2.0"
+
+# DataFlare dependencies
+# dataflare-wasm = { path = ".." }
+
+# Additional dependencies
+dirs = "5.0"
+wasmparser = "0.118"
+chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.10"
+fastrand = "2.0"
+
+[dev-dependencies]
+tempfile = "3.0"
+assert_cmd = "2.0"
+predicates = "3.0"

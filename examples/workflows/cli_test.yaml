@@ -1,0 +1,22 @@
+id: cli-test 
+name: CLI Test Workflow 
+description: Simple CLI test 
+version: 1.0.0 
+ 
+sources: 
+  csv_source: 
+    type: csv 
+    config: 
+      file_path: "examples/data/cli_test.csv" 
+      has_header: true 
+      delimiter: "," 
+ 
+destinations: 
+  csv_output: 
+    inputs: 
+      - csv_source 
+    type: csv 
+    config: 
+      file_path: "dataflare/output/cli_test_output.csv" 
+      delimiter: "," 
+      write_header: true 

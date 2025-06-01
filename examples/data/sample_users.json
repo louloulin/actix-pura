@@ -1,0 +1,187 @@
+[
+  {
+    "id": 1,
+    "personal_info": {
+      "first_name": "张",
+      "last_name": "三",
+      "email": "zhang.san@example.com",
+      "phone": "+86-138-0013-8000"
+    },
+    "address": {
+      "street": "北京市朝阳区建国路88号",
+      "city": "北京",
+      "country": "中国",
+      "postal_code": "100025"
+    },
+    "profile": {
+      "age": 28,
+      "gender": "male",
+      "occupation": "软件工程师",
+      "salary": 15000,
+      "join_date": "2022-03-15"
+    },
+    "preferences": {
+      "language": "zh-CN",
+      "timezone": "Asia/Shanghai",
+      "notifications": {
+        "email": true,
+        "sms": false,
+        "push": true
+      }
+    },
+    "metadata": {
+      "created_at": "2022-03-15T09:30:00Z",
+      "updated_at": "2024-01-20T14:22:00Z",
+      "status": "active",
+      "tags": ["premium", "developer", "early_adopter"]
+    }
+  },
+  {
+    "id": 2,
+    "personal_info": {
+      "first_name": "李",
+      "last_name": "四",
+      "email": "li.si@example.com",
+      "phone": "+86-139-0013-9000"
+    },
+    "address": {
+      "street": "上海市浦东新区陆家嘴环路1000号",
+      "city": "上海",
+      "country": "中国",
+      "postal_code": "200120"
+    },
+    "profile": {
+      "age": 32,
+      "gender": "female",
+      "occupation": "产品经理",
+      "salary": 18000,
+      "join_date": "2021-08-20"
+    },
+    "preferences": {
+      "language": "zh-CN",
+      "timezone": "Asia/Shanghai",
+      "notifications": {
+        "email": true,
+        "sms": true,
+        "push": false
+      }
+    },
+    "metadata": {
+      "created_at": "2021-08-20T10:15:00Z",
+      "updated_at": "2024-01-18T16:45:00Z",
+      "status": "active",
+      "tags": ["premium", "manager", "power_user"]
+    }
+  },
+  {
+    "id": 3,
+    "personal_info": {
+      "first_name": "王",
+      "last_name": "五",
+      "email": "wang.wu@example.com",
+      "phone": "+86-137-0013-7000"
+    },
+    "address": {
+      "street": "深圳市南山区科技园南区深南大道9988号",
+      "city": "深圳",
+      "country": "中国",
+      "postal_code": "518057"
+    },
+    "profile": {
+      "age": 26,
+      "gender": "male",
+      "occupation": "数据分析师",
+      "salary": 12000,
+      "join_date": "2023-01-10"
+    },
+    "preferences": {
+      "language": "zh-CN",
+      "timezone": "Asia/Shanghai",
+      "notifications": {
+        "email": false,
+        "sms": true,
+        "push": true
+      }
+    },
+    "metadata": {
+      "created_at": "2023-01-10T08:20:00Z",
+      "updated_at": "2024-01-22T11:30:00Z",
+      "status": "active",
+      "tags": ["standard", "analyst", "new_user"]
+    }
+  },
+  {
+    "id": 4,
+    "personal_info": {
+      "first_name": "赵",
+      "last_name": "六",
+      "email": "zhao.liu@example.com",
+      "phone": "+86-135-0013-5000"
+    },
+    "address": {
+      "street": "广州市天河区珠江新城花城大道85号",
+      "city": "广州",
+      "country": "中国",
+      "postal_code": "510623"
+    },
+    "profile": {
+      "age": 35,
+      "gender": "female",
+      "occupation": "架构师",
+      "salary": 25000,
+      "join_date": "2020-05-12"
+    },
+    "preferences": {
+      "language": "zh-CN",
+      "timezone": "Asia/Shanghai",
+      "notifications": {
+        "email": true,
+        "sms": false,
+        "push": false
+      }
+    },
+    "metadata": {
+      "created_at": "2020-05-12T14:45:00Z",
+      "updated_at": "2024-01-25T09:15:00Z",
+      "status": "active",
+      "tags": ["premium", "architect", "veteran"]
+    }
+  },
+  {
+    "id": 5,
+    "personal_info": {
+      "first_name": "孙",
+      "last_name": "七",
+      "email": "sun.qi@example.com",
+      "phone": "+86-136-0013-6000"
+    },
+    "address": {
+      "street": "杭州市西湖区文三路269号",
+      "city": "杭州",
+      "country": "中国",
+      "postal_code": "310013"
+    },
+    "profile": {
+      "age": 29,
+      "gender": "male",
+      "occupation": "DevOps工程师",
+      "salary": 16000,
+      "join_date": "2022-11-08"
+    },
+    "preferences": {
+      "language": "zh-CN",
+      "timezone": "Asia/Shanghai",
+      "notifications": {
+        "email": true,
+        "sms": true,
+        "push": true
+      }
+    },
+    "metadata": {
+      "created_at": "2022-11-08T13:20:00Z",
+      "updated_at": "2024-01-19T15:40:00Z",
+      "status": "active",
+      "tags": ["standard", "devops", "tech_enthusiast"]
+    }
+  }
+]

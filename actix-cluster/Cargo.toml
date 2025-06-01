@@ -1,0 +1,79 @@
+[package]
+name = "actix-cluster"
+version = "0.1.0"
+edition = "2021"
+authors = ["Actix Team <https://github.com/actix>"]
+description = "Distributed cluster extension for Actix actor framework"
+repository = "https://github.com/actix/actix"
+license = "MIT OR Apache-2.0"
+keywords = ["actor", "actix", "distributed", "cluster"]
+categories = ["asynchronous", "network-programming"]
+
+[features]
+default = []
+placement_tests = []
+
+[dependencies]
+actix = { path = "../actix" }
+tokio = { version = "1.28", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.3", features = ["v4", "serde"] }
+log = "0.4"
+futures = "0.3"
+bincode = "1.3"
+bytes = "1.4"
+thiserror = "1.0"
+anyhow = "1.0"
+async-trait = "0.1"
+libp2p = { version = "0.51", features = ["tokio", "tcp", "noise", "yamux", "identify", "kad", "ping", "mplex", "mdns"] }
+once_cell = "1.18"
+multiaddr = "0.17"
+parking_lot = "0.12"
+lru = "0.8.0"
+rand = "0.8.5"
+fnv = "1.0.7"
+chrono = { version = "0.4", features = ["serde"] }
+openraft = { version = "0.9", features = ["serde"] }
+structopt = "0.3.26"
+clap = "4.5.35"
+flate2 = { version = "1.1.1", features = ["zlib"] }
+prost = "0.11"
+prost-types = "0.11"
+prost-build = "0.11"
+tonic = "0.9"
+tonic-build = "0.9"
+
+[dev-dependencies]
+tokio-test = "0.4"
+env_logger = "0.10"
+actix-rt = "2.8"
+signal-hook = { version = "0.3.15", features = ["iterator"] }
+
+[[example]]
+name = "validate_cluster"
+path = "examples/validate_cluster.rs"
+
+[[example]]
+name = "simple_validate"
+path = "examples/simple_validate.rs"
+
+[[example]]
+name = "cluster_benchmark"
+path = "examples/cluster_benchmark.rs"
+
+[[example]]
+name = "distributed_benchmark"
+path = "examples/distributed_benchmark.rs"
+
+[[example]]
+name = "api_optimization"
+path = "examples/api_optimization/main.rs"
+
+[[example]]
+name = "protobuf_serialization"
+path = "examples/protobuf_serialization.rs"
+
+[build-dependencies]
+prost-build = "0.11"
+tonic-build = "0.9" 

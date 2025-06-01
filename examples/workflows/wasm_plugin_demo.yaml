@@ -1,0 +1,174 @@
+# DataFlare WASM Plugin Demo Workflow
+# 演示如何在DataFlare工作流中使用WASM插件进行数据转换
+
+name: "WASM Plugin Demo"
+version: "1.0.0"
+description: "演示使用JSON Transformer WASM插件进行数据转换"
+
+# 工作流配置
+workflow:
+  id: "wasm-plugin-demo"
+  name: "WASM插件演示"
+  description: "使用WASM插件转换JSON用户数据"
+  
+  # 数据源配置
+  sources:
+    - id: "json_file_source"
+      type: "file"
+      name: "JSON文件数据源"
+      config:
+        path: "examples/data/sample_users.json"
+        format: "json"
+        encoding: "utf-8"
+        batch_size: 100
+        
+  # 处理器配置 - 使用WASM插件
+  processors:
+    - id: "json_transformer_wasm"
+      type: "wasm_plugin"
+      name: "JSON转换器WASM插件"
+      config:
+        # WASM插件配置
+        plugin_name: "json-transformer"
+        plugin_path: "dataflare/plugins/json-transformer.wasm"
+        function_name: "transform"
+        
+        # 插件初始化配置
+        plugin_config:
+          transformations:
+            # 提取用户基本信息
+            - source_path: "$.personal_info.first_name"
+              target_field: "first_name"
+              transform_type: "Copy"
+            - source_path: "$.personal_info.last_name"
+              target_field: "last_name"
+              transform_type: "Copy"
+            - source_path: "$.personal_info.email"
+              target_field: "email"
+              transform_type: "Copy"
+              
+            # 提取地址信息
+            - source_path: "$.address.city"
+              target_field: "city"
+              transform_type: "Copy"
+            - source_path: "$.address.country"
+              target_field: "country"
+              transform_type: "Copy"
+              
+            # 提取职业信息
+            - source_path: "$.profile.occupation"
+              target_field: "job_title"
+              transform_type: "Copy"
+            - source_path: "$.profile.salary"
+              target_field: "monthly_salary"
+              transform_type: "ToNumber"
+            - source_path: "$.profile.age"
+              target_field: "age"
+              transform_type: "ToNumber"
+              
+            # 计算年薪
+            - source_path: "$.profile.salary"
+              target_field: "annual_salary"
+              transform_type: "Custom"
+              parameters:
+                multiplier: 12
+                
+            # 提取状态信息
+            - source_path: "$.metadata.status"
+              target_field: "is_active"
+              transform_type: "ToBoolean"
+            - source_path: "$.metadata.tags"
+              target_field: "user_tags"
+              transform_type: "ToArray"
+              
+            # 格式化创建时间
+            - source_path: "$.metadata.created_at"
+              target_field: "registration_date"
+              transform_type: "ToString"
+              
+          # 配置选项
+          preserve_original: false
+          error_strategy: "UseDefault"
+          
+        # WASM运行时配置
+        runtime_config:
+          memory_limit: 16777216  # 16MB
+          timeout_ms: 5000
+          enable_debug: true
+          
+  # 目标配置
+  destinations:
+    - id: "transformed_json_output"
+      type: "file"
+      name: "转换后的JSON输出"
+      config:
+        path: "examples/output/transformed_users.json"
+        format: "json"
+        encoding: "utf-8"
+        overwrite: true
+        pretty_print: true
+        
+    - id: "csv_output"
+      type: "file"
+      name: "CSV格式输出"
+      config:
+        path: "examples/output/users_summary.csv"
+        format: "csv"
+        encoding: "utf-8"
+        overwrite: true
+        headers: true
+        delimiter: ","
+        
+  # 数据流配置
+  flows:
+    - from: "json_file_source"
+      to: "json_transformer_wasm"
+      
+    - from: "json_transformer_wasm"
+      to: "transformed_json_output"
+      
+    - from: "json_transformer_wasm"
+      to: "csv_output"
+
+# 执行配置
+execution:
+  mode: "batch"
+  parallel: false
+  max_retries: 3
+  timeout_seconds: 300
+  
+  # 监控配置
+  monitoring:
+    enable_metrics: true
+    enable_logging: true
+    log_level: "info"
+    
+  # 错误处理
+  error_handling:
+    strategy: "continue"
+    max_errors: 10
+    
+# 插件配置
+plugins:
+  wasm:
+    enabled: true
+    runtime: "wasmtime"
+    security_policy:
+      allow_network: false
+      allow_filesystem: false
+      allow_env_vars: false
+      max_memory_bytes: 67108864  # 64MB
+      max_execution_time_ms: 10000
+      
+    # 插件注册表
+    registry:
+      - name: "json-transformer"
+        path: "dataflare/plugins/json-transformer.wasm"
+        metadata_path: "dataflare/plugins/json-transformer.json"
+        enabled: true
+        
+# 输出配置
+output:
+  format: "json"
+  compression: false
+  validation: true

@@ -1,0 +1,33 @@
+{
+  "name": "{{plugin_name}}",
+  "version": "0.1.0",
+  "description": "{{description}}",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "build": "dataflare-plugin build",
+    "test": "dataflare-plugin test",
+    "benchmark": "dataflare-plugin benchmark",
+    "validate": "dataflare-plugin validate",
+    "package": "dataflare-plugin package"
+  },
+  "keywords": [
+    "dataflare",
+    "plugin",
+    "{{plugin_type}}",
+    "wasm"
+  ],
+  "author": "{{author}}",
+  "license": "MIT",
+  "dataflare": {
+    "type": "{{plugin_type}}",
+    "description": "{{description}}",
+    "auto_wit": true,
+    "target": "wasm32-wasi"
+  },
+  "devDependencies": {
+    "@dataflare/plugin-sdk": "^1.0.0",
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  }
+}

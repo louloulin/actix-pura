@@ -1,0 +1,52 @@
+id: csv-workflow
+name: CSV 数据处理工作流
+description: 从 CSV 文件读取数据，进行过滤和转换，然后写入内存目标
+version: 1.0.0
+
+# 数据源配置
+sources:
+  csv_source:
+    type: csv
+    config:
+      file_path: "../examples/data/sample.csv"
+      has_header: true
+      delimiter: ","
+    collection_mode: full
+
+# 转换配置
+transformations:
+  filter_adults:
+    inputs:
+      - csv_source
+    type: filter
+    config:
+      condition: "age >= 18"
+
+  user_transform:
+    inputs:
+      - filter_adults
+    type: mapping
+    config:
+      mappings:
+        - source: name
+          destination: user.name
+        - source: email
+          destination: user.email
+          transform: lowercase
+        - source: age
+          destination: user.age
+
+# 目标配置
+destinations:
+  memory_output:
+    inputs:
+      - user_transform
+    type: memory
+    config:
+      collection_name: "processed_users"
+
+# 元数据
+metadata:
+  owner: admin
+  department: data
+  created: "2023-01-01"

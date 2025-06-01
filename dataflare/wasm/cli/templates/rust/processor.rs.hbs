@@ -1,0 +1,115 @@
+//! Data processor implementation
+
+use dataflare_plugin_sdk::prelude::*;
+use serde_json::Value;
+
+/// Process a single data record
+pub fn process_data(input: DataRecord) -> Result<ProcessingResult, String> {
+    // Parse the input data
+    let data: Value = serde_json::from_str(&input.data)
+        .map_err(|e| format!("Failed to parse input data: {}", e))?;
+    
+    // TODO: Implement your processing logic here
+    let processed_data = process_json_data(data)?;
+    
+    // Create output record
+    let output_record = DataRecord {
+        id: input.id,
+        data: serde_json::to_string(&processed_data)
+            .map_err(|e| format!("Failed to serialize output data: {}", e))?,
+        metadata: input.metadata,
+        created_at: input.created_at,
+        updated_at: Some(chrono::Utc::now().timestamp() as u64),
+    };
+    
+    Ok(ProcessingResult::Success(output_record))
+}
+
+/// Process JSON data
+fn process_json_data(mut data: Value) -> Result<Value, String> {
+    // Example processing: add a timestamp field
+    if let Value::Object(ref mut map) = data {
+        map.insert(
+            "processed_at".to_string(),
+            Value::String(chrono::Utc::now().to_rfc3339()),
+        );
+        
+        map.insert(
+            "processed_by".to_string(),
+            Value::String("{{plugin_name}}".to_string()),
+        );
+        
+        {{#if has_ai}}
+        // AI processing example
+        if let Some(text) = map.get("text").and_then(|v| v.as_str()) {
+            let sentiment = analyze_sentiment(text)?;
+            map.insert("sentiment".to_string(), Value::String(sentiment));
+        }
+        {{/if}}
+    }
+    
+    Ok(data)
+}
+
+{{#if has_ai}}
+/// Analyze sentiment of text (placeholder implementation)
+fn analyze_sentiment(text: &str) -> Result<String, String> {
+    // TODO: Implement actual sentiment analysis
+    // This is a placeholder implementation
+    let sentiment = if text.contains("good") || text.contains("great") || text.contains("excellent") {
+        "positive"
+    } else if text.contains("bad") || text.contains("terrible") || text.contains("awful") {
+        "negative"
+    } else {
+        "neutral"
+    };
+    
+    Ok(sentiment.to_string())
+}
+{{/if}}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    
+    #[test]
+    fn test_process_data() {
+        let input = DataRecord {
+            id: "test-1".to_string(),
+            data: json!({"message": "Hello, world!"}).to_string(),
+            metadata: std::collections::HashMap::new(),
+            created_at: Some(chrono::Utc::now().timestamp() as u64),
+            updated_at: None,
+        };
+        
+        let result = process_data(input).unwrap();
+        
+        match result {
+            ProcessingResult::Success(output) => {
+                let data: Value = serde_json::from_str(&output.data).unwrap();
+                assert!(data.get("processed_at").is_some());
+                assert_eq!(data.get("processed_by").unwrap(), "{{plugin_name}}");
+            }
+            _ => panic!("Expected success result"),
+        }
+    }
+    
+    #[test]
+    fn test_process_json_data() {
+        let input = json!({"message": "Hello, world!"});
+        let result = process_json_data(input).unwrap();
+        
+        assert!(result.get("processed_at").is_some());
+        assert_eq!(result.get("processed_by").unwrap(), "{{plugin_name}}");
+    }
+    
+    {{#if has_ai}}
+    #[test]
+    fn test_sentiment_analysis() {
+        assert_eq!(analyze_sentiment("This is great!").unwrap(), "positive");
+        assert_eq!(analyze_sentiment("This is terrible!").unwrap(), "negative");
+        assert_eq!(analyze_sentiment("This is okay.").unwrap(), "neutral");
+    }
+    {{/if}}
+}

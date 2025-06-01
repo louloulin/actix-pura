@@ -1,0 +1,36 @@
+[package]
+name = "smart-json-processor"
+version = "0.1.0"
+edition = "2021"
+description = "Smart JSON Processor - DataFlare WASM Plugin Example"
+authors = ["DataFlare Team"]
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# WIT bindings generation
+wit-bindgen = "0.30"
+
+# JSON processing
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# WASM optimization
+wee_alloc = "0.4"
+
+[profile.release]
+# Optimize for size and performance
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[package.metadata.component]
+package = "dataflare:smart-json-processor"
+
+[package.metadata.component.dependencies]

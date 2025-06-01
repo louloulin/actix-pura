@@ -1,0 +1,60 @@
+# CSV ETL 工作流示例
+id: csv-etl-workflow
+name: CSV ETL 工作流
+description: 从 CSV 文件读取数据，进行转换，然后写入新的 CSV 文件
+version: 1.0.0
+
+# 数据源配置
+sources:
+  csv_source:
+    type: csv
+    config:
+      file_path: "../examples/data/sample.csv"
+      has_header: true
+      delimiter: ","
+    collection_mode: full
+
+# 转换配置
+transformations:
+  # 过滤成年人
+  filter_adults:
+    inputs:
+      - csv_source
+    type: filter
+    config:
+      condition: "age >= 18"
+
+  # 转换数据格式
+  transform_data:
+    inputs:
+      - filter_adults
+    type: mapping
+    config:
+      mappings:
+        - source: id
+          destination: user_id
+          transform: string
+        - source: name
+          destination: full_name
+        - source: email
+          destination: email_address
+          transform: lowercase
+        - source: age
+          destination: user_age
+
+# 目标配置
+destinations:
+  csv_output:
+    inputs:
+      - transform_data
+    type: csv
+    config:
+      file_path: "../examples/data/transformed_output.csv"
+      delimiter: ","
+      write_header: true
+
+# 元数据
+metadata:
+  owner: admin
+  department: data
+  created: "2023-05-19"

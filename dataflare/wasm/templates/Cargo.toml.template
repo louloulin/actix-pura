@@ -1,0 +1,95 @@
+[package]
+name = "{{plugin_name}}"
+version = "1.0.0"
+edition = "2021"
+description = "DataFlare WASM插件: {{plugin_name}}"
+authors = ["DataFlare Team"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dataflare/{{plugin_name}}"
+keywords = ["dataflare", "wasm", "plugin", "data-processing"]
+categories = ["wasm", "data-structures"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+
+# DataFlare WASM SDK (如果可用)
+# dataflare-wasm-sdk = "1.0"
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+  "console",
+]
+
+[dependencies.wasm-bindgen]
+version = "0.2"
+
+# 开发依赖
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+# 构建配置
+[profile.release]
+# 优化大小
+opt-level = "s"
+# 启用链接时优化
+lto = true
+# 减少代码大小
+codegen-units = 1
+# 去除panic信息以减少大小
+panic = "abort"
+
+[profile.dev]
+# 开发时保持调试信息
+debug = true
+opt-level = 0
+
+# WASM特定配置
+[package.metadata.wasm-pack.profile.release]
+# 生成更小的WASM文件
+wasm-opt = ["-Os", "--enable-mutable-globals"]
+
+[package.metadata.wasm-pack.profile.dev]
+# 开发时保持调试信息
+wasm-opt = false
+
+# 插件元数据
+[package.metadata.dataflare]
+# 插件类型
+plugin_type = "processor"
+# 支持的DataFlare版本
+dataflare_version = ">=4.0.0"
+# 插件能力
+capabilities = [
+    "process",
+    "transform",
+    "filter"
+]
+# 资源需求
+resources = { memory = "64MB", cpu = "1 core" }
+# 安全权限
+permissions = { network = false, filesystem = false }
+
+# 示例配置
+[[example]]
+name = "basic_usage"
+path = "examples/basic_usage.rs"
+
+[[example]]
+name = "advanced_processing"
+path = "examples/advanced_processing.rs"
+
+# 基准测试
+[[bench]]
+name = "performance"
+harness = false
+
+# 集成测试
+[[test]]
+name = "integration"
+path = "tests/integration_test.rs"
