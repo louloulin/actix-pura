@@ -6,7 +6,9 @@
 use std::collections::HashMap;
 use chrono::Utc;
 use dataflare_core::message::DataRecord;
-use crate::{PluginRecord, OwnedPluginRecord, PluginType, SmartPlugin, PluginResult, Result};
+use crate::{PluginRecord, OwnedPluginRecord, SmartPlugin, PluginResult};
+use crate::interface::PluginType;
+use crate::core::Result;
 
 /// Create a test DataRecord with the given data
 pub fn create_test_data_record(data: serde_json::Value) -> DataRecord {
@@ -37,7 +39,8 @@ pub fn create_test_plugin_record(data: &[u8]) -> OwnedPluginRecord {
         value: data.to_vec(),
         metadata: HashMap::new(),
         timestamp: Utc::now().timestamp_millis(),
-
+        key: None,
+        partition: None,
         offset: 0,
     }
 }
@@ -51,7 +54,8 @@ pub fn create_test_plugin_record_with_metadata(
         value: data.to_vec(),
         metadata,
         timestamp: Utc::now().timestamp_millis(),
-
+        key: None,
+        partition: None,
         offset: 0,
     }
 }
@@ -67,7 +71,8 @@ pub fn create_test_plugin_record_full(
         value: data.to_vec(),
         metadata,
         timestamp: Utc::now().timestamp_millis(),
-
+        key,
+        partition: None,
         offset,
     }
 }
@@ -140,7 +145,13 @@ impl SmartPlugin for MockPlugin {
     }
 
     fn plugin_type(&self) -> crate::plugin::PluginType {
-        self.plugin_type.clone()
+        // 转换interface::PluginType到plugin::PluginType
+        match self.plugin_type {
+            PluginType::Filter => crate::plugin::PluginType::Filter,
+            PluginType::Transformer => crate::plugin::PluginType::Map,
+            PluginType::Aggregator => crate::plugin::PluginType::Aggregator,
+            PluginType::Sink => crate::plugin::PluginType::Sink,
+        }
     }
 }
 

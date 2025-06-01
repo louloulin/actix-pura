@@ -40,5 +40,5 @@ tokio-test = "0.4"
 criterion = "0.5"
 
 [[bench]]
-name = "plugin_performance"
+name = "performance_benchmark"
 harness = false

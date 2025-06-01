@@ -421,7 +421,7 @@ mod tests {
     struct TestPlugin;
 
     impl DataFlarePlugin for TestPlugin {
-        fn process(&self, record: &PluginRecord) -> Result<PluginResult, crate::interface::PluginError> {
+        fn process(&self, record: &PluginRecord) -> std::result::Result<PluginResult, crate::interface::PluginError> {
             let data = std::str::from_utf8(record.value).map_err(|e| {
                 crate::interface::PluginError::processing(format!("UTF-8 parsing failed: {}", e))
             })?;
