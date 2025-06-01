@@ -15,7 +15,10 @@ use dataflare_core::{
     model::Schema,
 };
 
-use crate::core::{DataFlarePlugin, PluginRecord, PluginResult, PluginError, Result};
+// Import from new interface module
+use crate::interface::{DataFlarePlugin, PluginRecord, PluginResult, PluginError};
+// Legacy compatibility
+use crate::core::{Result};
 
 /// 拥有的插件记录（用于从DataRecord转换）
 #[derive(Debug)]
@@ -151,7 +154,7 @@ impl SmartPluginAdapter {
             .collect();
 
         // Initialize plugin with configuration
-        plugin.initialize(&string_config)
+        plugin.initialize(&config)
             .map_err(|e| DataFlareError::Processing(format!("插件初始化失败: {}", e)))?;
 
         let name = plugin.name().to_string();
@@ -171,7 +174,24 @@ impl SmartPluginAdapter {
 
     /// Get plugin information
     pub fn plugin_info(&self) -> crate::core::PluginInfo {
-        self.plugin.info()
+        let info = self.plugin.info();
+        // Convert from interface::PluginInfo to core::PluginInfo
+        crate::core::PluginInfo {
+            name: info.name,
+            version: info.version,
+            plugin_type: match info.plugin_type {
+                crate::interface::PluginType::Source => crate::core::PluginType::Source,
+                crate::interface::PluginType::Destination => crate::core::PluginType::Sink,
+                crate::interface::PluginType::Processor => crate::core::PluginType::Processor,
+                crate::interface::PluginType::Transformer => crate::core::PluginType::Transform,
+                crate::interface::PluginType::Filter => crate::core::PluginType::Filter,
+                crate::interface::PluginType::Aggregator => crate::core::PluginType::Aggregate,
+                crate::interface::PluginType::Custom(_) => crate::core::PluginType::Processor, // 映射到Processor
+            },
+            description: Some(info.description),
+            author: info.author,
+            api_version: info.api_version,
+        }
     }
 
     /// Process a single record synchronously (internal method)
@@ -183,11 +203,12 @@ impl SmartPluginAdapter {
         let plugin_record = owned_plugin_record.as_plugin_record();
 
         // Process with the plugin
-        let result = self.plugin.process(&plugin_record)?;
+        let result = self.plugin.process(&plugin_record)
+            .map_err(|e| crate::core::PluginError::Execution(format!("Interface plugin error: {}", e)))?;
 
         // Update metrics
         let processing_time = start_time.elapsed();
-        let filtered = !result.should_keep();
+        let filtered = result.is_filtered();
         self.metrics.update(processing_time, filtered);
 
         // Convert result back to DataRecord
@@ -209,7 +230,7 @@ impl SmartPluginAdapter {
                 // For non-string data, we serialize to JSON
                 warn!("Non-string data requires serialization, creating owned copy");
                 let serialized = serde_json::to_string(&record.data)
-                    .map_err(|e| PluginError::Serialization(format!("Serialization failed: {}", e)))?;
+                    .map_err(|e| crate::core::PluginError::Serialization(format!("Serialization failed: {}", e)))?;
                 serialized.into_bytes()
             }
         };
@@ -230,15 +251,7 @@ impl SmartPluginAdapter {
         original: &DataRecord,
     ) -> Result<Option<DataRecord>> {
         match result {
-            PluginResult::Filtered(keep) => {
-                if keep {
-                    Ok(Some(original.clone()))
-                } else {
-                    debug!("Record filtered out by plugin {}", self.name);
-                    Ok(None)
-                }
-            }
-            PluginResult::Transformed(data) => {
+            PluginResult::Success { data, metadata } => {
                 let mut new_record = original.clone();
 
                 // Try to parse as JSON, fall back to string
@@ -255,46 +268,26 @@ impl SmartPluginAdapter {
                 new_record.data = json_value;
                 new_record.updated_at = chrono::Utc::now();
 
-                Ok(Some(new_record))
-            }
-            PluginResult::Aggregated(data) => {
-                // Similar to transformed, but mark as aggregated
-                let mut new_record = original.clone();
-
-                let json_value = if let Ok(s) = std::str::from_utf8(&data) {
-                    serde_json::from_str(s).unwrap_or_else(|_| {
-                        serde_json::Value::String(s.to_string())
-                    })
-                } else {
-                    use base64::Engine;
-                    serde_json::Value::String(base64::engine::general_purpose::STANDARD.encode(&data))
-                };
-
-                new_record.data = json_value;
-                new_record.updated_at = chrono::Utc::now();
-                new_record.metadata.insert("aggregated".to_string(), "true".to_string());
-
-                Ok(Some(new_record))
-            }
-            PluginResult::Processed(outputs) => {
-                // For multiple outputs, we return the first one
-                // TODO: Handle multiple outputs properly in the future
-                if let Some(first_output) = outputs.first() {
-                    self.convert_result_to_record(
-                        PluginResult::Transformed(first_output.clone()),
-                        original,
-                    )
-                } else {
-                    Ok(None)
+                // Update metadata if provided
+                if let Some(meta) = metadata {
+                    for (key, value) in meta {
+                        new_record.metadata.insert(key, value);
+                    }
                 }
+
+                Ok(Some(new_record))
+            }
+            PluginResult::Filtered => {
+                debug!("Record filtered out by plugin {}", self.name);
+                Ok(None)
             }
             PluginResult::Skip => {
                 debug!("Record skipped by plugin {}", self.name);
                 Ok(None)
             }
-            PluginResult::Error(msg) => {
-                error!("Plugin {} returned error: {}", self.name, msg);
-                Err(PluginError::Execution(msg))
+            PluginResult::Error { message, code: _ } => {
+                error!("Plugin {} returned error: {}", self.name, message);
+                Err(crate::core::PluginError::Execution(message))
             }
         }
     }
@@ -308,14 +301,8 @@ impl Processor for SmartPluginAdapter {
         if let serde_json::Value::Object(map) = config {
             self.config = map.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 
-            // Convert to string map for plugin initialization
-            let string_config: HashMap<String, String> = self.config
-                .iter()
-                .map(|(k, v)| (k.clone(), v.to_string()))
-                .collect();
-
             // Re-initialize plugin with new config
-            self.plugin.initialize(&string_config)
+            self.plugin.initialize(&self.config)
                 .map_err(|e| DataFlareError::Processing(format!("插件重新初始化失败: {}", e)))?;
 
             info!("Plugin {} configured successfully", self.name);
@@ -414,8 +401,8 @@ impl Processor for SmartPluginAdapter {
             self.metrics.processing_rate()
         );
 
-        // Finalize the plugin
-        self.plugin.finalize()
+        // Cleanup the plugin
+        self.plugin.cleanup()
             .map_err(|e| DataFlareError::Processing(format!("插件清理失败: {}", e)))?;
 
         Ok(())
@@ -428,26 +415,26 @@ use base64;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{DataFlarePlugin, PluginRecord, PluginResult, PluginType};
+    use crate::interface::{DataFlarePlugin, PluginRecord, PluginResult, PluginType};
 
     // Test plugin implementation
     struct TestPlugin;
 
     impl DataFlarePlugin for TestPlugin {
-        fn process(&self, record: &PluginRecord) -> Result<PluginResult> {
-            let data = record.value_as_str().map_err(|e| {
-                PluginError::Execution(format!("UTF-8 parsing failed: {}", e))
+        fn process(&self, record: &PluginRecord) -> Result<PluginResult, crate::interface::PluginError> {
+            let data = std::str::from_utf8(record.value).map_err(|e| {
+                crate::interface::PluginError::processing(format!("UTF-8 parsing failed: {}", e))
             })?;
             if data.contains("filter") {
-                Ok(PluginResult::Filtered(false))
+                Ok(PluginResult::filtered())
             } else {
-                Ok(PluginResult::Transformed(data.to_uppercase().into_bytes()))
+                Ok(PluginResult::success(data.to_uppercase().into_bytes()))
             }
         }
 
         fn name(&self) -> &str { "test_plugin" }
         fn version(&self) -> &str { "1.0.0" }
-        fn plugin_type(&self) -> PluginType { PluginType::Transform }
+        fn plugin_type(&self) -> PluginType { PluginType::Transformer }
     }
 
     // Note: Async tests are commented out due to tokio dependency issues
@@ -502,6 +489,6 @@ mod tests {
         let info = adapter.plugin_info();
         assert_eq!(info.name, "test_plugin");
         assert_eq!(info.version, "1.0.0");
-        assert_eq!(info.plugin_type, PluginType::Transform);
+        assert_eq!(info.plugin_type, crate::core::PluginType::Transform);
     }
 }

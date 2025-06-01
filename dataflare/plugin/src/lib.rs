@@ -14,11 +14,23 @@
 #![warn(missing_docs)]
 #![warn(rustdoc::missing_doc_code_examples)]
 
+// New 3-layer architecture modules
+pub mod interface;
+pub mod backend;
+pub mod pool;
+
+// Core modules
 pub mod core;
 pub mod runtime;
-pub mod adapter;
+
+// Performance optimization modules
 pub mod wasm_pool;
 pub mod memory_pool;
+pub mod batch;
+pub mod manager;
+
+// Legacy compatibility modules
+pub mod adapter;
 
 // Legacy modules (deprecated)
 #[deprecated(note = "Use core module instead")]
@@ -31,15 +43,32 @@ pub mod error;
 #[cfg(test)]
 pub mod test_utils;
 
-// Re-export main types for convenience
-pub use core::{
-    DataFlarePlugin, PluginType, PluginInfo, PluginRecord, PluginResult, PluginError, Result,
-    BatchPlugin, BatchStats, API_VERSION,
+// Re-export main types for new 3-layer architecture
+pub use interface::{
+    DataFlarePlugin, PluginRecord, PluginResult, PluginError, PluginType, PluginInfo, PluginState,
 };
-pub use runtime::{PluginRuntime, PluginRuntimeConfig, PluginMetrics, RuntimeSummary};
-pub use adapter::{SmartPluginAdapter, OwnedPluginRecord};
+pub use backend::{
+    PluginBackend, PluginBackendConfig, BackendType, NativeBackend, WasmBackend,
+    SecurityPolicy, ResourceLimits, BackendStats,
+};
+pub use pool::{
+    PluginPool, PluginPoolConfig, PluginInstanceHandle, PoolStats,
+};
+
+// Re-export core types for compatibility
+pub use core::{
+    API_VERSION,
+};
+pub use runtime::{PluginRuntime, PluginRuntimeConfig, RuntimeSummary};
+
+// Performance optimization re-exports
 pub use wasm_pool::{WasmInstancePool, WasmPoolConfig};
 pub use memory_pool::{MemoryPool, MemoryPoolConfig, BufferSize};
+pub use batch::{BatchPlugin, BatchConfig, BatchResult, BatchStats, BatchAdapter};
+pub use manager::{PluginManager, PluginManagerConfig, PluginMetrics, FailureRecoveryConfig};
+
+// Legacy compatibility re-exports
+pub use adapter::{SmartPluginAdapter, OwnedPluginRecord};
 
 // Legacy re-exports (deprecated)
 #[deprecated(note = "Use DataFlarePlugin instead")]

@@ -39,7 +39,7 @@ impl std::fmt::Display for PluginType {
 
 /// 零拷贝插件记录结构
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PluginRecord<'a> {
     /// 记录值（零拷贝引用）
     pub value: &'a [u8],
@@ -105,6 +105,16 @@ pub enum PluginResult {
 }
 
 impl PluginResult {
+    /// 创建成功的转换结果
+    pub fn success(data: Vec<u8>) -> Self {
+        PluginResult::Transformed(data)
+    }
+
+    /// 创建过滤结果
+    pub fn filtered() -> Self {
+        PluginResult::Filtered(false)
+    }
+
     /// 检查结果是否应该保留
     pub fn should_keep(&self) -> bool {
         match self {

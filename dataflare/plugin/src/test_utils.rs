@@ -37,7 +37,7 @@ pub fn create_test_plugin_record(data: &[u8]) -> OwnedPluginRecord {
         value: data.to_vec(),
         metadata: HashMap::new(),
         timestamp: Utc::now().timestamp_millis(),
-        key: None,
+
         offset: 0,
     }
 }
@@ -51,7 +51,7 @@ pub fn create_test_plugin_record_with_metadata(
         value: data.to_vec(),
         metadata,
         timestamp: Utc::now().timestamp_millis(),
-        key: None,
+
         offset: 0,
     }
 }
@@ -67,7 +67,7 @@ pub fn create_test_plugin_record_full(
         value: data.to_vec(),
         metadata,
         timestamp: Utc::now().timestamp_millis(),
-        key,
+
         offset,
     }
 }
@@ -100,8 +100,14 @@ impl MockPlugin {
         F: Fn(&str) -> bool + Send + Sync + 'static,
     {
         Self::new(name, "1.0.0", PluginType::Filter, move |record| {
-            let data = record.value_as_str()?;
-            Ok(PluginResult::Filtered(predicate(data)))
+            let data = std::str::from_utf8(record.value).map_err(|e| {
+                crate::interface::PluginError::processing(format!("UTF-8 parsing failed: {}", e))
+            })?;
+            if predicate(data) {
+                Ok(PluginResult::success(record.value.to_vec()))
+            } else {
+                Ok(PluginResult::filtered())
+            }
         })
     }
 
@@ -110,10 +116,12 @@ impl MockPlugin {
     where
         F: Fn(&str) -> String + Send + Sync + 'static,
     {
-        Self::new(name, "1.0.0", PluginType::Map, move |record| {
-            let data = record.value_as_str()?;
+        Self::new(name, "1.0.0", PluginType::Transformer, move |record| {
+            let data = std::str::from_utf8(record.value).map_err(|e| {
+                crate::interface::PluginError::processing(format!("UTF-8 parsing failed: {}", e))
+            })?;
             let result = transform(data);
-            Ok(PluginResult::Mapped(result.into_bytes()))
+            Ok(PluginResult::success(result.into_bytes()))
         })
     }
 }
@@ -131,7 +139,7 @@ impl SmartPlugin for MockPlugin {
         &self.version
     }
 
-    fn plugin_type(&self) -> PluginType {
+    fn plugin_type(&self) -> crate::plugin::PluginType {
         self.plugin_type.clone()
     }
 }

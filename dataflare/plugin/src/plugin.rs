@@ -5,7 +5,8 @@
 
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::{PluginRecord, PluginError, Result};
+use crate::{PluginRecord, PluginError};
+use crate::core::Result;
 
 /// Plugin processing result
 #[derive(Debug, Clone)]
@@ -162,7 +163,7 @@ impl std::fmt::Display for PluginType {
 impl std::str::FromStr for PluginType {
     type Err = PluginError;
 
-    fn from_str(s: &str) -> Result<Self> {
+    fn from_str(s: &str) -> std::result::Result<Self, crate::interface::PluginError> {
         match s.to_lowercase().as_str() {
             "filter" => Ok(Self::Filter),
             "map" => Ok(Self::Map),
@@ -171,7 +172,7 @@ impl std::str::FromStr for PluginType {
             custom if custom.starts_with("custom:") => {
                 Ok(Self::Custom(custom[7..].to_string()))
             }
-            _ => Err(PluginError::Configuration(format!("Unknown plugin type: {}", s))),
+            _ => Err(crate::interface::PluginError::configuration(format!("Unknown plugin type: {}", s))),
         }
     }
 }
@@ -275,7 +276,9 @@ mod tests {
 
     impl SmartPlugin for TestFilterPlugin {
         fn process(&self, record: &PluginRecord) -> Result<PluginResult> {
-            let data = record.value_as_str()?;
+            let data = std::str::from_utf8(record.value).map_err(|e| {
+                crate::interface::PluginError::processing(format!("UTF-8 parsing failed: {}", e))
+            })?;
             Ok(PluginResult::Filtered(data.contains("test")))
         }
 
@@ -321,7 +324,7 @@ mod tests {
         let plugin = TestFilterPlugin;
         let metadata = HashMap::new();
 
-        let record = PluginRecord::new(b"test data", &metadata, 0);
+        let record = crate::interface::PluginRecord::new(b"test data", &metadata, 0, 0, 0);
         let result = plugin.process(&record).unwrap();
 
         match result {

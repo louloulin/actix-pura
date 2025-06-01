@@ -2,50 +2,85 @@
 //!
 //! 高性能的内存池，减少内存分配和释放开销
 
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::collections::{VecDeque, HashMap};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
-use tracing::{debug, info, warn};
+use serde::{Serialize, Deserialize};
+use tracing::{debug, info, warn, error};
 
 /// 内存块大小类别
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BufferSize {
-    /// 小缓冲区 (< 1KB)
+    /// 微小缓冲区 (< 256B)
+    Tiny,
+    /// 小缓冲区 (256B - 4KB)
     Small,
-    /// 中等缓冲区 (1KB - 64KB)
+    /// 中等缓冲区 (4KB - 64KB)
     Medium,
-    /// 大缓冲区 (> 64KB)
+    /// 大缓冲区 (64KB - 1MB)
     Large,
+    /// 超大缓冲区 (> 1MB)
+    Huge,
 }
 
 impl BufferSize {
     /// 根据大小确定缓冲区类别
     pub fn from_size(size: usize) -> Self {
-        if size < 1024 {
+        if size < 256 {
+            BufferSize::Tiny
+        } else if size < 4 * 1024 {
             BufferSize::Small
         } else if size < 64 * 1024 {
             BufferSize::Medium
-        } else {
+        } else if size < 1024 * 1024 {
             BufferSize::Large
+        } else {
+            BufferSize::Huge
         }
     }
 
     /// 获取该类别的标准大小
     pub fn standard_size(self) -> usize {
         match self {
-            BufferSize::Small => 1024,      // 1KB
+            BufferSize::Tiny => 256,         // 256B
+            BufferSize::Small => 4 * 1024,   // 4KB
             BufferSize::Medium => 64 * 1024, // 64KB
             BufferSize::Large => 1024 * 1024, // 1MB
+            BufferSize::Huge => 4 * 1024 * 1024, // 4MB
         }
     }
 
     /// 获取该类别的最大缓存数量
     pub fn max_cached(self) -> usize {
         match self {
+            BufferSize::Tiny => 2000,
             BufferSize::Small => 1000,
-            BufferSize::Medium => 100,
-            BufferSize::Large => 10,
+            BufferSize::Medium => 200,
+            BufferSize::Large => 50,
+            BufferSize::Huge => 5,
         }
+    }
+
+    /// 获取该类别的内存权重（用于内存压力计算）
+    pub fn memory_weight(self) -> f64 {
+        match self {
+            BufferSize::Tiny => 0.1,
+            BufferSize::Small => 0.5,
+            BufferSize::Medium => 2.0,
+            BufferSize::Large => 8.0,
+            BufferSize::Huge => 32.0,
+        }
+    }
+
+    /// 获取所有缓冲区类别
+    pub fn all_categories() -> &'static [BufferSize] {
+        &[
+            BufferSize::Tiny,
+            BufferSize::Small,
+            BufferSize::Medium,
+            BufferSize::Large,
+            BufferSize::Huge,
+        ]
     }
 }
 
@@ -61,18 +96,35 @@ pub struct MemoryBuffer {
     usage_count: u64,
     /// 缓冲区类别
     size_category: BufferSize,
+    /// 缓冲区ID
+    id: String,
+    /// 是否被锁定（不能被清理）
+    locked: bool,
+    /// 错误次数
+    error_count: u64,
+    /// 最大使用大小
+    max_used_size: usize,
 }
 
 impl MemoryBuffer {
     /// 创建新的内存缓冲区
     pub fn new(size: usize, category: BufferSize) -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static BUFFER_COUNTER: AtomicU64 = AtomicU64::new(0);
+
         let now = Instant::now();
+        let id = format!("buffer_{}", BUFFER_COUNTER.fetch_add(1, Ordering::SeqCst));
+
         Self {
             data: vec![0; size],
             created_at: now,
             last_used: now,
             usage_count: 0,
             size_category: category,
+            id,
+            locked: false,
+            error_count: 0,
+            max_used_size: size,
         }
     }
 
@@ -119,34 +171,126 @@ impl MemoryBuffer {
     pub fn size_category(&self) -> BufferSize {
         self.size_category
     }
+
+    /// 获取缓冲区ID
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// 锁定缓冲区
+    pub fn lock(&mut self) {
+        self.locked = true;
+    }
+
+    /// 解锁缓冲区
+    pub fn unlock(&mut self) {
+        self.locked = false;
+    }
+
+    /// 检查是否被锁定
+    pub fn is_locked(&self) -> bool {
+        self.locked
+    }
+
+    /// 标记错误
+    pub fn mark_error(&mut self) {
+        self.error_count += 1;
+    }
+
+    /// 获取错误次数
+    pub fn error_count(&self) -> u64 {
+        self.error_count
+    }
+
+    /// 检查是否健康
+    pub fn is_healthy(&self, max_errors: u64) -> bool {
+        self.error_count < max_errors
+    }
+
+    /// 获取最大使用大小
+    pub fn max_used_size(&self) -> usize {
+        self.max_used_size
+    }
+
+    /// 更新最大使用大小
+    pub fn update_max_used_size(&mut self, size: usize) {
+        if size > self.max_used_size {
+            self.max_used_size = size;
+        }
+    }
+
+    /// 获取内存效率（实际使用/分配大小）
+    pub fn memory_efficiency(&self) -> f64 {
+        if self.data.len() == 0 {
+            0.0
+        } else {
+            self.max_used_size as f64 / self.data.len() as f64
+        }
+    }
+
+    /// 检查是否应该被清理
+    pub fn should_cleanup(&self, idle_timeout: Duration, max_errors: u64, min_efficiency: f64) -> bool {
+        if self.locked {
+            return false;
+        }
+
+        // 检查空闲时间
+        if self.is_idle(idle_timeout) {
+            return true;
+        }
+
+        // 检查健康状态
+        if !self.is_healthy(max_errors) {
+            return true;
+        }
+
+        // 检查内存效率
+        if self.memory_efficiency() < min_efficiency && self.usage_count > 10 {
+            return true;
+        }
+
+        false
+    }
 }
 
 /// 内存池配置
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryPoolConfig {
+    /// 微小缓冲区最大数量
+    pub max_tiny_buffers: usize,
     /// 小缓冲区最大数量
     pub max_small_buffers: usize,
     /// 中等缓冲区最大数量
     pub max_medium_buffers: usize,
     /// 大缓冲区最大数量
     pub max_large_buffers: usize,
+    /// 超大缓冲区最大数量
+    pub max_huge_buffers: usize,
     /// 缓冲区空闲超时时间
     pub idle_timeout: Duration,
     /// 清理间隔
     pub cleanup_interval: Duration,
     /// 是否启用统计
     pub enable_stats: bool,
+    /// 内存压力阈值
+    pub memory_pressure_threshold: f64,
+    /// 最小内存效率
+    pub min_memory_efficiency: f64,
 }
 
 impl Default for MemoryPoolConfig {
     fn default() -> Self {
         Self {
+            max_tiny_buffers: 2000,
             max_small_buffers: 1000,
-            max_medium_buffers: 100,
-            max_large_buffers: 10,
+            max_medium_buffers: 200,
+            max_large_buffers: 50,
+            max_huge_buffers: 5,
             idle_timeout: Duration::from_secs(300), // 5分钟
             cleanup_interval: Duration::from_secs(60), // 1分钟
             enable_stats: true,
+            memory_pressure_threshold: 0.8,
+            min_memory_efficiency: 0.5,
         }
     }
 }
@@ -174,12 +318,16 @@ pub struct MemoryPoolStats {
 pub struct MemoryPool {
     /// 配置
     config: MemoryPoolConfig,
+    /// 微小缓冲区池
+    tiny_buffers: Arc<Mutex<VecDeque<MemoryBuffer>>>,
     /// 小缓冲区池
     small_buffers: Arc<Mutex<VecDeque<MemoryBuffer>>>,
     /// 中等缓冲区池
     medium_buffers: Arc<Mutex<VecDeque<MemoryBuffer>>>,
     /// 大缓冲区池
     large_buffers: Arc<Mutex<VecDeque<MemoryBuffer>>>,
+    /// 超大缓冲区池
+    huge_buffers: Arc<Mutex<VecDeque<MemoryBuffer>>>,
     /// 统计信息
     stats: Arc<Mutex<MemoryPoolStats>>,
     /// 最后清理时间
@@ -193,9 +341,11 @@ impl MemoryPool {
 
         Self {
             config,
+            tiny_buffers: Arc::new(Mutex::new(VecDeque::new())),
             small_buffers: Arc::new(Mutex::new(VecDeque::new())),
             medium_buffers: Arc::new(Mutex::new(VecDeque::new())),
             large_buffers: Arc::new(Mutex::new(VecDeque::new())),
+            huge_buffers: Arc::new(Mutex::new(VecDeque::new())),
             stats: Arc::new(Mutex::new(MemoryPoolStats::default())),
             last_cleanup: Arc::new(Mutex::new(Instant::now())),
         }
@@ -252,9 +402,11 @@ impl MemoryPool {
             if let Some(pool) = self.get_pool_for_category(category) {
                 if let Ok(mut pool_guard) = pool.lock() {
                     let max_size = match category {
+                        BufferSize::Tiny => self.config.max_tiny_buffers,
                         BufferSize::Small => self.config.max_small_buffers,
                         BufferSize::Medium => self.config.max_medium_buffers,
                         BufferSize::Large => self.config.max_large_buffers,
+                        BufferSize::Huge => self.config.max_huge_buffers,
                     };
 
                     if pool_guard.len() < max_size {
@@ -306,9 +458,11 @@ impl MemoryPool {
     /// 获取指定类别的池
     fn get_pool_for_category(&self, category: BufferSize) -> Option<&Arc<Mutex<VecDeque<MemoryBuffer>>>> {
         match category {
+            BufferSize::Tiny => Some(&self.tiny_buffers),
             BufferSize::Small => Some(&self.small_buffers),
             BufferSize::Medium => Some(&self.medium_buffers),
             BufferSize::Large => Some(&self.large_buffers),
+            BufferSize::Huge => Some(&self.huge_buffers),
         }
     }
 
@@ -345,9 +499,11 @@ impl MemoryPool {
         }
 
         // 清理各个池
+        total_cleaned += self.cleanup_pool(&self.tiny_buffers, "tiny");
         total_cleaned += self.cleanup_pool(&self.small_buffers, "small");
         total_cleaned += self.cleanup_pool(&self.medium_buffers, "medium");
         total_cleaned += self.cleanup_pool(&self.large_buffers, "large");
+        total_cleaned += self.cleanup_pool(&self.huge_buffers, "huge");
 
         // 更新最后清理时间
         {
@@ -413,9 +569,19 @@ impl MemoryPool {
         info!("预热内存池");
 
         // 预创建一些缓冲区
+        let tiny_count = self.config.max_tiny_buffers / 10;
         let small_count = self.config.max_small_buffers / 10;
         let medium_count = self.config.max_medium_buffers / 10;
         let large_count = self.config.max_large_buffers / 10;
+        let huge_count = self.config.max_huge_buffers / 10;
+
+        // 预热微小缓冲区
+        if let Ok(mut pool) = self.tiny_buffers.lock() {
+            for _ in 0..tiny_count {
+                let buffer = MemoryBuffer::new(BufferSize::Tiny.standard_size(), BufferSize::Tiny);
+                pool.push_back(buffer);
+            }
+        }
 
         // 预热小缓冲区
         if let Ok(mut pool) = self.small_buffers.lock() {
@@ -441,14 +607,24 @@ impl MemoryPool {
             }
         }
 
+        // 预热超大缓冲区
+        if let Ok(mut pool) = self.huge_buffers.lock() {
+            for _ in 0..huge_count {
+                let buffer = MemoryBuffer::new(BufferSize::Huge.standard_size(), BufferSize::Huge);
+                pool.push_back(buffer);
+            }
+        }
+
         // 更新统计
         if self.config.enable_stats {
             if let Ok(mut stats) = self.stats.lock() {
-                let total_created = small_count + medium_count + large_count;
+                let total_created = tiny_count + small_count + medium_count + large_count + huge_count;
                 stats.cached_buffers += total_created;
-                stats.total_memory_usage += small_count * BufferSize::Small.standard_size() +
+                stats.total_memory_usage += tiny_count * BufferSize::Tiny.standard_size() +
+                                           small_count * BufferSize::Small.standard_size() +
                                            medium_count * BufferSize::Medium.standard_size() +
-                                           large_count * BufferSize::Large.standard_size();
+                                           large_count * BufferSize::Large.standard_size() +
+                                           huge_count * BufferSize::Huge.standard_size();
             }
         }
 
@@ -456,12 +632,14 @@ impl MemoryPool {
     }
 
     /// 获取池大小信息
-    pub fn get_pool_sizes(&self) -> (usize, usize, usize) {
+    pub fn get_pool_sizes(&self) -> (usize, usize, usize, usize, usize) {
+        let tiny_size = self.tiny_buffers.lock().map(|p| p.len()).unwrap_or(0);
         let small_size = self.small_buffers.lock().map(|p| p.len()).unwrap_or(0);
         let medium_size = self.medium_buffers.lock().map(|p| p.len()).unwrap_or(0);
         let large_size = self.large_buffers.lock().map(|p| p.len()).unwrap_or(0);
+        let huge_size = self.huge_buffers.lock().map(|p| p.len()).unwrap_or(0);
 
-        (small_size, medium_size, large_size)
+        (tiny_size, small_size, medium_size, large_size, huge_size)
     }
 }
 
@@ -471,9 +649,11 @@ mod tests {
 
     #[test]
     fn test_buffer_size_categorization() {
-        assert_eq!(BufferSize::from_size(512), BufferSize::Small);
-        assert_eq!(BufferSize::from_size(2048), BufferSize::Medium);
+        assert_eq!(BufferSize::from_size(128), BufferSize::Tiny);
+        assert_eq!(BufferSize::from_size(2048), BufferSize::Small);
+        assert_eq!(BufferSize::from_size(32 * 1024), BufferSize::Medium);
         assert_eq!(BufferSize::from_size(128 * 1024), BufferSize::Large);
+        assert_eq!(BufferSize::from_size(2 * 1024 * 1024), BufferSize::Huge);
     }
 
     #[test]
@@ -492,8 +672,8 @@ mod tests {
         let pool = MemoryPool::new(config);
 
         // 获取缓冲区
-        let buffer = pool.get_buffer(1024);
-        assert_eq!(buffer.data().len(), 1024);
+        let buffer = pool.get_buffer(32 * 1024);
+        assert_eq!(buffer.data().len(), 64 * 1024); // 标准大小
         assert_eq!(buffer.size_category(), BufferSize::Medium);
 
         // 归还缓冲区
@@ -510,11 +690,11 @@ mod tests {
         let pool = MemoryPool::new(config);
 
         // 第一次分配
-        let buffer1 = pool.get_buffer(1024);
+        let buffer1 = pool.get_buffer(32 * 1024);
         pool.return_buffer(buffer1);
 
         // 第二次分配应该复用
-        let buffer2 = pool.get_buffer(1024);
+        let buffer2 = pool.get_buffer(32 * 1024);
         pool.return_buffer(buffer2);
 
         let stats = pool.get_stats();
@@ -530,10 +710,12 @@ mod tests {
 
         pool.warmup();
 
-        let (small, medium, large) = pool.get_pool_sizes();
+        let (tiny, small, medium, large, huge) = pool.get_pool_sizes();
+        assert!(tiny > 0);
         assert!(small > 0);
         assert!(medium > 0);
         assert!(large > 0);
+        assert!(huge > 0);
 
         let stats = pool.get_stats();
         assert!(stats.cached_buffers > 0);
