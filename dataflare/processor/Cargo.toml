@@ -30,7 +30,7 @@ rand = "0.8"
 # WASM plugin system dependencies
 base64 = "0.21"
 reqwest = { version = "0.11", features = ["json"] }
-dataflare-wasm = { path = "../wasm", optional = true }
+dataflare-enterprise = { path = "../wasm", optional = true }
 
 [dev-dependencies]
 criterion = "0.5.1"
@@ -40,4 +40,4 @@ tokio-test = "0.4.3"
 
 [features]
 default = []
-wasm = ["dataflare-wasm"]
+wasm = ["dataflare-enterprise"]

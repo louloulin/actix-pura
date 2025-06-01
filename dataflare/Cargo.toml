@@ -11,7 +11,7 @@ dataflare-runtime = { path = "runtime" }
 dataflare-connector = { path = "connector" }
 dataflare-processor = { path = "processor" }
 dataflare-plugin = { path = "plugin" }
-dataflare-wasm = { path = "wasm" }
+dataflare-enterprise = { path = "wasm" }
 dataflare-state = { path = "state" }
 dataflare-cli = { path = "cli" }
 

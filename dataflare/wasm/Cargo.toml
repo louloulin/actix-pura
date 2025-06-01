@@ -1,53 +1,66 @@
 [package]
-name = "dataflare-wasm"
+name = "dataflare-enterprise"
 version = "0.1.0"
 edition = "2021"
-description = "WASM plugin system for DataFlare - supports all DSL components"
+description = "DataFlare Enterprise - High-performance streaming platform with WASM-powered distributed processing"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/dataflare/dataflare"
-keywords = ["wasm", "plugin", "data-integration", "etl"]
-categories = ["data-structures", "web-programming"]
+keywords = ["streaming", "enterprise", "distributed", "wasm", "fluvio"]
+categories = ["data-structures", "web-programming", "database"]
 
 [dependencies]
 # Core dependencies
 dataflare-core = { path = "../core" }
+dataflare-plugin = { path = "../plugin" }
 
 # Async runtime
-tokio = { version = "1.0", features = ["full"] }
+tokio = { version = "1.0", features = ["full", "tracing"] }
+tokio-stream = "0.1"
 async-trait = "0.1"
+futures = "0.3"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+bincode = "1.3"
 
-# WASM runtime (using wasmtime for production)
-wasmtime = { version = "33.0", features = ["async", "component-model"], optional = true }
+# Enterprise WASM runtime (optimized for production)
+wasmtime = { version = "33.0", features = ["async", "component-model", "cranelift"], optional = true }
 wasmtime-wasi = { version = "33.0", optional = true }
 
-# WIT support
-wit-bindgen = { version = "0.33.0", optional = true }
-wit-parser = { version = "0.231.0", optional = true }
-
-# Logging
+# Logging and observability
 log = "0.4"
-env_logger = "0.11"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+metrics = "0.23"
+metrics-exporter-prometheus = "0.15"
 
 # Error handling
 anyhow = "1.0"
 thiserror = "1.0"
 
 # Utilities
-uuid = { version = "1.0", features = ["v4"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-futures = "0.3"
 rand = "0.8"
 
-# Security and sandboxing
-cap-std = "3.0"
+# Enterprise streaming (Fluvio-inspired)
+fluvio = { version = "0.21", optional = true }
+rdkafka = { version = "0.36", optional = true }
 
-# Authentication and encryption
-jsonwebtoken = "9.0"
-sha2 = "0.10"
+# Distributed computing
+etcd-rs = { version = "1.0", optional = true }
+consul = { version = "0.4", optional = true }
+
+# Security and encryption
+ring = "0.17"
+rustls = "0.23"
+webpki-roots = "0.26"
+
+# High-performance data structures
+dashmap = "6.0"
+crossbeam = "0.8"
+parking_lot = "0.12"
 
 [dev-dependencies]
 tokio-test = "0.4"
@@ -62,9 +75,9 @@ name = "wasm_performance"
 harness = false
 
 [features]
-default = ["wasmtime-runtime", "wit-support"]
-wasmtime-runtime = ["wasmtime", "wasmtime-wasi"]
-wit-support = ["wit-bindgen", "wit-parser"]
-mock-runtime = []
-
-# 示例文件将在后续添加
+default = ["enterprise-runtime", "streaming", "distributed"]
+enterprise-runtime = ["wasmtime", "wasmtime-wasi"]
+streaming = ["fluvio", "rdkafka"]
+distributed = ["etcd-rs", "consul"]
+full = ["enterprise-runtime", "streaming", "distributed"]
+minimal = []

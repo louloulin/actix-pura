@@ -1,8 +1,8 @@
 [package]
-name = "dataflare-wasm-cli"
+name = "dataflare-enterprise-cli"
 version = "0.1.0"
 edition = "2021"
-description = "DataFlare WASM Plugin CLI Tool"
+description = "DataFlare Enterprise CLI Tool"
 authors = ["DataFlare Team"]
 license = "MIT"
 repository = "https://github.com/dataflare/dataflare"
@@ -58,7 +58,7 @@ indicatif = "0.17"
 colored = "2.0"
 
 # DataFlare dependencies
-# dataflare-wasm = { path = ".." }
+# dataflare-enterprise = { path = ".." }
 
 # Additional dependencies
 dirs = "5.0"

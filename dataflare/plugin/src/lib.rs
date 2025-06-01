@@ -67,6 +67,9 @@ pub use memory_pool::{MemoryPool, MemoryPoolConfig, BufferSize};
 pub use batch::{BatchPlugin, BatchConfig, BatchResult, BatchStats, BatchAdapter};
 pub use manager::{PluginManager, PluginManagerConfig, PluginMetrics, FailureRecoveryConfig};
 
+// Note: For advanced WASM features (marketplace, distributed, AI integration),
+// use the separate `dataflare-wasm` crate which provides enterprise-grade WASM capabilities.
+
 // Legacy compatibility re-exports
 pub use adapter::{SmartPluginAdapter, OwnedPluginRecord};
 

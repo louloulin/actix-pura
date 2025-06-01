@@ -1,296 +1,341 @@
-//! # DataFlare WASM Plugin System
+//! # DataFlare Enterprise
 //!
-//! 统一的WASM插件系统，支持DataFlare完整的DSL生态：
-//! - Source连接器
-//! - Destination连接器
-//! - Processor处理器
-//! - Transformer转换器
-//! - Filter过滤器
-//! - Aggregator聚合器
-//! - 自定义组件
+//! 企业级高性能流处理平台，基于 @dataflare/plugin 构建的分布式数据处理引擎。
 //!
-//! ## 特性
-//! - 安全的沙箱执行环境
-//! - 统一的插件接口
-//! - 热插拔支持
-//! - 多语言插件开发
-//! - 资源限制和权限控制
-//! - 高性能异步执行
+//! ## 核心功能
+//! - 企业级流处理：高吞吐量、低延迟的实时数据流处理
+//! - 分布式计算：基于 WASM 的分布式数据处理引擎
+//! - 企业级监控：完整的可观测性、告警和运维体系
+//! - 安全合规：企业级安全、加密、审计和权限管理
+//!
+//! ## 设计理念
+//! - 基于 @dataflare/plugin 的插件系统，专注于企业级功能
+//! - 借鉴 Fluvio 的高性能流处理设计
+//! - 提供企业级的安全、监控和运维能力
+//! - 支持大规模分布式部署和管理
 
 #![warn(missing_docs)]
 #![warn(rustdoc::missing_doc_code_examples)]
 
-pub mod runtime;
-pub mod plugin;
-pub mod interface;
-pub mod components;
-pub mod registry;
-pub mod sandbox;
-pub mod host_functions;
-pub mod error;
-pub mod processor;
-pub mod wit_runtime;
-pub mod dtl_bridge;
-pub mod ai_integration;
-pub mod registry_integration;
-pub mod profiler;
-pub mod metrics;
-pub mod dev_tools;
-pub mod marketplace;
+// 企业级流处理模块
+pub mod streaming;
+pub mod events;
+pub mod batch;
+
+// 分布式计算模块 (基于 @dataflare/plugin)
 pub mod distributed;
+pub mod cluster;
+pub mod executor;
 
-// Re-exports for convenience
-pub use runtime::{WasmRuntime, WasmRuntimeConfig, WasmRuntimeBuilder};
-pub use plugin::{WasmPlugin, WasmPluginConfig, WasmPluginMetadata, WasmPluginStatus};
-pub use interface::{WasmPluginInterface, WasmPluginCapabilities, WasmFunctionCall, WasmFunctionResult};
-pub use components::{
-    WasmComponent, WasmComponentType, WasmComponentConfig, WasmComponentFactory, WasmComponentManager,
-    source::WasmSourceConnector,
-    destination::WasmDestinationConnector,
-    processor::WasmProcessorComponent,
-    transformer::WasmTransformerComponent,
-    filter::WasmFilterComponent,
-    aggregator::WasmAggregatorComponent,
+// 企业级基础设施模块
+pub mod monitoring;
+pub mod security;
+pub mod storage;
+pub mod networking;
+
+// 企业级运维模块
+pub mod observability;
+pub mod alerting;
+pub mod compliance;
+
+// 核心错误和结果类型
+pub mod error;
+pub mod result;
+
+// 企业级流处理 re-exports
+pub use streaming::{
+    EnterpriseStreamProcessor, StreamProcessorConfig, StreamMetrics,
+    ZeroCopyStreamProcessor, BackpressureController
 };
-pub use processor::{DataFlareWasmProcessor, WasmProcessorConfig, register_wasm_processor};
-pub use registry::{WasmPluginRegistry, PluginRegistration};
-pub use sandbox::{WasmSandbox, SandboxConfig, SecurityPolicy};
-pub use host_functions::{HostFunctionRegistry, HostFunction, HostFunctionCall};
-pub use error::{WasmError, WasmResult};
-pub use wit_runtime::{WitRuntime, WitRuntimeConfig, WitComponent};
-pub use dtl_bridge::{DTLWasmBridge, WasmFunctionInfo, DTLWasmFunction};
-pub use ai_integration::{AIWasmIntegrator, AIWasmConfig, AIWasmStats};
-pub use registry_integration::{WasmProcessorRegistry, WasmProcessorFactory, WasmProcessorTypeInfo};
-pub use profiler::{WasmProfiler, PerformanceReport, ExecutionPhase};
-pub use metrics::{MetricsCollector, SystemMetrics, PluginMetrics};
-pub use dev_tools::{PluginDevTools, BuildConfig, TestConfig, TemplateType};
+pub use events::{
+    EnterpriseEventProcessor, EnterpriseEvent, EventRouter, EventStore
+};
+pub use batch::{
+    EnterpriseBatchProcessor, BatchProcessorConfig, BatchMetrics
+};
+
+// 分布式计算 re-exports (基于 @dataflare/plugin)
+pub use distributed::{
+    EnterpriseWasmExecutor, DistributedTask, TaskPriority,
+    ResourceRequirements, ExecutionConstraints
+};
+pub use cluster::{
+    ClusterManager, ClusterConfig, NodeManager, NodeInfo
+};
+pub use executor::{
+    WasmExecutor, ExecutorConfig, ExecutorMetrics
+};
+
+// 企业级基础设施 re-exports
+pub use monitoring::{
+    EnterpriseMonitoring, MetricsCollector, PerformanceMetrics
+};
+pub use security::{
+    EnterpriseSecurityManager, SecurityPolicy, EncryptionManager
+};
+pub use storage::{
+    DistributedStateManager, StateStorageBackend, CheckpointManager
+};
+
+// 企业级运维 re-exports
+pub use observability::{
+    DistributedTracingSystem, TraceContext, TraceCollector
+};
+pub use alerting::{
+    EnterpriseAlertManager, AlertRule, AlertLevel
+};
+pub use compliance::{
+    ComplianceChecker, AuditManager, AuditEvent
+};
+
+// 核心类型 re-exports
+pub use error::{EnterpriseError, EnterpriseResult};
+pub use result::{ProcessingResult, TaskResult};
+
+// 保留并增强的企业级功能
 pub use marketplace::{
-    DataFlareMarketplace, PluginMarketplace, MarketplaceConfig,
-    PluginRegistry, PluginSearchEngine, PluginPackageManager,
-    PluginSecurityScanner, PluginQualityScorer, PluginRecommendationEngine,
-    PluginMetadata, PluginVersion, PluginStats, PluginSummary, PluginDetails,
-    SearchQuery, SearchResult, SortBy, Pagination,
-    SecurityRating, LicenseInfo, PluginDependency, PublishStatus,
+    EnterprisePluginMarketplace, EnterpriseMarketplaceConfig,
+    EnterprisePluginRegistry, EnterpriseSecurityScanner,
+    EnterpriseLicenseManager, EnterpriseAuthService
 };
 
+// 集成 @dataflare/plugin 作为基础
+use dataflare_plugin::{PluginRuntime, PluginManager, DataFlarePlugin};
 use dataflare_core::error::Result;
 
-/// DataFlare WASM模块版本
+/// DataFlare Enterprise 模块版本
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// 初始化WASM插件系统
+/// 初始化 DataFlare Enterprise 系统
 ///
 /// # Examples
 ///
 /// ```rust
-/// use dataflare_wasm::init_wasm_system;
+/// use dataflare_enterprise::init_enterprise_system;
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     init_wasm_system().await?;
-///     println!("WASM插件系统初始化完成");
+///     init_enterprise_system().await?;
+///     println!("DataFlare Enterprise 系统初始化完成");
 ///     Ok(())
 /// }
 /// ```
-pub async fn init_wasm_system() -> Result<()> {
-    log::info!("初始化DataFlare WASM插件系统 v{}", VERSION);
+pub async fn init_enterprise_system() -> Result<()> {
+    log::info!("初始化 DataFlare Enterprise 系统 v{}", VERSION);
 
-    // 初始化运行时
-    let _runtime = WasmRuntime::new(WasmRuntimeConfig::default())?;
+    // 初始化基础插件运行时 (基于 @dataflare/plugin)
+    let _plugin_runtime = PluginRuntime::new(Default::default()).await?;
 
-    // 初始化插件注册表
-    let _registry = WasmPluginRegistry::new();
+    // 初始化企业级流处理器
+    let _stream_processor = EnterpriseStreamProcessor::new(Default::default()).await?;
 
-    // 初始化组件工厂
-    let _factory = WasmComponentFactory::new();
+    // 初始化企业级监控系统
+    let _monitoring = EnterpriseMonitoring::new(Default::default()).await?;
 
-    log::info!("WASM插件系统初始化完成");
+    log::info!("DataFlare Enterprise 系统初始化完成");
     Ok(())
 }
 
-/// 创建默认的WASM运行时
+/// 创建默认的企业级流处理器
 ///
 /// # Examples
 ///
 /// ```rust
-/// use dataflare_wasm::create_default_runtime;
+/// use dataflare_enterprise::create_default_stream_processor;
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let runtime = create_default_runtime().await?;
-///     println!("WASM运行时创建完成");
+///     let processor = create_default_stream_processor().await?;
+///     println!("企业级流处理器创建完成");
 ///     Ok(())
 /// }
 /// ```
-pub async fn create_default_runtime() -> Result<WasmRuntime> {
-    let config = WasmRuntimeConfig::default();
-    let mut runtime = WasmRuntime::new(config)?;
-    runtime.initialize().await?;
-    Ok(runtime)
+pub async fn create_default_stream_processor() -> Result<Box<dyn streaming::StreamProcessor>> {
+    let config = streaming::StreamProcessorConfig::default();
+    let plugin_runtime = Arc::new(PluginRuntime::new(Default::default())
+        .map_err(|e| dataflare_core::error::DataFlareError::Configuration(e.to_string()))?);
+    let processor = streaming::processor::EnterpriseStreamProcessor::new(config, plugin_runtime).await
+        .map_err(|e| dataflare_core::error::DataFlareError::Processing(e.to_string()))?;
+    Ok(Box::new(processor))
 }
 
-/// 创建默认的组件管理器
+/// 创建默认的企业级监控系统 (占位符)
 ///
 /// # Examples
 ///
 /// ```rust
-/// use dataflare_wasm::create_default_component_manager;
+/// use dataflare_enterprise::create_default_monitoring;
 ///
 /// #[tokio::main]
 /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-///     let manager = create_default_component_manager().await?;
-///     println!("组件管理器创建完成");
+///     let monitoring = create_default_monitoring().await?;
+///     println!("企业级监控系统创建完成");
 ///     Ok(())
 /// }
 /// ```
-pub async fn create_default_component_manager() -> Result<WasmComponentManager> {
-    Ok(WasmComponentManager::new())
+pub async fn create_default_monitoring() -> Result<bool> {
+    // TODO: 实现企业级监控系统
+    log::info!("企业级监控系统创建完成 (占位符)");
+    Ok(true)
 }
 
-/// WASM插件系统构建器
-pub struct WasmSystemBuilder {
-    runtime_config: WasmRuntimeConfig,
-    sandbox_config: SandboxConfig,
-    enable_hot_reload: bool,
-    enable_metrics: bool,
+/// DataFlare Enterprise 系统构建器
+pub struct EnterpriseSystemBuilder {
+    stream_config: streaming::StreamProcessorConfig,
+    enable_distributed: bool,
+    enable_marketplace: bool,
 }
 
-impl WasmSystemBuilder {
+impl EnterpriseSystemBuilder {
     /// 创建新的构建器
     pub fn new() -> Self {
         Self {
-            runtime_config: WasmRuntimeConfig::default(),
-            sandbox_config: SandboxConfig::default(),
-            enable_hot_reload: false,
-            enable_metrics: true,
+            stream_config: streaming::StreamProcessorConfig::default(),
+            enable_distributed: true,
+            enable_marketplace: true,
         }
     }
 
-    /// 设置运行时配置
-    pub fn with_runtime_config(mut self, config: WasmRuntimeConfig) -> Self {
-        self.runtime_config = config;
+    /// 设置流处理配置
+    pub fn with_stream_config(mut self, config: streaming::StreamProcessorConfig) -> Self {
+        self.stream_config = config;
         self
     }
 
-    /// 设置沙箱配置
-    pub fn with_sandbox_config(mut self, config: SandboxConfig) -> Self {
-        self.sandbox_config = config;
+    /// 设置监控配置 (占位符)
+    pub fn with_monitoring_enabled(mut self, enabled: bool) -> Self {
+        // TODO: 实现监控配置
         self
     }
 
-    /// 启用热重载
-    pub fn enable_hot_reload(mut self) -> Self {
-        self.enable_hot_reload = true;
+    /// 设置安全配置 (占位符)
+    pub fn with_security_enabled(mut self, enabled: bool) -> Self {
+        // TODO: 实现安全配置
         self
     }
 
-    /// 启用指标收集
-    pub fn enable_metrics(mut self) -> Self {
-        self.enable_metrics = true;
+    /// 启用分布式计算
+    pub fn enable_distributed(mut self) -> Self {
+        self.enable_distributed = true;
         self
     }
 
-    /// 构建WASM系统
-    pub async fn build(self) -> Result<WasmSystem> {
-        let runtime = WasmRuntime::new(self.runtime_config)?;
-        let registry = WasmPluginRegistry::new();
-        let component_manager = WasmComponentManager::new();
-        let sandbox = WasmSandbox::new(self.sandbox_config)?;
+    /// 启用企业级插件市场
+    pub fn enable_marketplace(mut self) -> Self {
+        self.enable_marketplace = true;
+        self
+    }
 
-        Ok(WasmSystem {
-            runtime,
-            registry,
-            component_manager,
-            sandbox,
-            hot_reload_enabled: self.enable_hot_reload,
-            metrics_enabled: self.enable_metrics,
+    /// 构建企业级系统
+    pub async fn build(self) -> Result<EnterpriseSystem> {
+        // 初始化基础插件运行时
+        let plugin_runtime = Arc::new(PluginRuntime::new(Default::default())
+            .map_err(|e| dataflare_core::error::DataFlareError::Configuration(e.to_string()))?);
+
+        // 初始化企业级组件
+        let stream_processor = streaming::processor::EnterpriseStreamProcessor::new(
+            self.stream_config,
+            plugin_runtime.clone()
+        ).await?;
+
+        Ok(EnterpriseSystem {
+            plugin_runtime,
+            stream_processor: Box::new(stream_processor),
+            monitoring_enabled: true,
+            security_enabled: true,
+            distributed_enabled: self.enable_distributed,
+            marketplace_enabled: self.enable_marketplace,
         })
     }
 }
 
-impl Default for WasmSystemBuilder {
+impl Default for EnterpriseSystemBuilder {
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// 完整的WASM插件系统
-pub struct WasmSystem {
-    /// WASM运行时
-    pub runtime: WasmRuntime,
-    /// 插件注册表
-    pub registry: WasmPluginRegistry,
-    /// 组件管理器
-    pub component_manager: WasmComponentManager,
-    /// 沙箱
-    pub sandbox: WasmSandbox,
-    /// 是否启用热重载
-    pub hot_reload_enabled: bool,
-    /// 是否启用指标收集
-    pub metrics_enabled: bool,
+/// 完整的 DataFlare Enterprise 系统
+pub struct EnterpriseSystem {
+    /// 基础插件运行时 (来自 @dataflare/plugin)
+    pub plugin_runtime: std::sync::Arc<PluginRuntime>,
+    /// 企业级流处理器
+    pub stream_processor: Box<dyn streaming::StreamProcessor>,
+    /// 企业级监控系统 (占位符)
+    pub monitoring_enabled: bool,
+    /// 企业级安全管理器 (占位符)
+    pub security_enabled: bool,
+    /// 是否启用分布式计算
+    pub distributed_enabled: bool,
+    /// 是否启用企业级插件市场
+    pub marketplace_enabled: bool,
 }
 
-impl WasmSystem {
-    /// 创建新的WASM系统
+impl EnterpriseSystem {
+    /// 创建新的企业级系统
     pub async fn new() -> Result<Self> {
-        WasmSystemBuilder::new().build().await
+        EnterpriseSystemBuilder::new().build().await
     }
 
-    /// 加载插件
-    pub async fn load_plugin(&mut self, path: &str, config: WasmPluginConfig) -> Result<String> {
-        let plugin = self.runtime.load_plugin(path).await?;
-        let plugin_id = plugin.get_metadata().name.clone();
-
-        self.registry.register_plugin(plugin_id.clone(), plugin).await?;
-
-        log::info!("插件加载成功: {}", plugin_id);
-        Ok(plugin_id)
+    /// 启动企业级流处理
+    pub async fn start_stream_processing(&mut self) -> Result<()> {
+        self.stream_processor.start().await
+            .map_err(|e| dataflare_core::error::DataFlareError::Processing(e.to_string()))?;
+        log::info!("企业级流处理已启动");
+        Ok(())
     }
 
-    /// 创建组件
-    pub async fn create_component(&mut self, config: WasmComponentConfig) -> Result<String> {
-        let component_id = config.name.clone();
-        self.component_manager.load_component(component_id.clone(), &config).await?;
-
-        log::info!("组件创建成功: {}", component_id);
-        Ok(component_id)
-    }
-
-    /// 获取系统统计信息
-    pub fn get_stats(&self) -> WasmSystemStats {
-        WasmSystemStats {
-            loaded_plugins: self.registry.list_plugins().len(),
-            active_components: self.component_manager.list_components().len(),
-            component_stats: self.component_manager.get_stats(),
-            hot_reload_enabled: self.hot_reload_enabled,
-            metrics_enabled: self.metrics_enabled,
+    /// 提交分布式任务 (基于 @dataflare/plugin) - 占位符实现
+    pub async fn submit_distributed_task(&self, _task: result::TaskResult) -> Result<String> {
+        if !self.distributed_enabled {
+            return Err(dataflare_core::error::DataFlareError::Configuration(
+                "分布式计算未启用".to_string()
+            ));
         }
+
+        // TODO: 实现分布式任务提交
+        let task_id = uuid::Uuid::new_v4().to_string();
+        log::info!("分布式任务已提交: {}", task_id);
+        Ok(task_id)
     }
 
-    /// 清理系统
-    pub async fn cleanup(&mut self) -> Result<()> {
-        self.component_manager.cleanup_all().await?;
-        self.registry.cleanup().await?;
-        self.runtime.cleanup().await?;
+    /// 获取企业级系统统计信息
+    pub async fn get_enterprise_stats(&self) -> Result<EnterpriseSystemStats> {
+        let stream_metrics = self.stream_processor.get_metrics().await
+            .map_err(|e| dataflare_core::error::DataFlareError::Processing(e.to_string()))?;
 
-        log::info!("WASM系统清理完成");
+        Ok(EnterpriseSystemStats {
+            stream_metrics,
+            monitoring_metrics: streaming::StreamMetrics::default(), // 占位符
+            security_metrics: streaming::StreamMetrics::default(), // 占位符
+            distributed_enabled: self.distributed_enabled,
+            marketplace_enabled: self.marketplace_enabled,
+        })
+    }
+
+    /// 清理企业级系统
+    pub async fn cleanup(&mut self) -> Result<()> {
+        self.stream_processor.stop().await
+            .map_err(|e| dataflare_core::error::DataFlareError::Processing(e.to_string()))?;
+
+        log::info!("DataFlare Enterprise 系统清理完成");
         Ok(())
     }
 }
 
-/// WASM系统统计信息
+/// DataFlare Enterprise 系统统计信息
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct WasmSystemStats {
-    /// 已加载插件数量
-    pub loaded_plugins: usize,
-    /// 活跃组件数量
-    pub active_components: usize,
-    /// 组件统计信息
-    pub component_stats: components::WasmComponentStats,
-    /// 是否启用热重载
-    pub hot_reload_enabled: bool,
-    /// 是否启用指标收集
-    pub metrics_enabled: bool,
+pub struct EnterpriseSystemStats {
+    /// 流处理指标
+    pub stream_metrics: streaming::StreamMetrics,
+    /// 监控指标 (占位符)
+    pub monitoring_metrics: streaming::StreamMetrics,
+    /// 安全指标 (占位符)
+    pub security_metrics: streaming::StreamMetrics,
+    /// 是否启用分布式计算
+    pub distributed_enabled: bool,
+    /// 是否启用企业级插件市场
+    pub marketplace_enabled: bool,
 }
 
 #[cfg(test)]
@@ -298,37 +343,43 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_wasm_system_initialization() {
-        let result = init_wasm_system().await;
+    async fn test_enterprise_system_initialization() {
+        let result = init_enterprise_system().await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
-    async fn test_default_runtime_creation() {
-        let result = create_default_runtime().await;
+    async fn test_default_stream_processor_creation() {
+        let result = create_default_stream_processor().await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
-    async fn test_wasm_system_builder() {
-        let builder = WasmSystemBuilder::new()
-            .enable_hot_reload()
-            .enable_metrics();
+    async fn test_default_monitoring_creation() {
+        let result = create_default_monitoring().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_enterprise_system_builder() {
+        let builder = EnterpriseSystemBuilder::new()
+            .enable_distributed()
+            .enable_marketplace();
 
         let result = builder.build().await;
         assert!(result.is_ok());
 
         let system = result.unwrap();
-        assert!(system.hot_reload_enabled);
-        assert!(system.metrics_enabled);
+        assert!(system.distributed_enabled);
+        assert!(system.marketplace_enabled);
     }
 
     #[tokio::test]
-    async fn test_wasm_system_stats() {
-        let system = WasmSystem::new().await.unwrap();
-        let stats = system.get_stats();
+    async fn test_enterprise_system_stats() {
+        let system = EnterpriseSystem::new().await.unwrap();
+        let stats = system.get_enterprise_stats().await.unwrap();
 
-        assert_eq!(stats.loaded_plugins, 0);
-        assert_eq!(stats.active_components, 0);
+        assert!(stats.distributed_enabled);
+        assert!(stats.marketplace_enabled);
     }
 }

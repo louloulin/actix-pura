@@ -13,7 +13,7 @@ dataflare-connector = { path = "../connector" }
 dataflare-processor = { path = "../processor" }
 dataflare-plugin = { path = "../plugin" }
 dataflare-state = { path = "../state" }
-dataflare-wasm-cli = { path = "../wasm/cli" }
+dataflare-enterprise-cli = { path = "../wasm/cli" }
 
 # Actix依赖
 actix = { path = "../../actix" }
