@@ -45,9 +45,9 @@ pub use dataflare_processor::{
 
 // Re-exports from plugin crate
 pub use dataflare_plugin::{
-    plugin::{PluginManager, PluginConfig, PluginMetadata, PluginType, ProcessorPlugin},
-    wasm::{WasmProcessor, create_example_wasm_module},
-    registry::{register_plugin, get_plugin, list_plugins},
+    DataFlarePlugin, PluginType, PluginInfo, PluginRecord, PluginResult, PluginError,
+    PluginRuntime, PluginRuntimeConfig, PluginMetrics,
+    SmartPluginAdapter, OwnedPluginRecord,
 };
 
 // Re-exports from state crate
@@ -130,9 +130,7 @@ pub mod workflow {
 
 /// Plugin system for DataFlare
 pub mod plugin {
-    pub use dataflare_plugin::registry::*;
-    pub use dataflare_plugin::plugin::*;
-    pub use dataflare_plugin::wasm::*;
+    pub use dataflare_plugin::*;
 }
 
 /// State management for DataFlare
@@ -175,7 +173,9 @@ pub fn init(config: DataFlareConfig) -> Result<()> {
     dataflare_processor::register_default_processors();
 
     // Initialize plugin system
-    dataflare_plugin::plugin::init_plugin_system(config.plugin_dir)?;
+    let plugin_config = dataflare_plugin::PluginRuntimeConfig::default();
+    let _plugin_runtime = dataflare_plugin::PluginRuntime::new(plugin_config);
+    log::info!("Plugin runtime initialized with directory: {:?}", config.plugin_dir);
 
     // Initialize edge components if enabled
     #[cfg(feature = "edge")]
