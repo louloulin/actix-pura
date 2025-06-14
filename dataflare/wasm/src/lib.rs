@@ -124,7 +124,8 @@ pub async fn init_enterprise_system() -> Result<()> {
     log::info!("初始化 DataFlare Enterprise 系统 v{}", VERSION);
 
     // 初始化基础插件运行时 (基于 @dataflare/plugin)
-    let _plugin_runtime = PluginRuntime::new(Default::default()).await?;
+    let _plugin_runtime = PluginRuntime::new(Default::default())
+        .map_err(|e| dataflare_core::error::DataFlareError::Config(e.to_string()))?;
 
     // 初始化企业级流处理器
     let _stream_processor = EnterpriseStreamProcessor::new(Default::default()).await?;
@@ -153,7 +154,7 @@ pub async fn init_enterprise_system() -> Result<()> {
 pub async fn create_default_stream_processor() -> Result<Box<dyn streaming::StreamProcessor>> {
     let config = streaming::StreamProcessorConfig::default();
     let plugin_runtime = Arc::new(PluginRuntime::new(Default::default())
-        .map_err(|e| dataflare_core::error::DataFlareError::Configuration(e.to_string()))?);
+        .map_err(|e| dataflare_core::error::DataFlareError::Config(e.to_string()))?);
     let processor = streaming::processor::EnterpriseStreamProcessor::new(config, plugin_runtime).await
         .map_err(|e| dataflare_core::error::DataFlareError::Processing(e.to_string()))?;
     Ok(Box::new(processor))
@@ -230,13 +231,14 @@ impl EnterpriseSystemBuilder {
     pub async fn build(self) -> Result<EnterpriseSystem> {
         // 初始化基础插件运行时
         let plugin_runtime = Arc::new(PluginRuntime::new(Default::default())
-            .map_err(|e| dataflare_core::error::DataFlareError::Configuration(e.to_string()))?);
+            .map_err(|e| dataflare_core::error::DataFlareError::Config(e.to_string()))?);
 
         // 初始化企业级组件
         let stream_processor = streaming::processor::EnterpriseStreamProcessor::new(
             self.stream_config,
             plugin_runtime.clone()
-        ).await?;
+        ).await
+        .map_err(|e| dataflare_core::error::DataFlareError::Processing(e.to_string()))?;
 
         Ok(EnterpriseSystem {
             plugin_runtime,
@@ -288,7 +290,7 @@ impl EnterpriseSystem {
     /// 提交分布式任务 (基于 @dataflare/plugin) - 占位符实现
     pub async fn submit_distributed_task(&self, _task: result::TaskResult) -> Result<String> {
         if !self.distributed_enabled {
-            return Err(dataflare_core::error::DataFlareError::Configuration(
+            return Err(dataflare_core::error::DataFlareError::Config(
                 "分布式计算未启用".to_string()
             ));
         }
