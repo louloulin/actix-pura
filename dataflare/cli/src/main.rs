@@ -59,7 +59,7 @@ enum Commands {
     /// WASM插件管理
     Plugin {
         #[command(subcommand)]
-        command: dataflare_wasm_cli::WasmCommands,
+        command: dataflare_enterprise_cli::WasmCommands,
 
         /// Enable verbose logging
         #[arg(short, long, global = true)]
@@ -294,7 +294,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Commands::Plugin { command, verbose, no_color } => {
             // 创建WASM CLI实例
-            let wasm_cli = dataflare_wasm_cli::WasmCli {
+            let wasm_cli = dataflare_enterprise_cli::WasmCli {
                 command: command.clone(),
                 verbose: *verbose,
                 no_color: *no_color,
@@ -302,7 +302,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // 执行WASM命令
             let rt = tokio::runtime::Runtime::new()?;
-            if let Err(e) = rt.block_on(dataflare_wasm_cli::execute_wasm_command(wasm_cli)) {
+            if let Err(e) = rt.block_on(dataflare_enterprise_cli::execute_wasm_command(wasm_cli)) {
                 error!("WASM插件命令执行失败: {}", e);
                 return Err(e.into());
             }

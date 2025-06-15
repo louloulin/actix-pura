@@ -29,7 +29,7 @@ rand = "0.8"
 
 # WASM plugin system dependencies
 base64 = "0.21"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
 dataflare-enterprise = { path = "../wasm", optional = true }
 
 [dev-dependencies]

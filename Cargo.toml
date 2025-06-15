@@ -40,7 +40,7 @@ async-trait = "0.1"
 thiserror = "1.0"
 anyhow = "1.0"
 tracing = "0.1"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
 axum = "0.7"
 
 # 工具库
@@ -54,6 +54,14 @@ tokio-test = "0.4"
 mockall = "0.11"
 mockito = "1.2"
 tempfile = "3.8"
+
+# 版本约束 - 避免 edition2024 要求
+base64ct = "=1.6.0"
+spki = "=0.7.2"
+
+# 强制禁用 openssl 相关特性
+fluvio = { version = "*", default-features = false, features = ["rustls", "compress"] }
+fluvio-future = { version = "*", default-features = false, features = ["rust_tls"] }
 
 [patch.crates-io]
 actix = { path = "actix" }
